@@ -16,7 +16,7 @@ set -euo pipefail
 here=$(dirname "$(readlink -f "$0")")
 PY="$HOME/pymobile3-venv/bin/python"
 ASC="$here/tools/asc.py"
-XCASSETS="$here/tools/xcassets/.build/release/xcassets"
+XCASSETS="$here/tools/darwin-tools/.build/release/xcassets"
 PATH="$(dirname "$(readlink -f "$(command -v swift)")"):$HOME/.local/bin:$PATH"
 export PATH
 
@@ -37,16 +37,19 @@ xtool dev build --configuration release
 app=$(find xtool -maxdepth 1 -name '*.app' -print -quit)
 [ -n "$app" ] || { echo "no .app under xtool/" >&2; exit 1; }
 
-echo "== 2. Asset catalog =="
-mapfile -t catalogs < <(find . -name '*.xcassets' -type d -not -path './.build/*' -not -path './xtool/*')
+echo "== 2. App icon catalog =="
+# The catalog with the .appiconset goes into the app's own Assets.car. Catalogs that
+# packages declare as resources are compiled by SwiftBuild through actool already.
+mapfile -t catalogs < <(find . -name '*.appiconset' -type d -not -path './.build/*' -not -path './xtool/*' \
+  -exec dirname {} \; | sort -u)
 case "${#catalogs[@]}" in
-  0) echo "no .xcassets in the project; App Store upload needs an AppIcon" ;;
+  0) echo "no .appiconset in the project; App Store upload needs an AppIcon" ;;
   1)
-    [ -x "$XCASSETS" ] || (cd "$here/tools/xcassets" && swift build -c release)
+    [ -x "$XCASSETS" ] || (cd "$here/tools/darwin-tools" && swift build -c release --product xcassets)
     min=$("$PY" -c 'import plistlib,sys; print(plistlib.load(open(sys.argv[1],"rb"))["MinimumOSVersion"])' "$app/Info.plist")
     "$XCASSETS" "${catalogs[0]}" "$app" "$min"
     ;;
-  *) echo "more than one .xcassets: ${catalogs[*]}" >&2; exit 1 ;;
+  *) echo "more than one catalog with an .appiconset: ${catalogs[*]}" >&2; exit 1 ;;
 esac
 
 echo "== 3. App Store Info.plist keys =="

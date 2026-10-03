@@ -35,6 +35,42 @@ sdk_install_from() {
   "$HOME/.local/bin/xtool" sdk install "$1"
 }
 
+REPO_DIR=$(dirname "$(readlink -f "$0")")
+DARWIN_SDK_BUNDLE="$HOME/.swiftpm/swift-sdks/darwin.artifactbundle"
+
+# SwiftBuild (xtool 1.20 on Swift 6.4) runs actool for .xcassets and xcstringstool
+# for .xcstrings package resources, and looks for both in the iPhoneOS platform's
+# Developer/usr/bin. Install the Linux stand-ins there, give .strings copies an
+# input encoding (SwiftBuild detects encodings only on macOS), and turn on Swift
+# cross-import overlays (StoreKit + SwiftUI = StoreView, ...). FINDINGS.md 24.
+install_darwin_tools() {
+  local bin="$DARWIN_SDK_BUNDLE/Developer/Platforms/iPhoneOS.platform/Developer/usr/bin"
+  (cd "$REPO_DIR/tools/darwin-tools" && swift build -c release --product actool >/dev/null)
+  mkdir -p "$bin"
+  install -m755 "$REPO_DIR/tools/darwin-tools/.build/release/actool" "$bin/actool"
+  install -m755 "$REPO_DIR/tools/xcstringstool" "$bin/xcstringstool"
+  install -m644 "$REPO_DIR/tools/xcstrings_symbols.py" "$bin/xcstrings_symbols.py"
+  python3 - "$DARWIN_SDK_BUNDLE" <<'PY'
+import json, os, plistlib, sys
+bundle = sys.argv[1]
+platform = os.path.join(bundle, "Developer/Platforms/iPhoneOS.platform/Info.plist")
+with open(platform, "rb") as f:
+    plist = plistlib.load(f)
+plist.setdefault("DefaultProperties", {})["STRINGS_FILE_INPUT_ENCODING"] = "utf-8"
+with open(platform + ".tmp", "wb") as f:
+    plistlib.dump(plist, f)
+os.replace(platform + ".tmp", platform)
+toolset = os.path.join(bundle, "toolset-swb.json")
+with open(toolset) as f:
+    data = json.load(f)
+data.setdefault("swiftCompiler", {})["extraCLIOptions"] = ["-Xfrontend", "-enable-cross-import-overlays"]
+with open(toolset + ".tmp", "w") as f:
+    json.dump(data, f, indent=4)
+os.replace(toolset + ".tmp", toolset)
+PY
+  echo "Installed actool and xcstringstool into $bin"
+}
+
 # Build the portable darwin.xtoolsdk from an Xcode.xip or Xcode.app ($1),
 # keep it in the cache, and register it. Building instead of installing
 # directly costs the same extraction plus one local copy, but the result is
@@ -185,6 +221,7 @@ if [ "${1:-}" = "--repair" ]; then
     exit 1
   fi
   swift sdk list   # must print: darwin
+  install_darwin_tools
   survive_status "$cached"
   exit 0
 fi
@@ -293,6 +330,7 @@ else
   exit 1
 fi
 swift sdk list   # must print: darwin
+install_darwin_tools
 
 # If an app that failed against an earlier or broken SDK still fails now, the
 # stale module cache is the cause: delete that project's .build directory (or

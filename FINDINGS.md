@@ -441,7 +441,7 @@ What had to be built, and why:
 1. **App icon.** xtool has no `.xcassets` support (xtool#219). AssetKit 1.0.0
    (xtool-org) compiles catalogs, but rejects Xcode 14+'s default
    single-size icon (`AppIcon 'AppIcon' declares size 1024x1024 but no
-   source file matched`), and does not resize. `tools/xcassets` expands that
+   source file matched`), and does not resize. `tools/darwin-tools` (`xcassets`) expands that
    form into 60@2x, 60@3x, 76@2x and the 1024 App Store icon (no alpha
    channel, ITMS-90717) and then calls AssetKit.
 2. **iPad Pro icon (open).** AssetKit sets every app icon's "Icon Index" to
@@ -478,3 +478,72 @@ creation, Apple's processing of a Linux-built `.ipa` (DT keys, an
 AssetKit `Assets.car` without MultiSized entries, rcodesign's
 Apple-certificate signature), and a TestFlight install.
 Receipt: `receipts/2026-10-03-ship-offline-validation.md`.
+
+## A real project: IceCubesApp, 2026-10-03
+
+**24. A real SwiftUI app hits seven walls on xtool 1.20 + Swift 6.4; six are fixed
+here, the seventh (SwiftData macros) is open.** IceCubesApp
+(Dimillian/IceCubesApp at 9efcb16: 13 local packages, 12 remote ones, String
+Catalog in 19 languages, 9 asset catalogs, SwiftData, AppIntents) was adapted
+without moving any source: one `omarchy-xtool/` directory (Package.swift that
+points at the app's folders through symlinks, xtool.yml) and one changed line.
+Each wall, in the order the build hit it:
+
+1. **Branch-pinned dependencies fail.** Any `branch:` dependency stops
+   `xtool dev build`: `a resolved file is required when automatic dependency
+   resolution is disabled ... was resolved to 'main' but now has a different
+   revision-based requirement`. Reproduced on the template with one dependency
+   (`from:` builds, `branch: "main"` fails). xtool builds a helper package in
+   `xtool/.xtool-tmp` with `--disable-automatic-resolution` and no
+   `Package.resolved`; copying the root's file in makes the same `swift build`
+   pass. Not fixable from outside xtool; IceCubes' DesignSystem package now
+   points its `fix-ios26` EmojiText branch at a local checkout (the one
+   changed line).
+2. **`.xcassets` and `.xcstrings` resources fail** with `failed to launch.
+   .../xtool/.xtool-tmp/actool` (and `xcstringstool`): SwiftBuild runs
+   Apple's tools, which Linux lacks. SwiftBuild looks for them in the darwin
+   SDK's `Platforms/iPhoneOS.platform/Developer/usr/bin` (probed: not `PATH`,
+   not the SDK `toolset/bin`). `install-toolchain.sh` now installs two Linux
+   stand-ins there:
+   - `tools/xcstringstool` (Python, stdlib): `compile` (both formats,
+     `--dry-run`, `-l`) and `generate-symbols --language swift`. Checked file
+     by file against Xcode 27's xcstringstool: IceCubes' catalog (735 keys,
+     19 languages, plural, device and substitution variations) gives 38 of 38
+     files and 0 differing keys, `stringsdictOnly` 19 of 19 and 0, an
+     edge-case catalog 4 of 4 and 0; the generated Swift symbols are
+     identical text for both catalogs (435 and 7 symbols).
+   - `actool` (Swift, `tools/darwin-tools`, on AssetKit): `--version`, the
+     asset-symbol mode and the compile mode, with the dependency-info file.
+     For a light/dark colorset plus a 1x/2x/3x imageset, the generated Swift,
+     ObjC header, symbol index, partial Info.plist, stdout and dependency
+     records match Apple's actool 27.0, and Xcode's `assetutil --info` lists
+     the same renditions for both `Assets.car` files.
+3. **AssetKit wrote colors CoreUI cannot read** (`assetutil`: one component,
+   `2e-323`, colorspace `generic`) and failed on system-color colorsets
+   (`"reference": "labelColor"`). Fixed on
+   `joshuaswarren/AssetKit@omarchy/color-csi` to actool's byte layout, with
+   tests that pin actool's bytes; `darwin-tools` pins that commit.
+4. **`.strings` copies fail**: `no --inputencoding specified and could not
+   detect encoding from input file`. SwiftBuild detects text encodings only
+   on Darwin. The installer sets `STRINGS_FILE_INPUT_ENCODING = utf-8` in
+   the SDK platform's `DefaultProperties`.
+5. **`Too many open files`** while building SDK modules. A login shell gets a
+   soft limit of 1024 open files; `ulimit -n 65536` (the hard limit is
+   524288) before `xtool dev build` clears it.
+6. **Asset types AssetKit lacks.** IceCubes' app catalog has 32 alternate app
+   icons, two `.symbolset`s, a `.solidimagestack`, HEIC images and an empty
+   AccentColor. actool now merges all catalogs of a target, drops color-less
+   colorset entries, and leaves out what AssetKit cannot compile with a
+   `warning: skipped by the Linux actool` line each (37 for IceCubes). Those
+   assets are missing at run time until AssetKit supports them.
+7. **Cross-import overlays are off.** `StoreView` (StoreKit + SwiftUI) is
+   `cannot find 'StoreView' in scope` on Linux; SwiftPM passes
+   `-enable-cross-import-overlays` only for test targets. The installer adds
+   `-Xfrontend -enable-cross-import-overlays` to the SDK's
+   `toolset-swb.json`; the template repro then builds.
+
+**Open: SwiftData.** The build then stops at `@Model`: `external macro
+implementation type 'SwiftDataMacros.PersistentModelMacro' could not be
+found`. Apple's macro plugins are macOS binaries; xtool's OpenAppleMacros
+server has no SwiftData macros (xtool#149). Any app with `@Model` needs that
+first. Receipt: `receipts/2026-10-03-icecubes-compat.md`.

@@ -2,6 +2,7 @@
 // icon PNGs, and the CFBundleIcons keys merged into the app's Info.plist.
 // xtool does not compile asset catalogs yet (xtool-org/xtool#219).
 import AssetKit
+import DarwinAssets
 import Foundation
 
 let args = CommandLine.arguments

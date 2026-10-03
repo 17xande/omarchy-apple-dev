@@ -1,0 +1,182 @@
+#!/usr/bin/python3
+"""Linux stand-in for Apple's xcstringstool (String Catalogs), for SwiftBuild under xtool.
+
+SwiftBuild runs `xcstringstool compile [--dry-run] [-l LANG ...] --output-directory DIR FILE` and
+`xcstringstool generate-symbols --language swift --output-directory DIR FILE`. Output matches Apple's
+xcstringstool from Xcode 27, checked file by file against it (FINDINGS.md item 24).
+"""
+import argparse
+import json
+import plistlib
+import re
+import sys
+from pathlib import Path
+
+FORMAT_SPEC = re.compile(r"%(?:\d+\$)?[-+ #0]*\d*(?:\.\d+)?(hh|h|ll|l|q|z|t|j|L)?([@dDiuUxXoOfeEgGcCsSpaA])")
+
+
+def die(msg):
+    print(f"error: {msg}", file=sys.stderr)
+    sys.exit(1)
+
+
+def value_type(text):
+    """The NSStringFormatValueTypeKey for the first numeric format specifier in text."""
+    for m in FORMAT_SPEC.finditer(text.replace("%%", "")):
+        if m.group(2) != "@":
+            return (m.group(1) or "") + m.group(2)
+    return "d"
+
+
+def unit_value(node):
+    return node.get("stringUnit", {}).get("value")
+
+
+def rule(variations):
+    """A stringsdict rule for one level of plural or device variations, recursing into nesting."""
+    if "plural" in variations:
+        cases = {c: rendered(n) for c, n in variations["plural"].items()}
+        cases = {c: v for c, v in cases.items() if v is not None}
+        return "plural", cases
+    if "device" in variations:
+        cases = {c: rendered(n) for c, n in variations["device"].items()}
+        return "device", {c: v for c, v in cases.items() if v is not None}
+    return None, {}
+
+
+def rendered(node):
+    """A leaf string, or a nested stringsdict fragment for nested variations."""
+    if "variations" in node:
+        return entry_for(node)
+    return unit_value(node)
+
+
+def plural_dict(cases, fmt):
+    d = {"NSStringFormatSpecTypeKey": "NSStringPluralRuleType", "NSStringFormatValueTypeKey": fmt}
+    d.update(cases)
+    return d
+
+
+def entry_for(loc):
+    """stringsdict value for a localization with variations or substitutions, else None."""
+    if "substitutions" in loc:
+        # "%arg" stands for the substitution's own argument; with an argNum both it and the
+        # %#@name@ reference become positional.
+        fmt_key = unit_value(loc)
+        entry = {}
+        for name, sub in loc["substitutions"].items():
+            spec, num = sub.get("formatSpecifier", "d"), sub.get("argNum")
+            pos = f"{num}$" if num else ""
+            if num:
+                fmt_key = fmt_key.replace(f"%#@{name}@", f"%{pos}#@{name}@")
+            kind, cases = rule(sub.get("variations", {}))
+            if kind == "plural":
+                cases = {c: v.replace("%arg", f"%{pos}{spec}") for c, v in cases.items()}
+                entry[name] = plural_dict(cases, spec)
+        entry["NSStringLocalizedFormatKey"] = fmt_key
+        return entry
+    if "variations" in loc:
+        kind, cases = rule(loc["variations"])
+        if kind == "plural":
+            sample = cases.get("other") or next(iter(cases.values()), "")
+            fmt = value_type(sample if isinstance(sample, str) else "")
+            return {"NSStringLocalizedFormatKey": "%#@value@", "value": plural_dict(cases, fmt)}
+        if kind == "device":
+            return {"NSStringDeviceSpecificRuleType": cases}
+    return None
+
+
+def compile_tables(catalog, languages):
+    """{language: (strings dict, stringsdict dict)}"""
+    source = catalog["sourceLanguage"]
+    strings = catalog.get("strings", {})
+    found = {source}
+    for e in strings.values():
+        found.update((e.get("localizations") or {}).keys())
+    langs = sorted(found if not languages else found & set(languages))
+    out = {}
+    for lang in langs:
+        st, sd = {}, {}
+        for key, e in strings.items():
+            locs = e.get("localizations") or {}
+            loc = locs.get(lang)
+            if loc is None:
+                # Apple writes the key as its own value for manually managed keys that the
+                # source language lacks, and for those whose source text varies.
+                src = locs.get(source)
+                if e.get("extractionState") == "manual" and (
+                        (lang == source and src is None)
+                        or (lang != source and src and ("variations" in src or "substitutions" in src))):
+                    st[key] = key
+                continue
+            device = loc.get("variations", {}).get("device", {})
+            if "other" in device:
+                # The device "other" case is the plain-string fallback, outside the device rule.
+                if "variations" in device["other"]:
+                    die(f"Fallback value cannot be further varied ({lang}: {key}|==|device.other)")
+                st[key] = unit_value(device["other"])
+                loc = {**loc, "variations": {"device": {d: v for d, v in device.items() if d != "other"}}}
+            entry = entry_for(loc)
+            if entry is not None:
+                sd[key] = entry
+            elif unit_value(loc) is not None:
+                st[key] = unit_value(loc)
+        out[lang] = (st, sd)
+    return out
+
+
+def cmd_compile(args):
+    catalog = json.loads(Path(args.input).read_text())
+    table = Path(args.input).stem
+    outdir = Path(args.output_directory)
+    planned = []
+    for lang, (st, sd) in compile_tables(catalog, args.language).items():
+        if args.format == "stringsdictOnly":
+            st, sd = {}, {**st, **sd}
+        for ext, data in (("strings", st), ("stringsdict", sd)):
+            if data:
+                planned.append((outdir / f"{lang}.lproj" / f"{table}.{ext}", data))
+    if args.dry_run:
+        for path, _ in planned:
+            print(path.resolve())
+        return
+    fmt = plistlib.FMT_BINARY if args.serialization_format == "binary" else plistlib.FMT_XML
+    for path, data in planned:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(plistlib.dumps(data, fmt=fmt, sort_keys=True))
+
+
+def cmd_generate_symbols(args):
+    if args.language != ["swift"]:
+        die("only --language swift is supported")
+    from xcstrings_symbols import swift_symbols  # noqa: PLC0415  (sibling module, loaded on demand)
+    path = Path(args.input)
+    outdir = Path(args.output_directory)
+    outdir.mkdir(parents=True, exist_ok=True)
+    (outdir / f"GeneratedStringSymbols_{path.stem}.swift").write_text(
+        swift_symbols(json.loads(path.read_text()), path.name, path.stem))
+
+
+def main():
+    p = argparse.ArgumentParser(prog="xcstringstool")
+    sub = p.add_subparsers(dest="command", required=True)
+    c = sub.add_parser("compile")
+    c.add_argument("input")
+    c.add_argument("-o", "--output-directory", required=True)
+    c.add_argument("-f", "--format", default="stringsAndStringsdict",
+                   choices=["stringsAndStringsdict", "stringsdictOnly"])
+    c.add_argument("-l", "--language", action="append", default=[])
+    c.add_argument("--serialization-format", default="text", choices=["text", "binary"])
+    c.add_argument("--dry-run", action="store_true")
+    c.add_argument("--force-build-all-strings", action="store_true")
+    g = sub.add_parser("generate-symbols")
+    g.add_argument("input")
+    g.add_argument("-o", "--output-directory", required=True)
+    g.add_argument("-l", "--language", action="append", required=True)
+    args = p.parse_args()
+    {"compile": cmd_compile, "generate-symbols": cmd_generate_symbols}[args.command](args)
+
+
+if __name__ == "__main__":
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    main()

@@ -7,7 +7,7 @@ import PNG
 // ponytail: no 83.5@2x (iPad Pro, 167 px). AssetKit keys icon renditions by
 // idiom+scale only, so it collides with 76@2x in Assets.car; add it back when
 // AssetKit keys by size.
-enum SingleSizeIcon {
+public enum SingleSizeIcon {
     /// (idiom, point size, scale)
     static let sizes: [(String, String, Int)] = [
         ("iphone", "60x60", 2), ("iphone", "60x60", 3),
@@ -17,7 +17,7 @@ enum SingleSizeIcon {
 
     /// Returns a catalog AssetKit accepts: `catalog` itself, or an expanded copy
     /// under a temporary directory when its AppIcon uses the single-size form.
-    static func expandIfNeeded(catalog: URL) throws -> URL {
+    public static func expandIfNeeded(catalog: URL) throws -> URL {
         let fm = FileManager.default
         guard let iconSet = try fm.contentsOfDirectory(at: catalog, includingPropertiesForKeys: nil)
             .first(where: { $0.pathExtension == "appiconset" }) else { return catalog }
