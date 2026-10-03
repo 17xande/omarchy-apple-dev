@@ -205,7 +205,8 @@ lacks (alternate app icons, symbol sets, HEIC) are left out with a warning.
   `--repair` re-registers the cached SDK into the current toolchain after a
   toolchain swap (see *Toolchain swaps* above); `--curses-compat [ROOT]`
   creates the curses sonames a vendor (mise/swift.org) toolchain needs on
-  Arch and optionally verifies ROOT resolves.
+  Arch and optionally verifies ROOT resolves; `--user-only` skips every sudo
+  step and uses the Swift already on PATH.
 - `device-run.sh`: pair, install, launch, LLDB attach; `--network` and
   `--rsd` modes for wireless deploys (unverified).
 - `ship.sh`: App Store `.ipa` build, offline validation, and `--upload`.

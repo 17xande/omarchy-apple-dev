@@ -141,12 +141,25 @@ curses_compat() {
   done
   if [ "$linked" -eq 0 ]; then echo "  nothing to alias (host already complete)"; fi
 
-  # Optional: verify against an extracted toolchain root ($1).
+  # Optional: an extracted toolchain root ($1). SwiftBuild runs swiftc and the
+  # linker with a scrubbed environment, so LD_LIBRARY_PATH never reaches them
+  # (FINDINGS.md item 25). Link the aliases into the toolchain's own RUNPATH
+  # directories as well, which every binary there searches first.
   if [ -n "${1:-}" ]; then
     if [ ! -d "$1" ]; then
       echo "Not a directory: $1" >&2
       return 1
     fi
+    if [ ! -e /usr/lib/libxml2.so.2 ] && [ -e /usr/lib/libxml2.so.16 ]; then
+      ln -sfn /usr/lib/libxml2.so.16 "$CURSES_COMPAT_DIR/libxml2.so.2"
+    fi
+    for dir in "$1/usr/lib" "$1/usr/lib/swift/linux"; do
+      [ -d "$dir" ] || continue
+      for alias in "$CURSES_COMPAT_DIR"/*.so*; do
+        [ -e "$alias" ] && ln -sfn "$(readlink "$alias")" "$dir/$(basename "$alias")"
+      done
+    done
+    echo "  aliases also linked into $1/usr/lib and $1/usr/lib/swift/linux"
     echo "-- verifying $1 --"
     unresolved=$(
       export LD_LIBRARY_PATH="$CURSES_COMPAT_DIR${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
@@ -226,6 +239,15 @@ if [ "${1:-}" = "--repair" ]; then
   exit 0
 fi
 
+# --user-only: no sudo and no system packages. Bring your own Swift on PATH (a
+# swift.org tarball or mise; see --curses-compat) and the system tools below.
+if [ "${1:-}" = "--user-only" ]; then
+  echo "== 1-2. User-only install: using $(command -v swift || echo 'no swift on PATH')"
+  swift --version | head -n1
+  for tool in fusermount3 zip python3 git; do
+    command -v "$tool" >/dev/null || echo "WARNING: $tool is missing; ask an admin for it"
+  done
+else
 echo "== 1. usbmuxd (device multiplexer; udev starts it on plug), fuse3, zip =="
 # fuse3 provides fusermount3; the xtool AppImage runtime cannot mount without it.
 # zip packages the .ipa in ship.sh.
@@ -240,12 +262,25 @@ yay -S --needed --noconfirm swift-bin
 # with "libpython3.9.so.1.0: cannot open shared object file".
 pydep=$(pacman -Qi swift-bin | grep -oE 'python3[0-9]+' | head -n1)
 if [ -n "$pydep" ]; then yay -S --needed --noconfirm --asdeps "$pydep"; fi
+fi
 
 echo "== 3. xtool AppImage and rcodesign (aarch64 and x86_64 releases) =="
 mkdir -p "$HOME/.local/bin"
 curl -fL "https://github.com/xtool-org/xtool/releases/latest/download/xtool-$(uname -m).AppImage" \
-  -o "$HOME/.local/bin/xtool"
-chmod +x "$HOME/.local/bin/xtool"
+  -o "$HOME/.local/bin/xtool.AppImage"
+chmod +x "$HOME/.local/bin/xtool.AppImage"
+rm -f "$HOME/.local/bin/xtool"
+if command -v fusermount3 >/dev/null; then
+  mv "$HOME/.local/bin/xtool.AppImage" "$HOME/.local/bin/xtool"
+else
+  # No FUSE (containers, --user-only hosts without fuse3): run it unpacked.
+  appdir="$HOME/.local/share/xtool-appdir"
+  rm -rf "$appdir" "$HOME/.local/bin/squashfs-root"
+  mkdir -p "$(dirname "$appdir")"
+  (cd "$HOME/.local/bin" && ./xtool.AppImage --appimage-extract >/dev/null && mv squashfs-root "$appdir")
+  rm "$HOME/.local/bin/xtool.AppImage"
+  ln -s "$appdir/AppRun" "$HOME/.local/bin/xtool"
+fi
 "$HOME/.local/bin/xtool" --version
 # rcodesign (apple-codesign) signs App Store builds for ship.sh; pinned + checksummed.
 RCODESIGN_VERSION=0.29.0

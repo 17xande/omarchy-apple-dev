@@ -547,3 +547,26 @@ implementation type 'SwiftDataMacros.PersistentModelMacro' could not be
 found`. Apple's macro plugins are macOS binaries; xtool's OpenAppleMacros
 server has no SwiftData macros (xtool#149). Any app with `@Model` needs that
 first. Receipt: `receipts/2026-10-03-icecubes-compat.md`.
+
+## No sudo, no FUSE, 2026-10-03
+
+**25. The whole pipeline runs for a user with no sudo: `install-toolchain.sh
+--user-only`.** It skips the pacman/yay steps and uses the Swift on PATH. Run as
+a new user with no sudo and with `fuse3` removed (clean Arch x86_64 root), with
+the swift.org `swift-6.4.0-RELEASE-ubi10` tarball (the build AUR swift-bin
+repackages): template build `Mach-O 64-bit arm64`, a template with `.xcassets` and
+`.xcstrings` resources builds (`Assets.car`, `de.lproj/Localizable.strings`), and
+`ship.sh` passes 35/35. Two fixes fell out:
+
+1. Without `fusermount3` the xtool AppImage cannot mount; the installer now
+   unpacks it (`--appimage-extract`) and links `~/.local/bin/xtool` to its
+   `AppRun`.
+2. `LD_LIBRARY_PATH` (item 21's curses shim) works for `swift --version` but not
+   for builds: SwiftBuild runs swiftc and the linker with a scrubbed
+   environment (`swiftc: error while loading shared libraries: libncurses.so.6`
+   at the link step). `--curses-compat ROOT` now also links the aliases into
+   the toolchain's own RUNPATH directories (`usr/lib`, `usr/lib/swift/linux`;
+   every binary there searches one of them), plus `libxml2.so.2` when the host
+   has only `.so.16`.
+
+Receipt: `receipts/2026-10-03-user-only-x86_64.md`.
