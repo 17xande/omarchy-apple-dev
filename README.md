@@ -143,6 +143,50 @@ gate. When your phone DOES hold a tunnel with some host, `device-run.sh`
 documents the pymobiledevice3 tunneld bridge for that case, and
 `device-run.sh --rsd` can drive any tunnel endpoint you hold.
 
+## Ship (App Store / TestFlight)
+
+From an xtool project directory:
+
+```
+~/omarchy-apple-dev/ship.sh
+```
+
+`ship.sh` builds a release `.app`, compiles the project's one `.xcassets`
+catalog (Xcode's single-size 1024 AppIcon is expanded to the App Store
+sizes), stamps the build-environment keys App Store processing reads
+(`DTXcode`, `DTSDKName`, …, and a UTC `CFBundleVersion`), signs it with
+`rcodesign`, packages `xtool/<App>.ipa`, and validates the `.ipa` offline:
+bundle layout, Info.plist keys and version formats, Mach-O arch and minimum
+OS, icons in `Assets.car`, profile type and app id, entitlements, team id,
+and every sealed hash. Any `FAIL` stops it. Without an App Store Connect key
+it signs with a local TEST identity, so the output proves the pipeline and
+Apple will reject that signature.
+
+To upload, once:
+
+1. Create an App Store Connect API team key (role App Manager with access to
+   Certificates, Identifiers & Profiles, or Admin) and save the `.p8` file
+   anywhere you like.
+2. Create the app record in App Store Connect (Apps > + > New App). The API
+   cannot create apps.
+
+Then:
+
+```
+ASC_KEY_PATH=/path/to/AuthKey_XXXXXXXXXX.p8 ASC_ISSUER_ID=<issuer-uuid> ASC_KEY_ID=XXXXXXXXXX \
+  ~/omarchy-apple-dev/ship.sh --upload
+```
+
+With the key set, `ship.sh` registers the bundle id, creates an Apple
+Distribution certificate (the private key stays in
+`~/.config/omarchy-apple-dev/distribution/`) and an App Store profile, then
+uploads through the App Store Connect build-upload API and prints Apple's
+processing result. **The upload step is unproven** (FINDINGS.md item 23).
+
+Known gap: iPad apps fail validation on the iPad Pro 167 px icon, because
+AssetKit 1.0.0 cannot store it next to the 152 px icon (FINDINGS.md item 23).
+iPhone-only apps (`UIDeviceFamily` = `[1]` in the app's Info.plist) pass.
+
 ## Scripts
 
 - `install-toolchain.sh`: everything up to and including the SDK install;
@@ -152,16 +196,19 @@ documents the pymobiledevice3 tunneld bridge for that case, and
   Arch and optionally verifies ROOT resolves.
 - `device-run.sh`: pair, install, launch, LLDB attach; `--network` and
   `--rsd` modes for wireless deploys (unverified).
+- `ship.sh`: App Store `.ipa` build, offline validation, and `--upload`.
+  Helpers: `tools/asc.py` (stamp, identity, validate, upload) and
+  `tools/xcassets` (asset catalogs through AssetKit).
 
 ## Findings
 
-[FINDINGS.md](FINDINGS.md) records the twenty-two findings behind the working
+[FINDINGS.md](FINDINGS.md) records the twenty-three findings behind the working
 run: what broke and how each was fixed (SDK install failures, a clang version
 mismatch that breaks SwiftUI, the unstated prerequisites for debugging on
 iOS 17+), the Swift/Xcode version matrix (items 15-16), why a toolchain
 swap breaks SDK registration and how `--repair` restores it (item 19),
-the mise/ncurses soname story (items 20-21), and the move to xtool 1.20 +
-Swift 6.4 + Xcode 27 (item 22).
+the mise/ncurses soname story (items 20-21), the move to xtool 1.20 +
+Swift 6.4 + Xcode 27 (item 22), and the App Store path (item 23).
 
 ## Notes
 

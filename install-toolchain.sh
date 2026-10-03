@@ -54,6 +54,9 @@ sdk_build_and_install() {
   mv "$tmpd/darwin.xtoolsdk" "$cached"
   rmdir "$tmpd"
   echo "SDK cache kept at: $cached"
+  # ship.sh stamps DTXcode/DTXcodeBuild from this. A .xip hides it; set
+  # XCODE_VERSION and XCODE_BUILD for ship.sh instead.
+  if [ -f "$1/Contents/version.plist" ]; then cp "$1/Contents/version.plist" "$cached.version.plist"; fi
   sdk_install_from "$cached"
 }
 
@@ -186,9 +189,10 @@ if [ "${1:-}" = "--repair" ]; then
   exit 0
 fi
 
-echo "== 1. usbmuxd (device multiplexer; udev starts it on plug) and fuse3 =="
+echo "== 1. usbmuxd (device multiplexer; udev starts it on plug), fuse3, zip =="
 # fuse3 provides fusermount3; the xtool AppImage runtime cannot mount without it.
-sudo pacman -S --needed --noconfirm usbmuxd fuse3
+# zip packages the .ipa in ship.sh.
+sudo pacman -S --needed --noconfirm usbmuxd fuse3 zip
 # usbmuxd.service is static on Arch: it is triggered by udev, do not enable it.
 
 echo "== 2. Swift toolchain (AUR binary package: swift, clang, lldb) =="
@@ -200,12 +204,29 @@ yay -S --needed --noconfirm swift-bin
 pydep=$(pacman -Qi swift-bin | grep -oE 'python3[0-9]+' | head -n1)
 if [ -n "$pydep" ]; then yay -S --needed --noconfirm --asdeps "$pydep"; fi
 
-echo "== 3. xtool AppImage (aarch64 and x86_64 releases) =="
+echo "== 3. xtool AppImage and rcodesign (aarch64 and x86_64 releases) =="
 mkdir -p "$HOME/.local/bin"
 curl -fL "https://github.com/xtool-org/xtool/releases/latest/download/xtool-$(uname -m).AppImage" \
   -o "$HOME/.local/bin/xtool"
 chmod +x "$HOME/.local/bin/xtool"
 "$HOME/.local/bin/xtool" --version
+# rcodesign (apple-codesign) signs App Store builds for ship.sh; pinned + checksummed.
+RCODESIGN_VERSION=0.29.0
+case "$(uname -m)" in
+  aarch64) rcs_sha=4af92c87ddf52f5f2d1258a3b4e56c7dcb8f1b2468df744976c5f139e031961f ;;
+  x86_64) rcs_sha=dbe85cedd8ee4217b64e9a0e4c2aef92ab8bcaaa41f20bde99781ff02e600002 ;;
+esac
+if ! "$HOME/.local/bin/rcodesign" --version 2>/dev/null | grep -q "$RCODESIGN_VERSION"; then
+  rcs=apple-codesign-$RCODESIGN_VERSION-$(uname -m)-unknown-linux-musl
+  rcs_tmp=$(mktemp -d)
+  curl -fsSL "https://github.com/indygreg/apple-platform-rs/releases/download/apple-codesign%2F$RCODESIGN_VERSION/$rcs.tar.gz" \
+    -o "$rcs_tmp/rcs.tar.gz"
+  echo "$rcs_sha  $rcs_tmp/rcs.tar.gz" | sha256sum -c --quiet
+  tar -xzf "$rcs_tmp/rcs.tar.gz" -C "$rcs_tmp"
+  install -m755 "$rcs_tmp/$rcs/rcodesign" "$HOME/.local/bin/rcodesign"
+  rm -rf "$rcs_tmp"
+fi
+"$HOME/.local/bin/rcodesign" --version
 
 echo "== 4. pymobiledevice3 in a venv =="
 python3 -m venv "$VENV"

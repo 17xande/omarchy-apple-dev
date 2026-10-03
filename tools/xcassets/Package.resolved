@@ -1,0 +1,33 @@
+{
+  "originHash" : "a0be54d689f881b51cb151e94c1e7cc41cfccd7ad5acd9c7cbdbe8e4eebb210e",
+  "pins" : [
+    {
+      "identity" : "assetkit",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/xtool-org/AssetKit",
+      "state" : {
+        "revision" : "bc9912b1017facbda994cd24ce7e44b93165adc6",
+        "version" : "1.0.0"
+      }
+    },
+    {
+      "identity" : "h",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/rarestype/h",
+      "state" : {
+        "revision" : "aa3626829160917d4378330617971977cbd78f5b",
+        "version" : "1.0.1"
+      }
+    },
+    {
+      "identity" : "swift-png",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/tayloraswift/swift-png",
+      "state" : {
+        "revision" : "8a0bcd4df5e4b307c804937776a56dd6ecdf6396",
+        "version" : "4.5.1"
+      }
+    }
+  ],
+  "version" : 3
+}

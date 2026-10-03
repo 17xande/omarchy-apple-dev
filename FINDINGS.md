@@ -5,7 +5,8 @@ running Omarchy from a bare install to a SwiftUI app running and debuggable on a
 iPhone 16 Pro Max (iOS 26.6.1). Fourteen things broke in the first run, and a
 fifteenth surfaced on 2026-09-16, with items 16-20 following the same day;
 item 21 came from the 2026-09-17 mise retest, and item 22 from the 2026-10-03
-retest on xtool 1.20.1, which supersedes items 15 and 16.
+retest on xtool 1.20.1, which supersedes items 15 and 16. Item 23 is the App
+Store path (build, sign, validate; upload unproven).
 Each is recorded with the error text, the root cause where it was found, and the fix. `install-toolchain.sh`
 applies every fix that can be automated (items 1 to 7); only Apple ID sign-in and
 sudo consent genuinely need a human.
@@ -420,3 +421,60 @@ The SDK cache is named after the iOS SDK inside it
 rule of item 16 still holds: Xcode 27 for Swift 6.4, Xcode 26 for Swift 6.3.
 Device install and LLDB on this pair are not yet re-run on hardware.
 Receipt: `receipts/2026-10-03-xtool-1.20-swift-6.4-x86_64.md`.
+
+## App Store path, 2026-10-03
+
+**23. An App Store `.ipa` can be built, signed and validated on Linux; the
+upload itself is unproven.** xtool signs only with development profiles and
+compiles no asset catalogs, so `ship.sh` adds the rest. Proven in the clean
+Arch x86_64 root by a brand-new user: `install-toolchain.sh`, `xtool new`, a
+single-size 1024 AppIcon, `ship.sh` → 35/35 offline checks pass. Apple's own
+tools on a Mac accept the result: `codesign --verify --deep --strict` reports
+`valid on disk` and `satisfies its Designated Requirement`, `codesign -dvvv`
+shows `TeamIdentifier`, sealed resources v2 and the entitlements, and
+`assetutil --info` parses the `Assets.car`. Each validator check also fails
+on a deliberately broken build (no team id, Info.plist edited after
+signing, `get-task-allow` true, no Assets.car or profile).
+
+What had to be built, and why:
+
+1. **App icon.** xtool has no `.xcassets` support (xtool#219). AssetKit 1.0.0
+   (xtool-org) compiles catalogs, but rejects Xcode 14+'s default
+   single-size icon (`AppIcon 'AppIcon' declares size 1024x1024 but no
+   source file matched`), and does not resize. `tools/xcassets` expands that
+   form into 60@2x, 60@3x, 76@2x and the 1024 App Store icon (no alpha
+   channel, ITMS-90717) and then calls AssetKit.
+2. **iPad Pro icon (open).** AssetKit sets every app icon's "Icon Index" to
+   1, so 76@2x and 83.5@2x get the same rendition key and only one survives
+   lookup (`assetutil` shows two 152 px pad renditions). `actool` from Xcode
+   27 on the same images gives Icon Index 1 (60), 2 (76), 3 (83.5) and
+   5 (1024), plus one "MultiSized Image" entry per idiom, which AssetKit
+   does not emit. Until AssetKit keys icons by size, iPad apps fail the
+   167 px check; iPhone-only apps pass.
+3. **Build-environment keys.** App Store processing reads `DTXcode`,
+   `DTXcodeBuild`, `DTSDKName`, `DTSDKBuild`, `DTPlatform*`, `DTCompiler`;
+   xtool writes none. `asc.py stamp` takes the SDK values from the darwin
+   bundle and the Xcode values from `Contents/version.plist`, which
+   `install-toolchain.sh` now keeps next to the SDK cache. A `.xip` install
+   hides that file: set `XCODE_VERSION` and `XCODE_BUILD`.
+4. **Distribution signing.** `rcodesign` 0.29.0 (pinned, checksummed) signs
+   with any key, certificate and entitlements. Without `--team-name` the
+   CodeDirectory carries no team id (`TeamIdentifier=not set` in
+   `codesign -dvvv`); `ship.sh` passes it from the profile.
+5. **Identity.** With an App Store Connect key, `asc.py identity` creates an
+   Apple Distribution certificate from a CSR made on this machine and an
+   `IOS_APP_STORE` profile. Without one, `asc.py test-identity` makes a
+   self-signed stand-in of the same shape, which is what the run above
+   used.
+6. **Upload.** The App Store Connect API has a build-upload resource
+   (`POST /v1/buildUploads`, `POST /v1/buildUploadFiles`, chunked `PUT`s,
+   `PATCH uploaded`, then poll for `COMPLETE`/`FAILED` with Apple's errors),
+   so no Transporter and no macOS. `/v1/apps` is GET-only, so the app record
+   is a one-time web step. A throwaway key unknown to Apple gets a clean
+   `401 NOT_AUTHORIZED`, which proves the token and HTTP path up to auth.
+
+Unproven until a real key and app record exist: certificate and profile
+creation, Apple's processing of a Linux-built `.ipa` (DT keys, an
+AssetKit `Assets.car` without MultiSized entries, rcodesign's
+Apple-certificate signature), and a TestFlight install.
+Receipt: `receipts/2026-10-03-ship-offline-validation.md`.

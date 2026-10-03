@@ -1,0 +1,509 @@
+#!/usr/bin/env python3
+"""App Store steps for ship.sh: stamp, identity, test-identity, validate, upload.
+
+Runs with the pymobiledevice3 venv's python, which already has `cryptography`.
+API key: ASC_KEY_ID, ASC_ISSUER_ID, and ASC_KEY_PATH (default
+~/.appstoreconnect/AuthKey_<ASC_KEY_ID>.p8). The key needs the App Manager role
+with access to Certificates, Identifiers & Profiles, or Admin.
+"""
+import base64
+import datetime
+import hashlib
+import json
+import os
+import plistlib
+import re
+import shutil
+import struct
+import subprocess
+import sys
+import tempfile
+import time
+import urllib.error
+import urllib.request
+import uuid
+import zipfile
+from pathlib import Path
+
+from cryptography import x509
+from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.hazmat.primitives.asymmetric import ec, rsa
+from cryptography.hazmat.primitives.asymmetric.utils import decode_dss_signature
+from cryptography.hazmat.primitives.serialization import pkcs7
+from cryptography.x509.oid import NameOID
+
+API = "https://api.appstoreconnect.apple.com"
+IDENTITY_DIR = Path(os.environ.get("ASC_IDENTITY_DIR", Path.home() / ".config/omarchy-apple-dev/distribution"))
+TEST_IDENTITY_DIR = Path.home() / ".config/omarchy-apple-dev/test-identity"
+TEST_TEAM = "TEST000000"
+SDK = Path(os.environ.get("DARWIN_SDK", Path.home() / ".swiftpm/swift-sdks/darwin.artifactbundle"))
+XCODE_VERSION_PLISTS = sorted(Path.home().glob(".cache/xtool/darwin-*.xtoolsdk.version.plist"))
+
+
+def die(msg):
+    sys.exit(f"asc.py: {msg}")
+
+
+def b64url(data):
+    return base64.urlsafe_b64encode(data).rstrip(b"=").decode()
+
+
+def token():
+    key_id, issuer = os.environ.get("ASC_KEY_ID"), os.environ.get("ASC_ISSUER_ID")
+    if not key_id or not issuer:
+        die("set ASC_KEY_ID and ASC_ISSUER_ID (App Store Connect > Users and Access > Integrations)")
+    path = Path(os.environ.get("ASC_KEY_PATH", Path.home() / f".appstoreconnect/AuthKey_{key_id}.p8"))
+    key = serialization.load_pem_private_key(path.read_bytes(), password=None)
+    now = int(time.time())
+    header = b64url(json.dumps({"alg": "ES256", "kid": key_id, "typ": "JWT"}).encode())
+    claims = b64url(json.dumps({"iss": issuer, "iat": now, "exp": now + 1200, "aud": "appstoreconnect-v1"}).encode())
+    r, s = decode_dss_signature(key.sign(f"{header}.{claims}".encode(), ec.ECDSA(hashes.SHA256())))
+    return f"{header}.{claims}.{b64url(r.to_bytes(32, 'big') + s.to_bytes(32, 'big'))}"
+
+
+def call(method, path, body=None):
+    req = urllib.request.Request(
+        API + path, method=method,
+        data=None if body is None else json.dumps(body).encode(),
+        headers={"Authorization": f"Bearer {token()}", "Content-Type": "application/json"},
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=60) as resp:
+            raw = resp.read()
+    except urllib.error.HTTPError as e:
+        die(f"{method} {path}: HTTP {e.code}\n{e.read().decode(errors='replace')}")
+    return json.loads(raw) if raw else {}
+
+
+def rel(kind, ident):
+    return {"data": {"type": kind, "id": ident}}
+
+
+# -- stamp -------------------------------------------------------------------
+
+def stamp(app_dir, build_number):
+    """Add the build-environment keys App Store processing reads from Info.plist."""
+    sdk = SDK / "Developer/Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS.sdk"
+    settings = json.loads((sdk / "SDKSettings.json").read_text())
+    version_plist = sdk / "System/Library/CoreServices/SystemVersion.plist"
+    sdk_build = plistlib.loads(version_plist.read_bytes())["ProductBuildVersion"]
+    if XCODE_VERSION_PLISTS:
+        xcode = plistlib.loads(XCODE_VERSION_PLISTS[-1].read_bytes())
+        xcode_version, xcode_build = xcode["CFBundleShortVersionString"], xcode["ProductBuildVersion"]
+    else:
+        xcode_version, xcode_build = os.environ.get("XCODE_VERSION"), os.environ.get("XCODE_BUILD")
+        if not xcode_version or not xcode_build:
+            die("no Xcode version recorded with the SDK; set XCODE_VERSION (27.0) and XCODE_BUILD (27A266a)")
+    major, minor, patch = (xcode_version.split(".") + ["0", "0"])[:3]
+    info_path = Path(app_dir) / "Info.plist"
+    with info_path.open("rb") as f:
+        info = plistlib.load(f)
+    info.update({
+        "CFBundleVersion": build_number,
+        "DTCompiler": "com.apple.compilers.llvm.clang.1_0",
+        "DTPlatformBuild": sdk_build,
+        "DTPlatformName": "iphoneos",
+        "DTPlatformVersion": settings["Version"],
+        "DTSDKBuild": sdk_build,
+        "DTSDKName": settings["CanonicalName"],
+        "DTXcode": f"{int(major):02d}{minor}{patch}",
+        "DTXcodeBuild": xcode_build,
+    })
+    with info_path.open("wb") as f:
+        plistlib.dump(info, f, fmt=plistlib.FMT_BINARY)
+    print(f"stamped {info['CFBundleIdentifier']} {info['CFBundleShortVersionString']} ({build_number}), "
+          f"{settings['CanonicalName']} {sdk_build}, Xcode {xcode_version} {xcode_build}")
+
+
+# -- identity ----------------------------------------------------------------
+
+def certificate():
+    """Reuse the local Apple Distribution identity, or create one (key never leaves this machine)."""
+    key_path, cert_path = IDENTITY_DIR / "key.pem", IDENTITY_DIR / "cert.der"
+    if cert_path.exists():
+        cert = x509.load_der_x509_certificate(cert_path.read_bytes())
+        serial = format(cert.serial_number, "X")
+        listed = call("GET", "/v1/certificates?filter[certificateType]=DISTRIBUTION&limit=200")["data"]
+        found = [c for c in listed
+                 if c["attributes"].get("serialNumber", "").upper().lstrip("0") == serial.lstrip("0")]
+        if found and cert.not_valid_after_utc.timestamp() > time.time():
+            return found[0]["id"], key_path, cert_path
+        print(f"local certificate {serial} is expired or revoked; creating a new one")
+    IDENTITY_DIR.mkdir(parents=True, exist_ok=True, mode=0o700)
+    key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    csr = (x509.CertificateSigningRequestBuilder()
+           .subject_name(x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "omarchy-apple-dev")]))
+           .sign(key, hashes.SHA256()))
+    created = call("POST", "/v1/certificates", {"data": {"type": "certificates", "attributes": {
+        "certificateType": "DISTRIBUTION",
+        "csrContent": csr.public_bytes(serialization.Encoding.PEM).decode(),
+    }}})["data"]
+    key_path.write_bytes(key.private_bytes(
+        serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8, serialization.NoEncryption()))
+    key_path.chmod(0o600)
+    cert_path.write_bytes(base64.b64decode(created["attributes"]["certificateContent"]))
+    print(f"created Apple Distribution certificate {created['attributes'].get('serialNumber')}")
+    return created["id"], key_path, cert_path
+
+
+def bundle_id(identifier):
+    found = call("GET", f"/v1/bundleIds?filter[identifier]={identifier}")["data"]
+    exact = [b for b in found if b["attributes"]["identifier"] == identifier]
+    if exact:
+        return exact[0]["id"]
+    print(f"registering bundle id {identifier}")
+    return call("POST", "/v1/bundleIds", {"data": {"type": "bundleIds", "attributes": {
+        "identifier": identifier, "name": identifier.replace(".", " "), "platform": "IOS",
+    }}})["data"]["id"]
+
+
+def profile(identifier, cert_id):
+    name = f"omarchy-apple-dev {identifier} {cert_id[:8]}"
+    found = call("GET", f"/v1/profiles?filter[name]={urllib.request.quote(name)}"
+                        "&filter[profileType]=IOS_APP_STORE&filter[profileState]=ACTIVE")["data"]
+    if found:
+        return base64.b64decode(found[0]["attributes"]["profileContent"])
+    print(f"creating App Store profile '{name}'")
+    created = call("POST", "/v1/profiles", {"data": {
+        "type": "profiles",
+        "attributes": {"name": name, "profileType": "IOS_APP_STORE"},
+        "relationships": {
+            "bundleId": rel("bundleIds", bundle_id(identifier)),
+            "certificates": {"data": [{"type": "certificates", "id": cert_id}]},
+        },
+    }})["data"]
+    return base64.b64decode(created["attributes"]["profileContent"])
+
+
+def identity(app_dir, out_dir):
+    """Apple identity via the API: write embedded.mobileprovision into the app; key, cert and
+    entitlements into out_dir."""
+    cert_id, key_path, cert_path = certificate()
+    install_identity(app_dir, out_dir, profile(bundle_identifier(app_dir), cert_id), key_path, cert_path)
+
+
+def test_identity(app_dir, out_dir):
+    """A local stand-in with the same shape as an Apple Distribution identity and App Store profile,
+    signed by a self-made certificate. It exercises signing and validation; Apple rejects it."""
+    team = TEST_TEAM
+    key_path, cert_path = TEST_IDENTITY_DIR / "key.pem", TEST_IDENTITY_DIR / "cert.der"
+    now = datetime.datetime.now(datetime.timezone.utc)
+    if not cert_path.exists():
+        TEST_IDENTITY_DIR.mkdir(parents=True, exist_ok=True, mode=0o700)
+        key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+        name = x509.Name([
+            x509.NameAttribute(NameOID.COMMON_NAME, f"Apple Distribution: omarchy-apple-dev TEST ({team})"),
+            x509.NameAttribute(NameOID.ORGANIZATIONAL_UNIT_NAME, team),
+        ])
+        cert = (x509.CertificateBuilder().subject_name(name).issuer_name(name)
+                .public_key(key.public_key()).serial_number(x509.random_serial_number())
+                .not_valid_before(now).not_valid_after(now + datetime.timedelta(days=365))
+                .add_extension(x509.ExtendedKeyUsage([x509.oid.ExtendedKeyUsageOID.CODE_SIGNING]), critical=True)
+                .add_extension(x509.KeyUsage(
+                    digital_signature=True, content_commitment=False, key_encipherment=False,
+                    data_encipherment=False, key_agreement=False, key_cert_sign=False, crl_sign=False,
+                    encipher_only=False, decipher_only=False), critical=True)
+                .sign(key, hashes.SHA256()))
+        key_path.write_bytes(key.private_bytes(
+            serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8, serialization.NoEncryption()))
+        key_path.chmod(0o600)
+        cert_path.write_bytes(cert.public_bytes(serialization.Encoding.DER))
+    key = serialization.load_pem_private_key(key_path.read_bytes(), password=None)
+    cert = x509.load_der_x509_certificate(cert_path.read_bytes())
+    identifier = bundle_identifier(app_dir)
+    payload = plistlib.dumps({
+        "AppIDName": identifier, "ApplicationIdentifierPrefix": [team], "Platform": ["iOS"],
+        "CreationDate": now.replace(tzinfo=None), "ExpirationDate": cert.not_valid_after_utc.replace(tzinfo=None),
+        "DeveloperCertificates": [cert_path.read_bytes()],
+        "Entitlements": {
+            "application-identifier": f"{team}.{identifier}", "com.apple.developer.team-identifier": team,
+            "beta-reports-active": True, "get-task-allow": False, "keychain-access-groups": [f"{team}.*"],
+        },
+        "Name": f"omarchy-apple-dev TEST profile {identifier} (not from Apple)",
+        "TeamIdentifier": [team], "TeamName": "omarchy-apple-dev TEST", "TimeToLive": 365,
+        "UUID": str(uuid.uuid4()).upper(), "Version": 1,
+    })
+    prov = (pkcs7.PKCS7SignatureBuilder().set_data(payload)
+            .add_signer(cert, key, hashes.SHA256()).sign(serialization.Encoding.DER, []))
+    print(f"TEST identity (self-signed, team {team}): Apple will reject this signature; use it to check the pipeline")
+    install_identity(app_dir, out_dir, prov, key_path, cert_path)
+
+
+def bundle_identifier(app_dir):
+    with (Path(app_dir) / "Info.plist").open("rb") as f:
+        return plistlib.load(f)["CFBundleIdentifier"]
+
+
+def profile_payload(prov):
+    # A profile is CMS-signed; its payload is a plain XML plist.
+    return plistlib.loads(prov[prov.index(b"<?xml"):prov.index(b"</plist>") + len(b"</plist>")])
+
+
+def install_identity(app_dir, out_dir, prov, key_path, cert_path):
+    (Path(app_dir) / "embedded.mobileprovision").write_bytes(prov)
+    payload = profile_payload(prov)
+    granted = payload["Entitlements"]
+    entitlements = {k: granted[k] for k in (
+        "application-identifier", "com.apple.developer.team-identifier", "beta-reports-active") if k in granted}
+    entitlements["get-task-allow"] = False
+    out = Path(out_dir)
+    out.mkdir(parents=True, exist_ok=True)
+    (out / "entitlements.plist").write_bytes(plistlib.dumps(entitlements))
+    for name, src in (("key.pem", key_path), ("cert.der", cert_path)):
+        dest = out / name
+        dest.unlink(missing_ok=True)
+        dest.symlink_to(src)
+    print(f"identity for {entitlements['application-identifier']}: profile {payload['UUID']}, "
+          f"expires {payload['ExpirationDate']:%Y-%m-%d}")
+
+
+# -- validate ----------------------------------------------------------------
+
+REQUIRED_INFO_KEYS = (
+    "CFBundleIdentifier", "CFBundleExecutable", "CFBundleName", "CFBundleShortVersionString", "CFBundleVersion",
+    "CFBundlePackageType", "CFBundleSupportedPlatforms", "CFBundleInfoDictionaryVersion", "MinimumOSVersion",
+    "UIDeviceFamily", "UIRequiredDeviceCapabilities", "CFBundleIconName", "CFBundleIcons",
+    "DTCompiler", "DTPlatformBuild", "DTPlatformName", "DTPlatformVersion", "DTSDKBuild", "DTSDKName",
+    "DTXcode", "DTXcodeBuild",
+)
+IPAD_ORIENTATIONS = {
+    "UIInterfaceOrientationPortrait", "UIInterfaceOrientationPortraitUpsideDown",
+    "UIInterfaceOrientationLandscapeLeft", "UIInterfaceOrientationLandscapeRight",
+}
+
+
+def macho(path):
+    """(cputype, filetype, flags, minos tuple or None, has code signature) of a thin 64-bit Mach-O."""
+    data = Path(path).read_bytes()
+    magic, cputype, _, filetype, ncmds, _, flags, _ = struct.unpack_from("<8I", data, 0)
+    if magic != 0xFEEDFACF:
+        return None
+    off, minos, signed = 32, None, False
+    for _ in range(ncmds):
+        cmd, size = struct.unpack_from("<2I", data, off)
+        if cmd == 0x32:  # LC_BUILD_VERSION
+            platform, raw = struct.unpack_from("<2I", data, off + 8)
+            if platform == 2:  # PLATFORM_IOS
+                minos = (raw >> 16, (raw >> 8) & 0xFF, raw & 0xFF)
+        elif cmd == 0x1D:  # LC_CODE_SIGNATURE
+            signed = True
+        off += size
+    return cputype, filetype, flags, minos, signed
+
+
+def car_renditions(path):
+    """(width, height, rendition name) for every CSI header in an Assets.car."""
+    data, out, i = Path(path).read_bytes(), [], 0
+    while (i := data.find(b"ISTC", i)) >= 0:
+        width, height = struct.unpack_from("<2I", data, i + 12)
+        out.append((width, height, data[i + 40:i + 168].split(b"\0")[0].decode(errors="replace")))
+        i += 4
+    return out
+
+
+def png_info(path):
+    """(width, height, has alpha) from a PNG IHDR."""
+    data = Path(path).read_bytes()[:33]
+    width, height, _, color_type = struct.unpack(">2I2B", data[16:26])
+    return width, height, color_type in (4, 6)
+
+
+def version_tuple(s):
+    return tuple(int(p) for p in (s.split(".") + ["0", "0"])[:3])
+
+
+def signature_blob(rcodesign, exe, magic):
+    raw = subprocess.run([rcodesign, "extract", "signature-raw", str(exe)], capture_output=True, check=True).stdout
+    i = raw.find(magic)
+    if i < 0:
+        return None
+    length = struct.unpack_from(">I", raw, i + 4)[0]
+    return raw[i + 8:i + length]
+
+
+def validate(ipa):
+    """Check an .ipa offline against what App Store Connect rejects at upload. Exit 1 on any FAIL."""
+    results = []
+
+    def check(ok, msg):
+        results.append(ok)
+        print(f"{'ok  ' if ok else 'FAIL'} {msg}")
+        return ok
+
+    rcodesign = (shutil.which("rcodesign", path=f"{os.environ.get('PATH', '')}:{Path.home() / '.local/bin'}")
+                 or die("rcodesign not on PATH (install-toolchain.sh installs it)"))
+    with zipfile.ZipFile(ipa) as z, tempfile.TemporaryDirectory() as tmp:
+        names = z.namelist()
+        apps = sorted({n.split("/")[1] for n in names if n.count("/") >= 2 and n.split("/")[1].endswith(".app")})
+        check(all(n.startswith("Payload/") for n in names), "every entry is under Payload/")
+        check(not any("__MACOSX" in n or n.endswith(".DS_Store") for n in names), "no __MACOSX or .DS_Store")
+        if not check(len(apps) == 1, f"exactly one app bundle in Payload/: {apps}"):
+            sys.exit(1)
+        z.extractall(tmp)
+        app = Path(tmp) / "Payload" / apps[0]
+
+        with (app / "Info.plist").open("rb") as f:
+            info = plistlib.load(f)
+        missing = [k for k in REQUIRED_INFO_KEYS if k not in info]
+        check(not missing, f"Info.plist has the required keys{': missing ' + ', '.join(missing) if missing else ''}")
+        number = re.compile(r"^\d+(\.\d+){0,2}$")
+        short, build = info.get("CFBundleShortVersionString", ""), info.get("CFBundleVersion", "")
+        check(bool(number.match(short)), f"CFBundleShortVersionString '{short}' is up to three integers")
+        check(bool(number.match(build)), f"CFBundleVersion '{build}' is up to three integers")
+        check(info.get("CFBundlePackageType") == "APPL", "CFBundlePackageType is APPL")
+        check(info.get("CFBundleSupportedPlatforms") == ["iPhoneOS"], "CFBundleSupportedPlatforms is [iPhoneOS]")
+        check(info.get("DTPlatformName") == "iphoneos" and str(info.get("DTSDKName", "")).startswith("iphoneos"),
+              f"built against the device SDK: {info.get('DTSDKName')}")
+        check(str(info.get("DTXcode", "")).isdigit(), f"DTXcode {info.get('DTXcode')} / {info.get('DTXcodeBuild')}")
+        check("UILaunchScreen" in info or "UILaunchStoryboardName" in info, "launch screen declared")
+        families = info.get("UIDeviceFamily", [])
+        ipad = 2 in families
+        if ipad and not info.get("UIRequiresFullScreen"):
+            check(IPAD_ORIENTATIONS <= set(info.get("UISupportedInterfaceOrientations~ipad", [])),
+                  "iPad multitasking: all four iPad orientations declared")
+
+        exe = app / info.get("CFBundleExecutable", "")
+        header = macho(exe) if exe.is_file() else None
+        if check(header is not None, f"executable {exe.name} is a thin 64-bit Mach-O"):
+            cputype, filetype, mh_flags, minos, signed = header
+            check(cputype == 0x0100000C and filetype == 2, "arm64 MH_EXECUTE")
+            check(bool(mh_flags & 0x200000), "position independent (MH_PIE)")
+            plist_min = version_tuple(info.get("MinimumOSVersion", "0"))
+            check(minos is not None and minos <= plist_min,
+                  f"LC_BUILD_VERSION iOS minos {minos} <= MinimumOSVersion {info.get('MinimumOSVersion')}")
+            check(signed, "LC_CODE_SIGNATURE present")
+
+        car = app / "Assets.car"
+        sizes = {(w, h) for w, h, _ in car_renditions(car)} if car.exists() else set()
+        check(car.exists(), f"Assets.car present ({len(sizes)} rendition sizes)")
+        needed = {(1024, 1024): "App Store 1024", (120, 120): "iPhone 60@2x"}
+        if ipad:
+            needed.update({(152, 152): "iPad 76@2x", (167, 167): "iPad Pro 83.5@2x"})
+        for size, label in needed.items():
+            check(size in sizes, f"Assets.car has the {label} icon ({size[0]}x{size[1]})")
+        marketing = app / f"{info.get('CFBundleIconName', 'AppIcon')}1024x1024.png"
+        if marketing.exists():
+            check(not png_info(marketing)[2], "App Store icon has no alpha channel")
+        primary = info.get("CFBundleIcons", {}).get("CFBundlePrimaryIcon", {})
+        for stem in primary.get("CFBundleIconFiles", []):
+            check(any(app.glob(f"{stem}*.png")), f"declared icon file {stem}*.png is in the bundle")
+
+        prov_path = app / "embedded.mobileprovision"
+        if check(prov_path.exists(), "embedded.mobileprovision present"):
+            prov = profile_payload(prov_path.read_bytes())
+            team = (prov.get("TeamIdentifier") or [""])[0]
+            granted = prov.get("Entitlements", {})
+            app_id = granted.get("application-identifier", "")
+            check(app_id in (f"{team}.{info.get('CFBundleIdentifier')}", f"{team}.*"),
+                  f"profile app id {app_id} covers {info.get('CFBundleIdentifier')}")
+            check("ProvisionedDevices" not in prov and not prov.get("ProvisionsAllDevices"),
+                  "App Store profile (no device list, not enterprise)")
+            check(granted.get("get-task-allow") is False, "profile get-task-allow is false")
+            expires = prov["ExpirationDate"].replace(tzinfo=datetime.timezone.utc)
+            check(expires > datetime.datetime.now(datetime.timezone.utc), f"profile valid until {expires:%Y-%m-%d}")
+            test = prov.get("TeamName") == "omarchy-apple-dev TEST"
+            if test:
+                print("note TEST identity: structure only; Apple rejects this signature")
+
+            verify = subprocess.run([rcodesign, "verify", str(exe)], capture_output=True, text=True, check=False)
+            check(verify.returncode == 0,
+                  f"rcodesign verify {exe.name}{'' if verify.returncode == 0 else ': ' + verify.stderr.strip()[-200:]}")
+            cd = subprocess.run([rcodesign, "extract", "code-directory", str(exe)],
+                                capture_output=True, text=True, check=True).stdout
+            cd_team = re.search(r'team_name: Some\(\s*"([^"]*)"', cd)
+            check(bool(cd_team) and cd_team.group(1) == team,
+                  f"CodeDirectory team id {cd_team.group(1) if cd_team else None} matches the profile")
+            slots = dict(re.findall(r"(Info|Resources) \(\d\): ([0-9a-f]{64})", cd))
+            seal = app / "_CodeSignature" / "CodeResources"
+            check(slots.get("Info") == hashlib.sha256((app / "Info.plist").read_bytes()).hexdigest(),
+                  "Info.plist matches its sealed hash")
+            check(seal.exists() and slots.get("Resources") == hashlib.sha256(seal.read_bytes()).hexdigest(),
+                  "_CodeSignature/CodeResources matches its sealed hash")
+            files2 = plistlib.loads(seal.read_bytes()).get("files2", {}) if seal.exists() else {}
+            changed = [p for p, v in files2.items() if not (isinstance(v, dict) and v.get("optional")) and (
+                not (app / p).is_file()
+                or (v["hash2"] if isinstance(v, dict) else v) != hashlib.sha256((app / p).read_bytes()).digest())]
+            unsealed = [str(p.relative_to(app)) for p in app.rglob("*") if p.is_file()
+                        and str(p.relative_to(app)) not in files2 and p != exe and p != app / "Info.plist"
+                        and p.relative_to(app).parts[0] != "_CodeSignature"]
+            check(not changed and not unsealed, "every bundle file is sealed with a matching hash"
+                  f"{f'; changed {changed}' if changed else ''}{f'; unsealed {unsealed}' if unsealed else ''}")
+            xml = signature_blob(rcodesign, exe, b"\xfa\xde\x71\x71")
+            signed_ent = plistlib.loads(xml) if xml else {}
+            check(signed_ent.get("application-identifier") == app_id
+                  and signed_ent.get("com.apple.developer.team-identifier") == team,
+                  f"signed entitlements match the profile: {signed_ent.get('application-identifier')}")
+            check(signed_ent.get("get-task-allow") is False, "signed get-task-allow is false")
+            extra = set(signed_ent) - set(granted)
+            check(not extra,
+                  f"signed entitlements are a subset of the profile{': extra ' + str(extra) if extra else ''}")
+            cms = subprocess.run([rcodesign, "extract", "cms-pem", str(exe)], capture_output=True, check=True).stdout
+            signers = {c.public_bytes(serialization.Encoding.DER) for c in pkcs7.load_pem_pkcs7_certificates(cms)}
+            check(bool(signers & set(prov.get("DeveloperCertificates", []))),
+                  "signing certificate is one of the profile's DeveloperCertificates")
+
+    failed = results.count(False)
+    print(f"{len(results) - failed}/{len(results)} checks passed")
+    if failed:
+        sys.exit(1)
+
+# -- upload ------------------------------------------------------------------
+
+def upload(ipa):
+    ipa = Path(ipa)
+    with zipfile.ZipFile(ipa) as z:
+        info_name = next(n for n in z.namelist() if n.count("/") == 2 and n.endswith(".app/Info.plist"))
+        info = plistlib.loads(z.read(info_name))
+    identifier = info["CFBundleIdentifier"]
+    apps = call("GET", f"/v1/apps?filter[bundleId]={identifier}")["data"]
+    if not apps:
+        die(f"no App Store Connect app for {identifier}. Create it once in the web UI "
+            "(Apps > + > New App); the API cannot create apps.")
+    upload_id = call("POST", "/v1/buildUploads", {"data": {
+        "type": "buildUploads",
+        "attributes": {
+            "cfBundleShortVersionString": info["CFBundleShortVersionString"],
+            "cfBundleVersion": info["CFBundleVersion"],
+            "platform": "IOS",
+        },
+        "relationships": {"app": rel("apps", apps[0]["id"])},
+    }})["data"]["id"]
+    data = ipa.read_bytes()
+    file = call("POST", "/v1/buildUploadFiles", {"data": {
+        "type": "buildUploadFiles",
+        "attributes": {"assetType": "ASSET", "fileName": ipa.name, "fileSize": len(data), "uti": "com.apple.ipa"},
+        "relationships": {"buildUpload": rel("buildUploads", upload_id)},
+    }})["data"]
+    for op in file["attributes"]["uploadOperations"]:
+        part = data[op["offset"]:op["offset"] + op["length"]]
+        headers = {h["name"]: h["value"] for h in op.get("requestHeaders") or []}
+        req = urllib.request.Request(op["url"], data=part, method=op["method"], headers=headers)
+        with urllib.request.urlopen(req, timeout=600) as resp:
+            resp.read()
+    print(f"uploaded {len(data)} bytes in {len(file['attributes']['uploadOperations'])} part(s)")
+    call("PATCH", f"/v1/buildUploadFiles/{file['id']}", {"data": {
+        "type": "buildUploadFiles", "id": file["id"],
+        "attributes": {"uploaded": True, "sourceFileChecksums": {
+            "file": {"hash": hashlib.md5(data).hexdigest(), "algorithm": "MD5"}}},
+    }})
+    state = {}
+    for _ in range(120):
+        state = call("GET", f"/v1/buildUploads/{upload_id}")["data"]["attributes"]["state"]
+        if state.get("state") in ("COMPLETE", "FAILED"):
+            break
+        time.sleep(15)
+    print(f"buildUpload {upload_id}: {state.get('state')}")
+    for kind in ("errors", "warnings", "infos"):
+        for item in state.get(kind) or []:
+            print(f"  {kind[:-1]} {item.get('code')}: {item.get('description')}")
+    if state.get("state") != "COMPLETE":
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    commands = {"stamp": stamp, "identity": identity, "test-identity": test_identity,
+                "validate": validate, "upload": upload}
+    if len(sys.argv) < 2 or sys.argv[1] not in commands:
+        die("usage: asc.py stamp APP BUILD | identity APP OUTDIR | test-identity APP OUTDIR"
+            " | validate IPA | upload IPA")
+    commands[sys.argv[1]](*sys.argv[2:])
