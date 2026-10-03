@@ -34,7 +34,10 @@
 #     pymobiledevice3 developer core-device launch-application BID "" \
 #         --tunnel UDID@BRIDGE_HOST:WS_PORT
 set -euo pipefail
-export PATH="/usr/lib/swift/bin:$PATH"
+# The toolchain's own bin dir (lldb) first: /usr/lib/swift/bin on swift-bin
+# 6.3, /usr/lib/swift/usr/bin on 6.4, elsewhere under mise.
+PATH="$(dirname "$(readlink -f "$(command -v swift)")"):$PATH"
+export PATH
 
 XT="$HOME/.local/bin/xtool"
 PMD3="$HOME/pymobile3-venv/bin/pymobiledevice3"
@@ -99,7 +102,7 @@ network)
 rsd)
   echo "== Install/launch via RSD $RSD_HOST:$RSD_PORT -- UNVERIFIED =="
   $PMD3 apps install "$PKG" --rsd "$RSD_HOST" "$RSD_PORT"
-  BID=$(grep -E '^bundle_id:' xtool.yml | awk '{print $2}')
+  BID=$(grep -E '^bundleID:' xtool.yml | awk '{print $2}')
   if [ -z "$BID" ]; then echo "No bundle_id in xtool.yml; launch it by hand:"; else
     $PMD3 developer core-device launch-application "$BID" "" --rsd "$RSD_HOST" "$RSD_PORT"
   fi

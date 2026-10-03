@@ -4,13 +4,15 @@ Everything below came out of one session on 2026-09-09, taking a 13" M1 MacBook 
 running Omarchy from a bare install to a SwiftUI app running and debuggable on an
 iPhone 16 Pro Max (iOS 26.6.1). Fourteen things broke in the first run, and a
 fifteenth surfaced on 2026-09-16, with items 16-20 following the same day;
-item 21 came from the 2026-09-17 mise retest.
+item 21 came from the 2026-09-17 mise retest, and item 22 from the 2026-10-03
+retest on xtool 1.20.1, which supersedes items 15 and 16.
 Each is recorded with the error text, the root cause where it was found, and the fix. `install-toolchain.sh`
 applies every fix that can be automated (items 1 to 7); only Apple ID sign-in and
 sudo consent genuinely need a human.
 
-Versions: Swift 6.3.3 (AUR `swift-bin`), xtool 1.19.0, LLDB 21.0.0, pymobiledevice3
-from PyPI, iPhoneOS SDK 26.5 taken from Xcode 26.6.
+Versions of the first run: Swift 6.3.3 (AUR `swift-bin`), xtool 1.19.0, LLDB 21.0.0,
+pymobiledevice3 from PyPI, iPhoneOS SDK 26.5 taken from Xcode 26.6. Current
+working set (item 22): swift-bin 6.4.0, xtool 1.20.1, iPhoneOS SDK 27.0 from Xcode 27.0.
 
 Confirmed on x86_64 (community report, Jon Kinney, 2026-09-15): the same flow
 works on a Framework Desktop with an iPhone 16, used for a real client project.
@@ -39,7 +41,9 @@ while copying `/usr/lib/clang/22/include/fuzzer`. Root cause: swift-corelibs
 EPERM for a normal user. Fix: take ownership of the toolchain trees first,
 `sudo chown -R "$USER:" /usr/lib/clang /usr/lib/swift` (the colon matters:
 copyItem restores the group too, so it must be the user's login group). The
-install script does this automatically before the SDK install.
+install script did this automatically before the SDK install. Obsolete since xtool
+1.19.2 (xtool PR #255 copies with `preserveOwner: false`); the script no longer
+touches ownership (item 22).
 
 **5. The SDK installs "successfully" and then SwiftUI will not compile.** The error
 is `size of '__builtin_bit_cast' source type 'int' does not match destination type
@@ -47,8 +51,8 @@ is `size of '__builtin_bit_cast' source type 'int' does not match destination ty
 headers it finds on PATH into the SDK bundle. The system clang here is 22.1.8 while
 the Swift compiler's own clang frontend is 21.0.0, and the headers are not
 compatible across that gap. Fix: run the SDK install with the toolchain's clang
-first on PATH, `PATH=/usr/lib/swift/bin:$PATH xtool sdk install ...`. The
-install script exports that PATH itself before installing the SDK.
+first on PATH. The install script puts the bin directory of the `swift` on PATH
+first (`/usr/lib/swift/bin` on swift-bin 6.3, `/usr/lib/swift/usr/bin` on 6.4).
 
 **6. A poisoned module cache survives the fix.** After rebuilding the SDK correctly,
 the same project in the same directory kept failing with the same error. Fix: build
@@ -106,7 +110,7 @@ process attach --pid 45977
 * thread #1, queue = 'com.apple.main-thread', stop reason = signal SIGSTOP
 ```
 
-## Known regression, 2026-09-16
+## Known regression, 2026-09-16 (superseded 2026-10-03 by item 22)
 
 **15. Swift 6.4.0 cannot build against the xtool darwin SDK.** AUR `swift-bin`
 6.4.0 installs fine, the SDK registers fine (`swift sdk list` prints `darwin`),
@@ -116,8 +120,8 @@ bundle: the build fails under 6.4.0 with both xtool 1.19.0 and 1.19.2, and
 succeeds the moment the system runs swift-bin 6.3.3 again. The bundle metadata
 is identical in both cases (schemaVersion 4.0, same toolset.json), so the
 regression is on the SwiftPM side. Workaround: run swift-bin 6.3.3 (build it
-from the AUR package's git history). `install-toolchain.sh` warns when it
-installs a 6.4+ toolchain. Confirmed on aarch64 and x86_64.
+from the AUR package's git history). Confirmed on aarch64 and x86_64 with xtool
+1.19.x. xtool 1.20 fixed it (item 22).
 
 **16. The streamed SDK's Xcode must match the Linux Swift version.** The SDK
 pieces carry Apple's prebuilt swiftmodules, and the Linux compiler refuses a
@@ -133,9 +137,9 @@ compiler is 'Swift version 6.3.3 ...')`. The matrix, all tested 2026-09-16:
 | swift 6.4.0 | Xcode 26.6 (iOS 26.5) | planning failure, item 15 |
 | swift 6.4.0 | Xcode 27 (iOS 27.0) | planning failure, item 15 |
 
-Rule: stream pieces from an Xcode whose Swift is 6.3.x (Xcode 26.x) while
-swift-bin is on 6.3.3. When the Mac's Xcode moves past the working pair, the
-fix has to come from upstream (item 15 or a newer xtool SDK format).
+Rule: the SDK's Xcode must ship the same Swift minor as the Linux toolchain:
+Xcode 26 for Swift 6.3, Xcode 27 for Swift 6.4. On xtool 1.20.1, swift 6.4.0 +
+Xcode 27 builds (item 22); swift 6.4.0 + Xcode 26.6 was not retested.
 
 ## Toolchain swaps, 2026-09-16
 
@@ -144,8 +148,7 @@ small tmpfs (4 GB here). Unpacking AUR sources (swift-bin is ~800 MB
 compressed, 3.3 GB installed) or building a SwiftUI app dies mid-extract
 with `I/O error 122` / `No space left on device` when it fills. Fix: point
 TMPDIR at the real disk — `TMPDIR=$HOME/tmp makepkg -si`; the same variable
-covers SwiftPM's scratch files. The 6.4 warning in `install-toolchain.sh`
-mentions this.
+covers SwiftPM's scratch files.
 
 **19. Toolchain swaps (mise/asdf/manual) used to end in a full multi-GB
 reinstall; `install-toolchain.sh --repair` now recovers from cache.**
@@ -197,18 +200,18 @@ consume an Xcode 26.x SDK.
 
 ```bash
 # once
-./install-toolchain.sh          # handles python dep, chown, PATH, SDK install
+./install-toolchain.sh          # handles python dep, fuse3, PATH, SDK install
 xtool auth                      # mode 1, Apple ID, 2FA, pick team
 
-# per app
+# per app; the toolchain's own bin dir first (item 5)
+export PATH="$(dirname "$(readlink -f "$(command -v swift)")"):$PATH"
 xtool new HelloOmarchy && cd HelloOmarchy
-PATH=/usr/lib/swift/bin:$PATH xtool dev run
+xtool dev run
 
 # debugging, phone connected, Developer Mode on
 pymobiledevice3 mounter auto-mount
 sudo pymobiledevice3 lockdown start-tunnel     # note the RSD address and port
-PATH=/usr/lib/swift/bin:$PATH pymobiledevice3 developer debugserver lldb \
-  <bundle-id> --rsd <address> <port>
+pymobiledevice3 developer debugserver lldb <bundle-id> --rsd <address> <port>
 ```
 
 ## Where it stands
@@ -381,4 +384,39 @@ into the compat directory.
 This does not change what this repo installs. AUR `swift-bin` already did
 the same reconciliation properly at package level — its `swift` links
 `libncursesw.so` directly — and it remains `install-toolchain.sh`'s path.
-Item 15 still applies to any mise-installed 6.4.x toolchain.
+Items 15 and 16 are superseded by item 22 (xtool 1.20.1 + Swift 6.4 + Xcode 27).
+
+## xtool 1.20, 2026-10-03
+
+**22. xtool 1.20.1 + swift-bin 6.4.0 + Xcode 27 builds; the 6.3.3 pin is over.**
+xtool 1.20.0 (2026-09-21) added Swift 6.4 support by driving SwiftBuild instead
+of SwiftPM's `--swift-sdk` path, which is where item 15's planning failure lived.
+Retested in a clean Arch x86_64 root (archlinux-bootstrap, 2026-10-03) with the
+repo's own `install-toolchain.sh` as a brand-new user, SDK pieces streamed from
+an Xcode 27.0 (27A266a) install:
+
+| Linux toolchain | xtool | SDK source | Result |
+|---|---|---|---|
+| swift-bin 6.4.0-2 | 1.20.1 | Xcode 27.0 (iOS 27.0) | debug and release build; Mach-O arm64 |
+
+Three install-path changes fell out of the retest:
+
+1. swift-bin 6.4.0-2 moved the toolchain binaries to `/usr/lib/swift/usr/bin`.
+   A hardcoded `/usr/lib/swift/bin` leaves clang off PATH, and `xtool sdk
+   install` stops with `Error: Could not find executable 'clang' in PATH`.
+   Both scripts now derive the directory from `readlink -f $(command -v swift)`,
+   which also covers mise installs.
+2. The step 3 chown (item 4) is not needed with xtool 1.20.1: the fresh user
+   built and registered the SDK while `/usr/lib/swift` stayed `root`-owned.
+   The old step also died on hosts without a system clang
+   (`chown: cannot access '/usr/lib/clang'`), so it is deleted.
+3. The xtool AppImage runtime needs `fusermount3` (`Error: No suitable
+   fusermount binary found on the $PATH`); the script installs `fuse3`.
+
+xtool 1.20's SDK builder also reads `Contents/Info.plist`, `version.plist` and
+each `Platforms/*.platform/Info.plist`; the Route B piece list now includes them.
+The SDK cache is named after the iOS SDK inside it
+(`darwin-iPhoneOS27.0.xtoolsdk`) instead of the input file name. The version
+rule of item 16 still holds: Xcode 27 for Swift 6.4, Xcode 26 for Swift 6.3.
+Device install and LLDB on this pair are not yet re-run on hardware.
+Receipt: `receipts/2026-10-03-xtool-1.20-swift-6.4-x86_64.md`.

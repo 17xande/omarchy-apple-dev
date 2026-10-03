@@ -3,18 +3,22 @@
 SwiftUI apps built on Omarchy Linux, installed on a physical iPhone over USB,
 with no Xcode and no macOS in the loop.
 
-Based on a first successful run on 2026-09-09 with:
+Current working set, verified 2026-10-03 on x86_64 Arch with the install
+script as a fresh user (FINDINGS.md item 22):
 
 | Tool | Version | Source |
 |------|---------|--------|
-| Swift | 6.3.3 (aarch64-unknown-linux-gnu) | AUR `swift-bin` |
-| xtool | 1.19.0 | xtool-org/xtool AppImage |
+| Swift | 6.4.0 | AUR `swift-bin` |
+| xtool | 1.20.1 | xtool-org/xtool AppImage |
 | pymobiledevice3 | latest from PyPI at install time | venv |
 | LLDB | 21.0.0 (Swift toolchain) | bundled with `swift-bin` |
-| iOS SDK | iPhoneOS 26.5 | Xcode 26.6 on a Mac, streamed as a directory |
+| iOS SDK | iPhoneOS 27.0 | Xcode 27.0 |
 
-Confirmed on x86_64 (community report, Jon Kinney, 2026-09-15): the same flow
-works on a Framework Desktop with an iPhone 16, used for a real client project.
+The device install and LLDB loop were proven on 2026-09-09 on an M1 with
+Swift 6.3.3, xtool 1.19.0 and the iOS 26.5 SDK; they are not yet re-run on
+the 6.4 set. Confirmed on x86_64 (community report, Jon Kinney, 2026-09-15):
+the same flow works on a Framework Desktop with an iPhone 16, used for a real
+client project.
 
 Works with a free Apple ID. Paid membership not required for device installs.
 
@@ -31,9 +35,9 @@ Works with a free Apple ID. Paid membership not required for device installs.
   only external requirement that cannot be automated away.
 
 Version matching matters: the SDK pieces must come from an Xcode whose Swift
-matches the installed `swift-bin` (Xcode 26.x for swift 6.3.3 — see
-FINDINGS.md item 16), and swift-bin 6.4.0 is not yet usable (item 15).
-Download **Xcode 26.x, not 27**.
+matches the installed `swift-bin`: **Xcode 27 for swift-bin 6.4** (the
+current AUR version), Xcode 26 for 6.3 (FINDINGS.md items 16 and 22). The
+install script prints the matching Xcode when it stops at the SDK step.
 
 ## Install
 
@@ -43,11 +47,10 @@ cd omarchy-apple-dev
 ./install-toolchain.sh
 ```
 
-The script installs the toolchain, applies the SDK-install workarounds
-(toolchain-tree ownership, toolchain clang first on PATH), and tells you
-exactly what is left if anything is. Safe to re-run. When it stops at the SDK
-step, download `Xcode 26.x .xip` from
-https://developer.apple.com/download/all/?q=Xcode and re-run:
+The script installs the toolchain, puts the toolchain's own clang first on
+PATH for the SDK install, and tells you exactly what is left if anything is.
+Safe to re-run. When it stops at the SDK step, download the matching
+`Xcode .xip` from https://developer.apple.com/download/all/?q=Xcode and re-run:
 
 ```
 XCODE_XIP=/path/to/Xcode.xip ./install-toolchain.sh
@@ -57,7 +60,7 @@ Verify with `swift sdk list` (should print `darwin`).
 
 Already have a Mac with a matching Xcode? You can stream just the ~3 GB of
 SDK pieces xtool needs instead of the full .xip — see Route B in
-`install-toolchain.sh` section 6. Optional; the .xip route above needs no Mac.
+`install-toolchain.sh` section 5. Optional; the .xip route above needs no Mac.
 
 ## Toolchain swaps (mise/asdf/manual)
 
@@ -83,8 +86,7 @@ The variable has to be in the shell — mise does not apply `mise.toml`
 `[env]` to its post-extract `swift --version` check.
 
 This repo still installs AUR `swift-bin`, which resolves the same thing at
-package level and needs no shim. Note item 15: a mise-installed 6.4.x
-toolchain cannot build against the darwin SDK.
+package level and needs no shim.
 
 Swapping the Swift toolchain — `mise use -g swift@<ver>`, an asdf switch, or a
 manual reinstall — moves Swift to a different absolute path. That does not
@@ -95,7 +97,7 @@ What survives a swap:
 
 - **Pairing** — `~/.pymobiledevice3/` (+ `/var/lib/lockdown` records).
 - **Apple ID auth** — `~/.local/share/xtool/`.
-- **SDK cache** — `~/.cache/xtool/darwin-<xcodever>.xtoolsdk`, kept by the
+- **SDK cache** — `~/.cache/xtool/darwin-iPhoneOS<ver>.xtoolsdk`, kept by the
   install script. The SDK bundle references the toolchain that registered it,
   so after a swap it must be **re-registered into the current toolchain**:
 
@@ -153,12 +155,13 @@ documents the pymobiledevice3 tunneld bridge for that case, and
 
 ## Findings
 
-[FINDINGS.md](FINDINGS.md) records the twenty-one findings behind the working
+[FINDINGS.md](FINDINGS.md) records the twenty-two findings behind the working
 run: what broke and how each was fixed (SDK install failures, a clang version
 mismatch that breaks SwiftUI, the unstated prerequisites for debugging on
 iOS 17+), the Swift/Xcode version matrix (items 15-16), why a toolchain
-swap breaks SDK registration and how `--repair` restores it (item 19), and
-the mise/ncurses soname story (items 20-21).
+swap breaks SDK registration and how `--repair` restores it (item 19),
+the mise/ncurses soname story (items 20-21), and the move to xtool 1.20 +
+Swift 6.4 + Xcode 27 (item 22).
 
 ## Notes
 
@@ -166,8 +169,8 @@ the mise/ncurses soname story (items 20-21).
   clang. The SDK install copies the host clang headers into the bundle; a
   version mismatch between host clang and the Swift compiler produces
   `__builtin_bit_cast` size errors when compiling SwiftUI. Both scripts in
-  this repo export that PATH themselves; prefix it by hand only when running
-  xtool directly in your own shell.
+  this repo put it first on PATH themselves; in your own shell use
+  `PATH="$(dirname "$(readlink -f "$(command -v swift)")"):$PATH"`.
 - Building SwiftUI pulls in simd/arm_neon headers; first build takes about a
   minute on an M1.
 
