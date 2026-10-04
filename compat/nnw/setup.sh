@@ -43,20 +43,45 @@ sed -i '5i import UIKit' \
 	"$dir/iOS/Settings/TimelineHeaderView.swift" \
 	"$dir/iOS/Settings/TimelineCustomizerCollectionViewController.swift"
 
+# iOS/Resources/Info.plist carries Xcode placeholders that Xcode substitutes
+# from build settings ($(EXECUTABLE_NAME), $(MARKETING_VERSION), ...); xtool
+# merges the plist verbatim, which would break the bundle. Substitute every
+# $(VAR) with the value from the xcconfig tree; drop keys with no value (e.g.
+# CFBundleExecutable - xtool writes its own).
+python3 - "$dir" <<'PYEOF'
+import plistlib, pathlib, re, sys
+root = pathlib.Path(sys.argv[1])
+p = root / "iOS/Resources/Info.plist"
+d = plistlib.load(open(p, "rb"))
+vals = {}
+for f in (root / "xcconfig").rglob("*.xcconfig"):
+    for line in f.read_text(errors="replace").splitlines():
+        m = re.match(r"([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)", line.split("//")[0])
+        if m:
+            vals.setdefault(m.group(1), m.group(2).strip().rstrip(";").strip())
+for k, v in list(d.items()):
+    if not isinstance(v, str):
+        continue
+    def sub(m):
+        return vals.get(m.group(1), m.group(0))
+    nv = re.sub(r"\$\(([A-Za-z_][A-Za-z0-9_]*)\)", sub, v)
+    if "$(" in nv:
+        del d[k]
+    elif nv != v:
+        d[k] = nv
+plistlib.dump(d, open(p, "wb"))
+print("placeholders resolved")
+PYEOF
+
 python3 "$here/../tools/xcodeproj2xtool.py" "$dir/NetNewsWire.xcodeproj"
 # Defaults printed by the generator: APP_ICON=AppIcon; xtool.yml gets
 # bundleID com.ranchero.NetNewsWire.iOS and infoPath ../iOS/Resources/Info.plist.
 #
-# Known walls (2026-10-04, xtool 1.20.1, Xcode 27.0 SDK), in build order:
-# - The generator excludes NetNewsWire's 7 storyboards/xibs (no ibtool on
-#   Linux) with a warning; the app builds but its UIKit UI cannot load.
-# - The build then stops in the Linux actool (AssetKit): it crashes decoding
-#   grayscale colorsets written with a "white" component, e.g.
-#   iOS/Resources/Assets.xcassets/fullScreenBackgroundColor.colorset
-#   ("DecodingError.keyNotFound: Key 'red' not found ... components").
-#   Fix belongs in AssetKit (tools/darwin-tools), not in this adapter.
-# - Behind that wall (diagnostic with the colorset moved aside): every module
-#   compiles, but the final app link fails - all 15 Modules/* packages declare
-#   `type: .dynamic` products and SwiftBuild on Linux does not link them:
-#   "ld64.lld: error: undefined symbol: $s2os6LoggerV6RSCoreE12nnwSubsystemSSvau"
-#   (20 undefined symbols from RSCore/Images/others).
+# Status (2026-10-04, Xcode 27.0 SDK): with stock xtool 1.20.1 the app link
+# fails on NetNewsWire's `type: .dynamic` packages (FINDINGS.md 27.3). It
+# builds end to end and ship.sh passes 38/38 only with three changes that are
+# not upstream yet: SDK toolset-swb.json linker extraCLIOptions
+# ["-lswiftCore", "-L<sdk>/usr/lib/swift", "-all_load"], and two xtool
+# PackLib patches (link each dynamic product into the app; embed each once).
+# The generator excludes NetNewsWire's 7 storyboards/xibs (no ibtool on
+# Linux) with a warning; the app builds but its UIKit UI cannot load.

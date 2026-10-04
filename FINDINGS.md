@@ -655,10 +655,30 @@ generator. It stops at three platform walls, in build order:
    components. AssetKit `8ddc2de` decodes all six Xcode color spaces and writes
    them as actool 27.0 does: for one colorset per space (light and dark),
    `assetutil --info` lists the same 12 entries, with bit-identical components.
-3. **Dynamic library products do not link.** With that colorset moved aside,
-   every module compiles, but the app link fails: all 15 local packages declare
-   `type: .dynamic` products, and the app sees `ld64.lld: error: undefined
-   symbol: $s2os6LoggerV6RSCoreE12nnwSubsystemSSvau` and 19 more.
+3. **Dynamic library products do not link (open: needs xtool and SwiftPM
+   fixes).** Every module compiles, but the app link fails: all 15 local
+   packages declare `type: .dynamic` products, and the app sees `ld64.lld:
+   error: undefined symbol: $s2os6LoggerV6RSCoreE12nnwSubsystemSSvau` and 19
+   more. A template app with one `.dynamic` local package shows three causes:
+   - The dylib link gets no Swift runtime (`undefined symbol:
+     swift_errorRetain`, `swift_once`): no `-lswiftCore`, no `-L` to the SDK's
+     `usr/lib/swift`. The SDK toolset's `linker.extraCLIOptions` can add both.
+   - The dylib exports nothing: SwiftPM compiles the module for static
+     linking and links it as an archive, which a dylib never pulls from.
+     SwiftPM turns that off for dynamic products only on Windows
+     (`PackagePIFProjectBuilder+Products.swift`). `-all_load` in the same
+     toolset list works around it.
+   - xtool embeds each dylib in `Frameworks/` but never adds `-l<name>` to
+     the app link, and embeds a dylib once per dependency edge (`File
+     exists` for `libRSWeb.dylib`). Two small patches to xtool's
+     `PackLib/Packer.swift` and `Planner.swift` fix both.
+
+   With all three, a patched xtool built from source builds NetNewsWire
+   (15 dylibs in `Frameworks/`, `@rpath` install names) and `ship.sh` passes
+   38 of 38. The installer does not apply the toolset flags: they help only
+   with the patched xtool, and `-all_load` affects every link. Unverified:
+   whether App Store processing accepts loose `.dylib` files in
+   `Frameworks/` (Xcode packages dynamic SwiftPM products as frameworks).
 
 ## aarch64 parity, 2026-10-04
 
