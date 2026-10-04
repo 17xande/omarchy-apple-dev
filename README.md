@@ -186,22 +186,25 @@ With the key set, `ship.sh` registers the bundle id, creates an Apple
 Distribution certificate (the private key stays in
 `~/.config/omarchy-apple-dev/distribution/`) and an App Store profile, then
 uploads through the App Store Connect build-upload API and prints Apple's
-processing result. **The upload step is unproven** (FINDINGS.md item 23).
+processing result. Apple accepts the Linux-built, Linux-signed app (build
+`VALID` in App Store Connect), but still rejects the `Assets.car` the Linux
+`actool` writes (error 90562; FINDINGS.md items 33 and 35).
 
 ## Real projects
 
-`install-toolchain.sh` also installs Linux stand-ins for Apple's `actool` and
-`xcstringstool` into the darwin SDK, so packages that declare `.xcassets` or
-`.xcstrings` resources build, and an OpenAppleMacros build with SwiftData
-(`@Model`, `@Query`, …) and Foundation (`#Predicate`, `#Expression`) macros.
-Large projects need more open files than a login shell allows: run
-`ulimit -n 65536` before `xtool dev build`.
+`install-toolchain.sh` also installs Linux stand-ins for Apple's `actool`,
+`xcstringstool` and `momc` into the darwin SDK, so packages that declare
+`.xcassets`, `.xcstrings` or Core Data resources build, and an OpenAppleMacros
+build with SwiftData (`@Model`, `@Query`, …), Foundation (`#Predicate`,
+`#Expression`) and `#Preview` macros. Large projects need more open files than
+a login shell allows: run `ulimit -n 65536` before `xtool dev build`.
 
-Known limits (FINDINGS.md items 24, 26): branch-pinned dependencies fail in
-xtool 1.20.1; asset types AssetKit lacks (Icon Composer `.icon`, alternate app
-icons, symbol sets, HEIC, dark and tinted icons) are left out with a warning.
-`compat/icecubes/setup.sh` reproduces the IceCubesApp run, which builds and
-passes `ship.sh`'s offline checks.
+Known limits: storyboards and xibs cannot be compiled (no `ibtool`), Icon
+Composer icons render flat, and alternate app icons, symbol sets and HEIC
+images are left out with a warning (FINDINGS.md items 24, 27, 29).
+`compat/icecubes/` and `compat/nnw/` reproduce IceCubesApp and NetNewsWire,
+which build with their app extensions and pass `ship.sh`'s offline checks;
+`compat/mastodon/` stops at the walls in FINDINGS.md item 36.
 
 For your own Xcode project, `tools/xcodeproj2xtool.py App.xcodeproj` writes an
 xtool adapter (`omarchy-xtool/`) next to it and prints a warning for each thing
