@@ -650,8 +650,11 @@ generator. It stops at three platform walls, in build order:
    --version ... failed to launch`). The generator leaves the 7 Interface
    Builder files out, so the build continues, but a UIKit app that loads them
    cannot run.
-2. **Grayscale colorsets crash the Linux `actool`**: `Key 'red' not found ...
-   components` for a `gray-gamma-22` color with `white`/`alpha` components.
+2. **Grayscale colorsets crashed the Linux `actool`** (fixed): `Key 'red' not
+   found ... components` for a `gray-gamma-22` color with `white`/`alpha`
+   components. AssetKit `8ddc2de` decodes all six Xcode color spaces and writes
+   them as actool 27.0 does: for one colorset per space (light and dark),
+   `assetutil --info` lists the same 12 entries, with bit-identical components.
 3. **Dynamic library products do not link.** With that colorset moved aside,
    every module compiles, but the app link fails: all 15 local packages declare
    `type: .dynamic` products, and the app sees `ld64.lld: error: undefined

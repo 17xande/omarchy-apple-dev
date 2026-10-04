@@ -6,9 +6,9 @@ let package = Package(
     name: "darwin-tools",
     platforms: [.macOS(.v13)],
     dependencies: [
-        // AssetKit 1.0.0 plus named-color fixes (actool's CSI layout, system colors; FINDINGS.md 24)
-        // and per-size icon renditions (Icon Index, MultiSized Image; FINDINGS.md 26).
-        .package(url: "https://github.com/joshuaswarren/AssetKit", revision: "0521ae7c9d991713c0e9f4ade9f555815345dc0b"),
+        // AssetKit 1.0.0 plus actool 27.0 parity fixes: named colors in every Xcode color space
+        // (FINDINGS.md 24, 27) and per-size icon renditions (Icon Index, MultiSized Image; FINDINGS.md 26).
+        .package(url: "https://github.com/joshuaswarren/AssetKit", revision: "8ddc2de19c7b04f94e75d81c8f75d057b69c77c2"),
         .package(url: "https://github.com/tayloraswift/swift-png", from: "4.5.0"),
     ],
     targets: [
