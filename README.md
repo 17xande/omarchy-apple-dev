@@ -186,9 +186,9 @@ With the key set, `ship.sh` registers the bundle id, creates an Apple
 Distribution certificate (the private key stays in
 `~/.config/omarchy-apple-dev/distribution/`) and an App Store profile, then
 uploads through the App Store Connect build-upload API and prints Apple's
-processing result. Apple accepts the Linux-built, Linux-signed app (build
-`VALID` in App Store Connect), but still rejects the `Assets.car` the Linux
-`actool` writes (error 90562; FINDINGS.md items 33 and 35).
+processing result. A build made this way, entirely on Linux, is `VALID` and
+App Store eligible in App Store Connect (FINDINGS.md item 38). `ship.sh` never
+submits a build for review.
 
 ## Real projects
 
@@ -229,7 +229,7 @@ it cannot map (FINDINGS.md item 27).
 
 ## Findings
 
-[FINDINGS.md](FINDINGS.md) records the thirty-seven findings behind the working
+[FINDINGS.md](FINDINGS.md) records the thirty-eight findings behind the working
 run: what broke and how each was fixed (SDK install failures, a clang version
 mismatch that breaks SwiftUI, the unstated prerequisites for debugging on
 iOS 17+), the Swift/Xcode version matrix (items 15-16), why a toolchain

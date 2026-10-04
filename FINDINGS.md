@@ -890,3 +890,19 @@ dynamic libraries of SwiftPM 6.4.2 need. With those and a 6.4.2 `swift-build`,
 Mastodon reaches its SiriKit intents: Xcode generates the intent classes
 from `.intentdefinition` files, and Linux has no intent compiler (`cannot find
 type 'FollowersCountIntent' in scope`).
+
+## TestFlight from Linux, 2026-10-04
+
+**38. A build made entirely on Linux is VALID in App Store Connect.** Build
+1.0.0 (202610042155) of the demo app: xtool binary, Linux `actool`
+`Assets.car`, `asc.py stamp` Info.plist keys, `rcodesign` signature with an
+API-created Apple Distribution certificate and App Store profile, and the
+build-upload API. `buildUpload ...: COMPLETE`, then `VALID`,
+`APP_STORE_ELIGIBLE`. The last 90562 rejection was a container bug: AssetKit's
+BOM writer declared 256 index entries and wrote only the used ones, so the
+file ended inside the index table. Apple's `assetutil` reads such a file; App
+Store processing does not. AssetKit 410cf2f writes the full index, and the
+Linux car now differs from an accepted hybrid only in content Apple accepts
+(item 37). The regression set passes with it: demo 36/36, iPad demo 37/37,
+IceCubesApp and NetNewsWire with their extensions 37/37. Nothing was submitted
+for review. Receipt: `receipts/2026-10-04-testflight-all-linux.md`.

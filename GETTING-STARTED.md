@@ -93,11 +93,8 @@ uploads the `.ipa` and prints Apple's processing result. When the result is
 `COMPLETE`, the build appears in TestFlight after Apple's processing. `ship.sh`
 never submits a build for review.
 
-Known gap (FINDINGS.md 35): App Store processing rejects the `Assets.car` that
-the Linux `actool` writes (`error 90562: Invalid Asset Catalog`). With an
-`Assets.car` from Apple's `actool`, the same Linux-built, Linux-signed app is
-accepted and marked `VALID`. Until this is fixed, an upload from Linux stops
-at that error.
+This path is proven: a demo app built, signed and uploaded this way on Linux
+is `VALID` in App Store Connect (FINDINGS.md item 38).
 
 ## If something fails
 
