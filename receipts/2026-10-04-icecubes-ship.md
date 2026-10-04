@@ -108,3 +108,24 @@ Icon Image phone Icon 180 3 1
 `OmarchyDemo` with `UIDeviceFamily` `[1, 2]`: `38/38 checks passed`. The iPhone-only demo:
 `35/35 checks passed`. `assetutil --info` on the universal demo's `Assets.car` lists pad
 152 px (Icon Index 2) and pad 167 px (Icon Index 3), and four MultiSized Image entries.
+
+## Fresh no-sudo user, swift.org tarball (FINDINGS 25 path)
+
+`try-user-only.sh` (root removes fuse3, recreates user `nosudo`) then
+`user-only-run.sh /opt/swift-6.4.0-RELEASE-ubi10.tar.gz /opt/xcode-sdk-src.tar ~/omarchy-apple-dev`.
+The resources app now also has a SwiftData `Models.swift` (`@Model`, `@Attribute(.unique)`,
+`@Relationship`, `#Predicate<Draft> { $0.content.count > 10 && $0.tags.isEmpty }`) and
+`UIDeviceFamily` `[1, 2]`:
+
+```
+install exit=0
+Building OpenAppleMacrosServer a517a2a60c05b69be4e28b3d51161b3cafaea589 (first run: about 5 minutes)
+=== template build (01:40:35)
+Build complete! (10.59 secs)
+=== resources + ship app (01:40:48)
+Build complete! (8.42 secs)
+xtool/UORes.app/UORes_UORes.bundle/Assets.car
+xtool/UORes.app/UORes_UORes.bundle/de.lproj/Localizable.strings
+stamped com.example.UORes 1.0.0 (202610040141), iphoneos27.0 24A430, Xcode 27.0 27A266a
+38/38 checks passed
+```
