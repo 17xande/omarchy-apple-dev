@@ -17,7 +17,8 @@ silent: CocoaPods, ObjC sources, run-script phases, Icon Composer .icon assets,
 unmapped build settings. App extensions (WidgetKit widgets, share, notification
 service, ...) embedded in the selected app target are emitted as extra SwiftPM
 targets/products plus `extensions:` entries in xtool.yml; their Info.plist
-build-setting placeholders are resolved into written copies.
+build-setting placeholders are resolved into written copies. Branch requirements
+remain as declared; Package.resolved revisions do not rewrite them.
 """
 
 import argparse
@@ -562,16 +563,7 @@ class Generator:
         if kind == "versionRange":
             return f"{sw_sy(req['minimumVersion'])}..<{sw_sy(req['maximumVersion'])}"
         if kind == "branch":
-            rev = revs.get(ident)
-            if rev:
-                self.warn(f"branch requirement for {url} emitted as revision {rev[:12]} "
-                          "(xtool 1.20.1 cannot build branch: requirements, FINDINGS 24.1)")
-                return f"revision: {sw_sy(rev)}"
-            self.warn(f"branch requirement for {url} kept as branch: {req.get('branch')!r}; "
-                      "xtool dev build fails on branch requirements - pin a revision from "
-                      f"{self.proj_path}/project.xcworkspace/xcshareddata/swiftpm/Package.resolved")
             return f"branch: {sw_sy(req.get('branch', ''))}"
-        if kind == "revision":
             return f"revision: {sw_sy(req.get('revision', ''))}"
         rev = revs.get(ident)
         if rev:
@@ -756,10 +748,6 @@ class Generator:
             for prod, pkg in prod_to_pkg.items():
                 if pkg in url_by_name and reqs[pkg]:
                     found[prod] = (url_by_name[pkg], reqs[pkg])
-            for m in re.finditer(r'branch:\s*"([^"]+)"', text):
-                self.warn(f"local package {rp!r} pins a dependency on branch {m.group(1)!r}; "
-                          "xtool 1.20.1 cannot build branch requirements - point it at a "
-                          "local checkout (see compat/icecubes/setup.sh)")
         return found
 
     # -- target file plan ---------------------------------------------------
@@ -1891,8 +1879,9 @@ def _self_test(root):
         ("tools-version", "// swift-tools-version: 6.2" in pkg),
         ("platform", '.iOS("16.4")' in pkg),
         ("upToNextMinor range", '"1.5.3"..<"1.6.0"' in pkg),
-        ("branch pinned to revision from Package.resolved",
-         '.package(url: "https://example.com/branchy.git", revision: "abc123def456")' in pkg),
+        ("branch requirement preserved",
+         '.package(url: "https://example.com/branchy.git", branch: "main")' in pkg),
+        ("branch requirement has no warning", "cannot build branch" not in warnings_text),
         ("library product", '.library(name: "DemoApp", targets: ["DemoApp"])' in pkg),
         ("product dep", '.product(name: "Logging", package: "swift-log")' in pkg),
         ("swift mode v5", ".swiftLanguageMode(.v5)" in pkg),
