@@ -751,3 +751,30 @@ generation`), and SwiftPM reports `Swift package product 'SwiftSoup-product'
 is linked as a static library by 'Mastodon-App-product' and
 'MastodonSDKDynamic-product'` (probably a real second path through MastoParse;
 unverified).
+
+## Extensions ship, 2026-10-04
+
+**31. IceCubesApp and NetNewsWire ship with all their app extensions, from
+generated adapters: 39 of 39 checks each.** Two more fixes made it:
+
+1. **Extension dylibs.** xtool copied each extension's dynamic libraries into
+   `PlugIns/<ext>.appex/Frameworks/`, which App Store processing rejects
+   (ITMS-90206, item 30). xtool-org/xtool#295 keeps them in the app's
+   `Frameworks/` and links extensions with Xcode 27's runpaths
+   (`@executable_path/../../Frameworks`, `@executable_path/Frameworks`). The
+   installer pins `joshuaswarren/xtool@3cbf66b`.
+2. **Widget previews.** IceCubes' WidgetKit extension uses `#Preview(as:
+   .systemSmall) { ... } timeline: { ... }`, which expands through
+   `PreviewsMacros.Common`; OpenAppleMacros had no such macro. The fork
+   (`omarchy/previews-common`, cb003a1) adds it and the SwiftUI and UIKit
+   `#Preview` forms, with expansions checked against Xcode 27 (124 of 124
+   tests).
+
+With the fixed xtool, `branch:` dependencies resolve, nested ones included,
+so the workarounds are gone: `compat/icecubes/setup.sh` is now a clone plus
+one generator run (its hand-written `Package.swift` is deleted), and the
+generator emits branch requirements as written. In a clean run, IceCubesApp
+builds its app and 4 extensions (action, widgets, notifications, share) and
+NetNewsWire its app, widget and share extensions with 15 dylibs. Both `.ipa`
+files pass the offline checks, and Apple's `codesign --verify --deep
+--strict` reports `valid on disk` for both.

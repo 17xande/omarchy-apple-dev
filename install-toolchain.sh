@@ -73,11 +73,12 @@ install_xtool() {
 }
 
 # xtool's SDK ships OpenAppleMacros v1.3.0 as the Darwin macro plugin server; it has no
-# SwiftData macros, and the toolchain's own FoundationMacros emit `FoundationEssentials.`
-# (#Predicate fails). Build the fork that adds both and register its modules with empty
-# plugin stubs, which outrank the toolchain plugins. FINDINGS.md 26.
+# SwiftData macros, no widget #Preview (PreviewsMacros.Common), and the toolchain's own
+# FoundationMacros emit `FoundationEssentials.` (#Predicate fails). Build the fork that adds
+# them and register its modules with empty plugin stubs, which outrank the toolchain plugins.
+# FINDINGS.md 26, 31.
 OAM_REPO=https://github.com/joshuaswarren/OpenAppleMacros
-OAM_SHA=a517a2a60c05b69be4e28b3d51161b3cafaea589
+OAM_SHA=cb003a1763b08947dd37376ed8240cbfb4745c32
 install_oam() {
   local src="$HOME/.cache/omarchy-apple-dev/oam-$OAM_SHA"
   local plugins="$DARWIN_SDK_BUNDLE/Developer/Platforms/iPhoneOS.platform/Developer/usr/lib/swift/host/plugins"
