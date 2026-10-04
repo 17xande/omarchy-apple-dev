@@ -865,3 +865,28 @@ next wall is Mastodon's own pin: Nuke 10.11.2 fails with Swift 6.4
 'Result<(data: Data, response: URLResponse?), ImagePipeline.Error>'`). The
 installer will pick up the SwiftPM fix with the first 6.4.2 toolchain; no
 workaround is shipped.
+
+## Asset catalog: bisecting Apple's rejection, 2026-10-04
+
+**37. Apple accepts our icon pixels, our name identifier and our identity
+strings one at a time; the all-Linux `Assets.car` is still rejected.** The
+Linux `actool` now writes a single-size app icon the way `actool` 27.0 does:
+2 renditions (the 1024 icon image and one MultiSized entry), Apple's BOM block
+order and sizes, the single-size BITMAPKEYS descriptor, Apple's loose icon
+PNGs (`AppIcon60x60@2x.png`, `AppIcon76x76@2x~ipad.png`) and Apple's partial
+Info.plist shape. Apple's `assetutil --info` lists the same two entries for
+both cars. Three hybrid uploads each changed Apple's own car in one way:
+our LZFSE pixel payload, our NameIdentifier (5444 instead of 6849), and our
+identity strings ("omarchy-apple-dev actool (AssetKit)"). All three builds are
+`VALID`. The all-Linux car is still `INVALID` with error 90562 (uploads at
+20:42Z and 21:14Z); the next step tests the combination of the three.
+
+The generator now maps `SWIFT_ENABLE_BARE_SLASH_REGEX` (Xcode's default for
+iOS 16 and later) for Swift 5 targets, excludes storyboards and xibs on every
+resource path with one warning, and warns when the launch or main storyboard
+is among them. The installer turns off text-based stub generation in the SDK
+(`GENERATE_TEXT_BASED_STUBS=NO`; Linux has no `tapi`), which the promoted
+dynamic libraries of SwiftPM 6.4.2 need. With those and a 6.4.2 `swift-build`,
+Mastodon reaches its SiriKit intents: Xcode generates the intent classes
+from `.intentdefinition` files, and Linux has no intent compiler (`cannot find
+type 'FollowersCountIntent' in scope`).

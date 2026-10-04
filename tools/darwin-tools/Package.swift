@@ -7,8 +7,9 @@ let package = Package(
     platforms: [.macOS(.v13)],
     dependencies: [
         // AssetKit 1.0.0 plus actool 27.0 parity fixes: named colors in every Xcode color space
-        // (FINDINGS.md 24, 27) and per-size icon renditions (Icon Index, MultiSized Image; FINDINGS.md 26).
-        .package(url: "https://github.com/joshuaswarren/AssetKit", revision: "55efa5da613f30730540ad948a95def9794ded91"),
+        // (FINDINGS.md 24, 27), per-size icon renditions (26), and actool's BOM layout and
+        // single-size icon form (37).
+        .package(url: "https://github.com/joshuaswarren/AssetKit", revision: "5d97a01d65b7fd4549ad7d2e1080eddc73f7fbee"),
         .package(url: "https://github.com/tayloraswift/swift-png", from: "4.5.0"),
     ],
     targets: [

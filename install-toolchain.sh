@@ -125,6 +125,19 @@ data.setdefault("linker", {})["extraCLIOptions"] = ["-lswiftCore", "-L/usr/lib/s
 with open(toolset + ".tmp", "w") as f:
     json.dump(data, f, indent=4)
 os.replace(toolset + ".tmp", toolset)
+# Linux has no `tapi`, so swift-build cannot generate eager-linking stubs for
+# promoted dylibs; its non-Darwin platforms hardcode the same DefaultProperties.
+sdks = os.path.join(bundle, "Developer/Platforms/iPhoneOS.platform/Developer/SDKs")
+for sdk in sorted(os.listdir(sdks)) if os.path.isdir(sdks) else []:
+    p = os.path.join(sdks, sdk, "SDKSettings.plist")
+    d = plistlib.load(open(p, "rb")) if os.path.isfile(p) else {"DefaultProperties": {}}
+    dp = d.setdefault("DefaultProperties", {})
+    if dp.get("GENERATE_INTERMEDIATE_TEXT_BASED_STUBS") == "NO":
+        continue
+    dp["GENERATE_INTERMEDIATE_TEXT_BASED_STUBS"] = "NO"
+    dp["GENERATE_TEXT_BASED_STUBS"] = "NO"
+    plistlib.dump(d, open(p + ".tmp", "wb"))
+    os.replace(p + ".tmp", p)
 PY
   echo "Installed actool, xcstringstool, momc and ibtool (version probe only) into $bin"
 }

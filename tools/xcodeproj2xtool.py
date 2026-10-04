@@ -885,10 +885,10 @@ class Generator:
             self.warn(f"{len(objc)} ObjC/C source files are not supported and were "
                       f"excluded, e.g. {objc[0]}")
 
+        ib_excluded = []
         for ref_id, p in res_files:
             if os.path.splitext(p)[1].lower() in IB_EXTS:
-                self.warn(f"{p!r} excluded - Linux has no ibtool to compile "
-                          "Interface Builder sources")
+                ib_excluded.append(p)
                 continue
             if p.endswith(".icon"):
                 # The app target's primary .icon is symlinked into the
@@ -905,7 +905,18 @@ class Generator:
                     os.path.splitext(p)[1].lower() in PROCESSABLE
                     or (os.path.isdir(pj) and dir_resource_kind(pj) == ".process")
                 ) else ".copy"
-                resources.append((kind, p))
+                # The src_anc symlink created above exposes this subtree to
+                # SwiftPM at target-relative basename(src_anc)/...; emit the
+                # resource in that space so the path always resolves. Emitting
+                # p verbatim only works when basename(src_anc) happens to be
+                # p's first component (project-root-named groups) and silently
+                # breaks otherwise (Mastodon's
+                # "Mastodon/Supporting Files/Settings.bundle" never existed in
+                # the adapter, so packaging died at CpResource).
+                rel = os.path.relpath(p, src_anc)
+                rp = os.path.basename(src_anc) if rel == "." \
+                    else os.path.join(os.path.basename(src_anc), rel)
+                resources.append((kind, rp))
                 continue
             ext = os.path.splitext(p)[1].lower()
             if ext in PROCESSABLE:
@@ -916,12 +927,53 @@ class Generator:
                 symlinks.append((os.path.join(target_dir, p), p))
             else:
                 self.mirror_file(p, target_dir, symlinks)
+        if ib_excluded:
+            # Exclude the same farm path SwiftPM's resource scan sees, so an
+            # auto-included storyboard never reaches ibtool (Mastodon's
+            # LaunchScreen/Main storyboards did exactly that through the
+            # "Supporting Files" link). Under src_anc the visible spelling is
+            # basename(src_anc)/...; elsewhere the file is only reachable at
+            # its emitted path, if at all.
+            for p in ib_excluded:
+                if src_anc and (p == src_anc or p.startswith(src_anc + "/")):
+                    rel = os.path.relpath(p, src_anc)
+                    excludes.append(os.path.basename(src_anc) if rel == "."
+                                    else os.path.join(os.path.basename(src_anc), rel))
+                else:
+                    excludes.append(p)
+            self.warn(f"{len(ib_excluded)} Interface Builder resource(s) excluded "
+                      "- Linux has no ibtool to compile them: "
+                      + ", ".join(ib_excluded))
+            missing_ui = self.excluded_storyboard_in_plist(ib_excluded, infoplist_rel)
+            if missing_ui:
+                self.warn(f"Info.plist references excluded storyboard {missing_ui!r}; "
+                          "the launch/main UI will be missing from the bundle")
         intents = [p for _k, p in resources if p.endswith(".intentdefinition")]
         if intents:
             self.warn(f"{len(intents)} .intentdefinition file(s) copied uncompiled "
                       "(Xcode compiles them and generates intent classes; Linux has "
                       "no intent compiler), e.g. " + intents[0])
         return symlinks, sorted(set(excludes)), resources, swift_rels
+
+    def excluded_storyboard_in_plist(self, ib_excluded, infoplist_rel):
+        """Name an excluded storyboard the Info.plist references, if any."""
+        if not infoplist_rel:
+            return None
+        path = os.path.join(self.proj_dir, infoplist_rel)
+        if not os.path.isfile(path):
+            return None
+        try:
+            with open(path, "rb") as f:
+                pl = plistlib.load(f)
+        except Exception:
+            return None
+        names = {os.path.splitext(pl[k])[0] for k in
+                 ("UILaunchStoryboardName", "UIMainStoryboardFile",
+                  "NSMainStoryboardFile") if pl.get(k)}
+        for p in ib_excluded:
+            if os.path.splitext(os.path.basename(p))[0] in names:
+                return os.path.basename(p)
+        return None
 
     def non_member_excludes(self, anc, members, keep=()):
         """Paths under ancestor `anc` that are neither on a member's path nor kept
@@ -1140,6 +1192,18 @@ class Generator:
                         upcoming.append(feat)
         for feat in upcoming:
             out.append(f'.enableUpcomingFeature({sw_sy(feat)})')
+        # Xcode resolves SWIFT_ENABLE_BARE_SLASH_REGEX to YES for iOS 16+
+        # deployment targets when the setting is unset; below language mode 6 a
+        # /regex/ literal is a parse error without the feature (Mastodon's
+        # GenericMastodonPost+Subclasses.swift).
+        bare = self.setting(layers, "SWIFT_ENABLE_BARE_SLASH_REGEX")
+        if bare not in ("YES", "NO"):
+            dt = self.setting(layers, "IPHONEOS_DEPLOYMENT_TARGET")
+            m = re.match(r"(\d+)(?:\.(\d+))?", self.expand(dt, layers)) if dt else None
+            bare = "YES" if m and (int(m.group(1)), int(m.group(2) or 0)) >= (16, 0) else "NO"
+        if bare == "YES" and mode != ".v6" and "BareSlashRegexLiterals" not in upcoming:
+            upcoming.insert(0, "BareSlashRegexLiterals")
+            out.insert(1, '.enableUpcomingFeature("BareSlashRegexLiterals")')
         cond = self.setting(layers, "SWIFT_ACTIVE_COMPILATION_CONDITIONS")
         if cond:
             for d in re.sub(r"\$\([^)]*\)", "", cond).replace(",", " ").split():
@@ -1792,6 +1856,7 @@ def self_test():
     root = tempfile.mkdtemp(prefix="xcodeproj2xtool-test-")
     try:
         _self_test(root)
+        _self_test_collision(root)
     except BaseException:
         # weakref.finalize would delete a TemporaryDirectory at exit even when
         # referenced, so keep the dir by simply not removing it
@@ -1888,6 +1953,7 @@ def _self_test(root):
         ("defaultIsolation", ".defaultIsolation(MainActor.self)" in pkg),
         ("approachable concurrency as features", ".enableUpcomingFeature(\"NonisolatedNonsendingByDefault\")" in pkg),
         ("upcoming feature", '.enableUpcomingFeature("CONCISE_MAGIC_FILE")' in pkg),
+        ("bare slash regex feature", '.enableUpcomingFeature("BareSlashRegexLiterals")' in pkg),
         ("source ancestor symlink", 'exclude' in pkg and '"src/Unused.swift"' in pkg),
         ("resource process", '.process("src/Assets.xcassets")' in pkg),
         ("bundleID expanded from xcconfig", "bundleID: net.example.demo" in yml),
@@ -1958,6 +2024,218 @@ def _self_test(root):
         print(open(os.path.join(out, "Package.swift")).read())
         raise SystemExit(f"self-test FAILED: {', '.join(failed)}")
     print(f"self-test passed ({len(checks)} checks)")
+
+
+COLLISION_PROJ = r"""// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	objectVersion = 54;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		CCCC00000000000000000A01 /* BundleObj.swift in Sources */ = {isa = PBXBuildFile; fileRef = CCCC00000000000000000B01 /* BundleObj.swift */; };
+		CCCC00000000000000000A02 /* BUNDLE.bundle in Resources */ = {isa = PBXBuildFile; fileRef = CCCC00000000000000000B02 /* BUNDLE.bundle */; };
+		CCCC00000000000000000A03 /* Main.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = CCCC00000000000000000B03 /* Main.storyboard */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		CCCC00000000000000000B01 /* BundleObj.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = BundleObj.swift; sourceTree = "<group>"; };
+		CCCC00000000000000000B02 /* BUNDLE.bundle */ = {isa = PBXFileReference; lastKnownFileType = wrapper.cfbundle; path = BUNDLE.bundle; sourceTree = "<group>"; };
+		CCCC00000000000000000B03 /* Main.storyboard */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = file.storyboard; path = Main.storyboard; sourceTree = "<group>"; };
+		CCCC00000000000000000B04 /* App-Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = App-Info.plist; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXGroup section */
+		CCCC00000000000000000C01 /* main */ = {
+			isa = PBXGroup;
+			children = (
+				CCCC00000000000000000C02 /* support */,
+			);
+			sourceTree = "<group>";
+		};
+		CCCC00000000000000000C02 /* support */ = {
+			isa = PBXGroup;
+			children = (
+				CCCC00000000000000000C03 /* Extra */,
+			);
+			path = support;
+			sourceTree = "<group>";
+		};
+		CCCC00000000000000000C03 /* Extra */ = {
+			isa = PBXGroup;
+			children = (
+				CCCC00000000000000000B01 /* BundleObj.swift */,
+				CCCC00000000000000000B02 /* BUNDLE.bundle */,
+				CCCC00000000000000000C04 /* Base.lproj */,
+				CCCC00000000000000000B04 /* App-Info.plist */,
+			);
+			path = Extra;
+			sourceTree = "<group>";
+		};
+		CCCC00000000000000000C04 /* Base.lproj */ = {
+			isa = PBXGroup;
+			children = (
+				CCCC00000000000000000B03 /* Main.storyboard */,
+			);
+			path = Base.lproj;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		CCCC00000000000000000D01 /* CollApp */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = CCCC00000000000000000E01;
+			buildPhases = (
+				CCCC00000000000000000D02 /* Sources */,
+				CCCC00000000000000000D03 /* Frameworks */,
+				CCCC00000000000000000D04 /* Resources */,
+			);
+			dependencies = ();
+			name = CollApp;
+			productName = CollApp;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		CCCC00000000000000000E02 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+			};
+			buildConfigurationList = CCCC00000000000000000E03;
+			developmentRegion = en;
+			mainGroup = CCCC00000000000000000C01;
+			targets = (
+				CCCC00000000000000000D01 /* CollApp */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		CCCC00000000000000000D04 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			files = (
+				CCCC00000000000000000A02 /* BUNDLE.bundle in Resources */,
+				CCCC00000000000000000A03 /* Main.storyboard in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		CCCC00000000000000000D02 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			files = (
+				CCCC00000000000000000A01 /* BundleObj.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		CCCC00000000000000000E04 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = "support/Extra/App-Info.plist";
+				IPHONEOS_DEPLOYMENT_TARGET = 16.4;
+				PRODUCT_BUNDLE_IDENTIFIER = net.example.collision;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		CCCC00000000000000000E01 = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				CCCC00000000000000000E04 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		CCCC00000000000000000E03 = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				CCCC00000000000000000E04 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = CCCC00000000000000000E02 /* Project object */;
+}
+"""
+
+
+def _self_test_collision(root):
+    """Reproduce the Mastodon collision: a classic subtree whose group path
+    spans several components ("support/Extra"), so basename(src_anc) ("Extra")
+    is NOT the first component of the emitted project-relative resource path
+    ("support/Extra/BUNDLE.bundle"). The src_anc symlink exposes the subtree at
+    target-relative "Extra/..." — every emitted resource must resolve through
+    it, directory resources included, and auto-scanned storyboards must be
+    excluded with one naming warning."""
+    proj = os.path.join(root, "CollApp.xcodeproj")
+    os.makedirs(proj)
+    extra = os.path.join(root, "support", "Extra")
+    os.makedirs(os.path.join(extra, "BUNDLE.bundle"))
+    os.makedirs(os.path.join(extra, "Base.lproj"))
+    with open(os.path.join(extra, "BundleObj.swift"), "w") as f:
+        f.write("let coll = 1\n")
+    with open(os.path.join(extra, "BUNDLE.bundle", "Localizable.strings"), "w") as f:
+        f.write('"k" = "v";\n')
+    with open(os.path.join(extra, "Base.lproj", "Main.storyboard"), "w") as f:
+        f.write("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n")
+    with open(os.path.join(extra, "App-Info.plist"), "wb") as f:
+        plistlib.dump({"CFBundleDisplayName": "Coll",
+                       "UILaunchStoryboardName": "Main"}, f)
+    with open(os.path.join(proj, "project.pbxproj"), "w") as f:
+        f.write(COLLISION_PROJ)
+
+    out = os.path.join(root, "gen-coll")
+    gen = Generator(proj, out_dir=out)
+    import io as _io
+    err_buf = _io.StringIO()
+    saved, sys.stderr = sys.stderr, err_buf
+    try:
+        gen.run()
+    finally:
+        sys.stderr = saved
+    warnings_text = err_buf.getvalue()
+    pkg = open(os.path.join(out, "Package.swift")).read()
+
+    # Every emitted resource path must exist under Sources/CollApp: this is
+    # the assertion the pre-fix generator failed ("support/Extra/BUNDLE.bundle"
+    # was emitted but never materialized, so packaging died at CpResource).
+    app_id = next(k for k, v in gen.objs.items()
+                  if isinstance(v, dict) and v.get("name") == "CollApp")
+    sym, exc, res, swift = gen.plan_target_files(app_id, gen.objs[app_id])
+    checks = [
+        ("bundle resource emitted anc-relative",
+         '.process("Extra/BUNDLE.bundle")' in pkg),
+        ("old project-relative path gone",
+         "support/Extra/BUNDLE.bundle" not in pkg),
+        ("storyboard excluded farm-relative",
+         '"Extra/Base.lproj/Main.storyboard"' in pkg),
+        ("one IB warning naming the file",
+         "1 Interface Builder resource(s) excluded" in warnings_text
+         and "support/Extra/Base.lproj/Main.storyboard" in warnings_text),
+        ("Info.plist launch storyboard warning",
+         "Info.plist references excluded storyboard 'Main.storyboard'"
+         in warnings_text),
+    ] + [("resource resolves: " + rp, ok) for (kind, rp), ok in
+         [(r, os.path.exists(os.path.join(out, "Sources", "CollApp", r[1])))
+          for r in res]]
+    failed = [n for n, ok in checks if not ok]
+    if failed:
+        print(pkg)
+        raise SystemExit("collision self-test FAILED: " + "; ".join(failed))
+    print("collision self-test passed "
+          f"({len(checks)} checks, {len(res)} resources, {len(exc)} excludes)")
 
 
 def main():
