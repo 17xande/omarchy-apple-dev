@@ -778,3 +778,41 @@ builds its app and 4 extensions (action, widgets, notifications, share) and
 NetNewsWire its app, widget and share extensions with 15 dylibs. Both `.ipa`
 files pass the offline checks, and Apple's `codesign --verify --deep
 --strict` reports `valid on disk` for both.
+
+## Core Data, 2026-10-04
+
+**32. `tools/momc` compiles Core Data models on Linux.** SwiftBuild runs
+Apple's `momc` twice: `momc --dry-run --action generate` lists the Swift files
+code generation will write (an unparsable answer is the error `Could not
+determine generated file paths for Core Data code generation`), then it
+compiles the model into the resource bundle. The Python stand-in does both:
+`.xcdatamodeld` to `.momd` (one `.mom` per version plus `VersionInfo.plist`),
+`.xcdatamodel` to `.mom`, as NSKeyedArchiver archives in momc 27's layout, and
+Swift code generation for `class` and `category` entities with Xcode 27's
+text. Checked on a Mac against Apple's `momc` with `NSManagedObjectModel`:
+Mastodon's 10-version model loads with 0 differences in every entity,
+attribute, relationship, constraint, index and version hash (for example
+v10: 385 checks, 0 differences, the same `versionChecksum`), and a SQLite
+store written with Apple's model opens with ours, no migration. Mastodon now
+gets past Core Data and stops at the duplicate-library check: `SwiftSoup` is
+linked statically into both the app (through MastoParse, an app dependency)
+and the `MastodonSDKDynamic` dylib. Xcode allows that; SwiftPM does not.
+
+## First App Store upload, 2026-10-04
+
+**33. App Store Connect accepts the upload from Linux and then validates it;
+two Apple checks failed.** With a real API key (team Creatuity Corp.), `ship.sh
+--upload` created an Apple Distribution certificate and an App Store profile,
+signed the demo app, passed the offline checks and uploaded it through the
+build-upload API (no Transporter, no Mac). Apple's processing then returned:
+
+1. `error 90725: SDK version issue. This app was built with the iOS 17.0 SDK`.
+   The Linux link writes the deployment target into the Mach-O
+   `LC_BUILD_VERSION` sdk field. `asc.py stamp` now writes the SDK actually
+   used (27.0) into every Mach-O in the bundle, and the validator checks it.
+   The next upload passed this check.
+2. `error 90562: Invalid Bundle. Invalid Asset Catalog. One of the files named
+   Assets.car is not a valid Asset Catalog file`. Apple's `assetutil` reads the
+   AssetKit-built `Assets.car`, but App Store processing rejects it. Open.
+
+Nothing was submitted for review.

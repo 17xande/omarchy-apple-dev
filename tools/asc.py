@@ -111,8 +111,35 @@ def stamp(app_dir, build_number):
     })
     with info_path.open("wb") as f:
         plistlib.dump(info, f, fmt=plistlib.FMT_BINARY)
+    # The Linux link writes the deployment target into LC_BUILD_VERSION's sdk field; App Store
+    # processing reads the SDK version from there (ITMS-90725). Record the SDK actually used.
+    sdk_raw = sum(int(p) << s for p, s in zip((settings["Version"].split(".") + ["0", "0"])[:3], (16, 8, 0)))
+    patched = 0
+    for path in Path(app_dir).rglob("*"):
+        if path.is_file() and not path.is_symlink() and set_macho_sdk(path, sdk_raw):
+            patched += 1
     print(f"stamped {info['CFBundleIdentifier']} {info['CFBundleShortVersionString']} ({build_number}), "
-          f"{settings['CanonicalName']} {sdk_build}, Xcode {xcode_version} {xcode_build}")
+          f"{settings['CanonicalName']} {sdk_build}, Xcode {xcode_version} {xcode_build}, "
+          f"Mach-O sdk {settings['Version']} in {patched} file(s)")
+
+
+def set_macho_sdk(path, sdk_raw):
+    """Set the sdk version of every iOS LC_BUILD_VERSION in a thin 64-bit Mach-O. True if changed."""
+    with path.open("rb") as f:
+        if f.read(4) != b"\xcf\xfa\xed\xfe":
+            return False
+    data = bytearray(path.read_bytes())
+    ncmds = struct.unpack_from("<I", data, 16)[0]
+    off, changed = 32, False
+    for _ in range(ncmds):
+        cmd, size = struct.unpack_from("<2I", data, off)
+        if cmd == 0x32 and struct.unpack_from("<I", data, off + 8)[0] == 2:
+            struct.pack_into("<I", data, off + 16, sdk_raw)
+            changed = True
+        off += size
+    if changed:
+        path.write_bytes(data)
+    return changed
 
 
 # -- identity ----------------------------------------------------------------
@@ -273,22 +300,24 @@ IPAD_ORIENTATIONS = {
 
 
 def macho(path):
-    """(cputype, filetype, flags, minos tuple or None, has code signature) of a thin 64-bit Mach-O."""
+    """(cputype, filetype, flags, minos, sdk, has code signature) of a thin 64-bit Mach-O;
+    minos and sdk are version tuples or None."""
     data = Path(path).read_bytes()
     magic, cputype, _, filetype, ncmds, _, flags, _ = struct.unpack_from("<8I", data, 0)
     if magic != 0xFEEDFACF:
         return None
-    off, minos, signed = 32, None, False
+    off, minos, sdk, signed = 32, None, None, False
     for _ in range(ncmds):
         cmd, size = struct.unpack_from("<2I", data, off)
         if cmd == 0x32:  # LC_BUILD_VERSION
-            platform, raw = struct.unpack_from("<2I", data, off + 8)
+            platform, raw_min, raw_sdk = struct.unpack_from("<3I", data, off + 8)
             if platform == 2:  # PLATFORM_IOS
-                minos = (raw >> 16, (raw >> 8) & 0xFF, raw & 0xFF)
+                minos = (raw_min >> 16, (raw_min >> 8) & 0xFF, raw_min & 0xFF)
+                sdk = (raw_sdk >> 16, (raw_sdk >> 8) & 0xFF, raw_sdk & 0xFF)
         elif cmd == 0x1D:  # LC_CODE_SIGNATURE
             signed = True
         off += size
-    return cputype, filetype, flags, minos, signed
+    return cputype, filetype, flags, minos, sdk, signed
 
 
 def car_renditions(path):
@@ -367,12 +396,13 @@ def validate(ipa):
         exe = app / info.get("CFBundleExecutable", "")
         header = macho(exe) if exe.is_file() else None
         if check(header is not None, f"executable {exe.name} is a thin 64-bit Mach-O"):
-            cputype, filetype, mh_flags, minos, signed = header
+            cputype, filetype, mh_flags, minos, sdk, signed = header
             check(cputype == 0x0100000C and filetype == 2, "arm64 MH_EXECUTE")
             check(bool(mh_flags & 0x200000), "position independent (MH_PIE)")
             plist_min = version_tuple(info.get("MinimumOSVersion", "0"))
             check(minos is not None and minos <= plist_min,
                   f"LC_BUILD_VERSION iOS minos {minos} <= MinimumOSVersion {info.get('MinimumOSVersion')}")
+            check(sdk is not None and sdk >= (26, 0, 0), f"LC_BUILD_VERSION sdk {sdk} is iOS 26 or later (ITMS-90725)")
             check(signed, "LC_CODE_SIGNATURE present")
 
         car = app / "Assets.car"
