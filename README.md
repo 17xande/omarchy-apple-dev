@@ -199,6 +199,10 @@ icons, symbol sets, HEIC, dark and tinted icons) are left out with a warning.
 `compat/icecubes/setup.sh` reproduces the IceCubesApp run, which builds and
 passes `ship.sh`'s offline checks.
 
+For your own Xcode project, `tools/xcodeproj2xtool.py App.xcodeproj` writes an
+xtool adapter (`omarchy-xtool/`) next to it and prints a warning for each thing
+it cannot map (FINDINGS.md item 27).
+
 ## Scripts
 
 - `install-toolchain.sh`: everything up to and including the SDK install;
@@ -213,18 +217,20 @@ passes `ship.sh`'s offline checks.
   Helpers: `tools/asc.py` (stamp, identity, validate, upload) and
   `tools/darwin-tools` (the Linux `actool`, on AssetKit) and
   `tools/xcstringstool` (String Catalogs).
+- `tools/xcodeproj2xtool.py`: an xtool adapter for an Xcode project's iOS app
+  target (`--self-test` checks it).
 
 ## Findings
 
-[FINDINGS.md](FINDINGS.md) records the twenty-six findings behind the working
+[FINDINGS.md](FINDINGS.md) records the twenty-seven findings behind the working
 run: what broke and how each was fixed (SDK install failures, a clang version
 mismatch that breaks SwiftUI, the unstated prerequisites for debugging on
 iOS 17+), the Swift/Xcode version matrix (items 15-16), why a toolchain
 swap breaks SDK registration and how `--repair` restores it (item 19),
 the mise/ncurses soname story (items 20-21), the move to xtool 1.20 +
 Swift 6.4 + Xcode 27 (item 22), the App Store path (item 23), the
-IceCubesApp compatibility run (items 24 and 26), and the no-sudo install
-(item 25).
+IceCubesApp compatibility run (items 24 and 26), the no-sudo install
+(item 25), and the `.xcodeproj` adapter generator (item 27).
 
 ## Notes
 

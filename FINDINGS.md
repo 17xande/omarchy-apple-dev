@@ -617,3 +617,42 @@ solid image stacks, HEIC images, dark and tinted icons (all skipped with a
 warning), and App Intents metadata (Apple's `appintentsmetadataprocessor`
 is macOS-only).
 Receipt: `receipts/2026-10-04-icecubes-ship.md`.
+
+## From .xcodeproj to xtool, 2026-10-04
+
+**27. `tools/xcodeproj2xtool.py` turns an Xcode project into an xtool adapter;
+the generated IceCubesApp adapter builds and passes 38 of 38 checks.** xtool
+builds SwiftPM packages, so a normal `.xcodeproj` app needs an adapter: a
+`Package.swift` for the app target, `xtool.yml`, and symlinks to the target's
+folders. The generator (Python stdlib) reads `project.pbxproj` and the target's
+xcconfig files, and maps synchronized folder groups with their membership
+exceptions, classic groups with the Sources and Resources phases, remote and
+local package references, the deployment target, bundle id, Info.plist (or one
+built from `INFOPLIST_KEY_*`), Swift language mode, default actor isolation
+and upcoming features. A `branch:` requirement becomes the `revision:` from the
+project's `Package.resolved` (item 24.1). Xcode lets a target import modules
+that reach it only through other packages; SwiftPM does not, so the generator
+scans the target's imports and adds those packages. Anything it cannot map
+(extensions, Objective-C, storyboards, run scripts, `.icon`) prints one
+`warning:` line. `--self-test` runs 18 checks on a synthetic classic-group
+project.
+
+IceCubesApp: the generated adapter has the same packages, exclusions and
+resources as the hand-written one (`xtool dev build` → `Build complete!`;
+`APP_ICON=Icon ship.sh` → `38/38 checks passed`).
+
+Second project, NetNewsWire (Ranchero-Software/NetNewsWire @ 8c322c2, 10k
+stars, SPM only): `compat/nnw/setup.sh` runs its prebuild script, replaces one
+Objective-C file with Swift, adds two missing `import UIKit` lines, and runs the
+generator. It stops at three platform walls, in build order:
+
+1. **No `ibtool`.** xtool probes for it for storyboards and xibs (`ibtool
+   --version ... failed to launch`). The generator leaves the 7 Interface
+   Builder files out, so the build continues, but a UIKit app that loads them
+   cannot run.
+2. **Grayscale colorsets crash the Linux `actool`**: `Key 'red' not found ...
+   components` for a `gray-gamma-22` color with `white`/`alpha` components.
+3. **Dynamic library products do not link.** With that colorset moved aside,
+   every module compiles, but the app link fails: all 15 local packages declare
+   `type: .dynamic` products, and the app sees `ld64.lld: error: undefined
+   symbol: $s2os6LoggerV6RSCoreE12nnwSubsystemSSvau` and 19 more.
