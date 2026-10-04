@@ -38,6 +38,28 @@ sdk_install_from() {
 REPO_DIR=$(dirname "$(readlink -f "$0")")
 DARWIN_SDK_BUNDLE="$HOME/.swiftpm/swift-sdks/darwin.artifactbundle"
 
+# xtool's SDK ships OpenAppleMacros v1.3.0 as the Darwin macro plugin server; it has no
+# SwiftData macros, and the toolchain's own FoundationMacros emit `FoundationEssentials.`
+# (#Predicate fails). Build the fork that adds both and register its modules with empty
+# plugin stubs, which outrank the toolchain plugins. FINDINGS.md 26.
+OAM_REPO=https://github.com/joshuaswarren/OpenAppleMacros
+OAM_SHA=a517a2a60c05b69be4e28b3d51161b3cafaea589
+install_oam() {
+  local src="$HOME/.cache/omarchy-apple-dev/oam-$OAM_SHA"
+  local plugins="$DARWIN_SDK_BUNDLE/Developer/Platforms/iPhoneOS.platform/Developer/usr/lib/swift/host/plugins"
+  if [ ! -d "$src/.git" ]; then
+    git init -q "$src"
+    git -C "$src" fetch -q --depth 1 "$OAM_REPO" "$OAM_SHA"
+    git -C "$src" checkout -q FETCH_HEAD
+  fi
+  echo "Building OpenAppleMacrosServer $OAM_SHA (first run: about 5 minutes)"
+  (cd "$src" && swift build -c release --build-system native --static-swift-stdlib \
+    --product OpenAppleMacrosServer >/dev/null)
+  install -m755 "$src/.build/release/OpenAppleMacrosServer" "$DARWIN_SDK_BUNDLE/OpenAppleMacrosServer"
+  : > "$plugins/libSwiftDataMacros.so"
+  : > "$plugins/libFoundationMacros.so"
+}
+
 # SwiftBuild (xtool 1.20 on Swift 6.4) runs actool for .xcassets and xcstringstool
 # for .xcstrings package resources, and looks for both in the iPhoneOS platform's
 # Developer/usr/bin. Install the Linux stand-ins there, give .strings copies an
@@ -235,6 +257,7 @@ if [ "${1:-}" = "--repair" ]; then
   fi
   swift sdk list   # must print: darwin
   install_darwin_tools
+  install_oam
   survive_status "$cached"
   exit 0
 fi
@@ -366,6 +389,7 @@ else
 fi
 swift sdk list   # must print: darwin
 install_darwin_tools
+install_oam
 
 # If an app that failed against an earlier or broken SDK still fails now, the
 # stale module cache is the cause: delete that project's .build directory (or

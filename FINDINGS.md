@@ -441,16 +441,14 @@ What had to be built, and why:
 1. **App icon.** xtool has no `.xcassets` support (xtool#219). AssetKit 1.0.0
    (xtool-org) compiles catalogs, but rejects Xcode 14+'s default
    single-size icon (`AppIcon 'AppIcon' declares size 1024x1024 but no
-   source file matched`), and does not resize. `tools/darwin-tools` (`xcassets`) expands that
-   form into 60@2x, 60@3x, 76@2x and the 1024 App Store icon (no alpha
-   channel, ITMS-90717) and then calls AssetKit.
-2. **iPad Pro icon (open).** AssetKit sets every app icon's "Icon Index" to
-   1, so 76@2x and 83.5@2x get the same rendition key and only one survives
-   lookup (`assetutil` shows two 152 px pad renditions). `actool` from Xcode
-   27 on the same images gives Icon Index 1 (60), 2 (76), 3 (83.5) and
-   5 (1024), plus one "MultiSized Image" entry per idiom, which AssetKit
-   does not emit. Until AssetKit keys icons by size, iPad apps fail the
-   167 px check; iPhone-only apps pass.
+   source file matched`), and does not resize. The Linux `actool`
+   (`tools/darwin-tools`, item 24) expands that form into 60@2x, 60@3x,
+   76@2x, 83.5@2x and the 1024 App Store icon (no alpha channel,
+   ITMS-90717); `ship.sh` runs it with `--app-icon`, as Xcode does for an
+   app target.
+2. **iPad Pro icon (fixed, item 26).** AssetKit 1.0.0 set every app icon's
+   "Icon Index" to 1, so 76@2x and 83.5@2x collided and iPad apps failed
+   the 167 px check.
 3. **Build-environment keys.** App Store processing reads `DTXcode`,
    `DTXcodeBuild`, `DTSDKName`, `DTSDKBuild`, `DTPlatform*`, `DTCompiler`;
    xtool writes none. `asc.py stamp` takes the SDK values from the darwin
@@ -475,14 +473,14 @@ What had to be built, and why:
 
 Unproven until a real key and app record exist: certificate and profile
 creation, Apple's processing of a Linux-built `.ipa` (DT keys, an
-AssetKit `Assets.car` without MultiSized entries, rcodesign's
-Apple-certificate signature), and a TestFlight install.
+AssetKit `Assets.car`, rcodesign's Apple-certificate signature), and a
+TestFlight install.
 Receipt: `receipts/2026-10-03-ship-offline-validation.md`.
 
 ## A real project: IceCubesApp, 2026-10-03
 
 **24. A real SwiftUI app hits seven walls on xtool 1.20 + Swift 6.4; six are fixed
-here, the seventh (SwiftData macros) is open.** IceCubesApp
+here, the seventh (SwiftData macros) in item 26.** IceCubesApp
 (Dimillian/IceCubesApp at 9efcb16: 13 local packages, 12 remote ones, String
 Catalog in 19 languages, 9 asset catalogs, SwiftData, AppIntents) was adapted
 without moving any source: one `omarchy-xtool/` directory (Package.swift that
@@ -542,11 +540,9 @@ Each wall, in the order the build hit it:
    `-Xfrontend -enable-cross-import-overlays` to the SDK's
    `toolset-swb.json`; the template repro then builds.
 
-**Open: SwiftData.** The build then stops at `@Model`: `external macro
-implementation type 'SwiftDataMacros.PersistentModelMacro' could not be
-found`. Apple's macro plugins are macOS binaries; xtool's OpenAppleMacros
-server has no SwiftData macros (xtool#149). Any app with `@Model` needs that
-first. Receipt: `receipts/2026-10-03-icecubes-compat.md`.
+**SwiftData** stopped the build at `@Model`: `external macro implementation
+type 'SwiftDataMacros.PersistentModelMacro' could not be found`. Fixed in
+item 26. Receipt: `receipts/2026-10-03-icecubes-compat.md`.
 
 ## No sudo, no FUSE, 2026-10-03
 
@@ -570,3 +566,51 @@ repackages): template build `Mach-O 64-bit arm64`, a template with `.xcassets` a
    has only `.so.16`.
 
 Receipt: `receipts/2026-10-03-user-only-x86_64.md`.
+
+## IceCubesApp builds and validates, 2026-10-04
+
+**26. IceCubesApp now builds end to end on Linux and its App Store `.ipa`
+passes 38 of 38 offline checks.** Four more walls after item 24:
+
+1. **SwiftData macros.** Apple's macro plugins are macOS binaries, and xtool's
+   OpenAppleMacros server (v1.3.0) has none for SwiftData (xtool#149).
+   `joshuaswarren/OpenAppleMacros@omarchy/swiftdata` adds `@Model`,
+   `@Attribute`, `@Relationship`, `@Transient`, `#Unique`, `#Index`,
+   `@ModelActor`, `@Query` and their helper macros. Its integration tests
+   compare each expansion with Xcode 27's: 102 of 102 pass.
+2. **`#Predicate` and `#Expression` expand for the wrong module.** With
+   `@Model` fixed, `cannot find 'FoundationEssentials' in scope`. The
+   toolchain's own `libFoundationMacros.so` is swift-foundation built without
+   `FOUNDATION_FRAMEWORK`, so it qualifies names with `FoundationEssentials.`,
+   which a Darwin target does not have. `@omarchy/foundation-macros`
+   (a517a2a) compiles swift-foundation's macro sources (a211bea) with
+   `FOUNDATION_FRAMEWORK` defined: 113 of 113 tests pass against Xcode 27.
+   An empty `libFoundationMacros.so` stub in the SDK's plugin directory
+   outranks the toolchain plugin, so the compiler sends these macros to the
+   OpenAppleMacros server. `install-toolchain.sh` builds the fork (static
+   Swift stdlib, so a toolchain swap cannot break it), installs it in the
+   SDK, and adds the `SwiftDataMacros` and `FoundationMacros` stubs.
+3. **A compiler crash for an Xcode-excluded file.** swift-frontend 6.4 crashed
+   in const-value extraction (`ConstExtract.cpp`, `Bad pointer dereference`)
+   instead of reporting `cannot find type 'ListsWidgetConfiguration' in
+   scope`. The project file excludes `IceCubesAppIntents/ListEntity.swift`
+   from the app target (a `PBXFileSystemSynchronizedBuildFileExceptionSet`);
+   the compat `Package.swift` now excludes it too.
+4. **iPad Pro icon.** `joshuaswarren/AssetKit@omarchy/color-csi` (0521ae7)
+   writes one Icon Index per size and the MultiSized Image entries. For the
+   same images, `assetutil --info` lists the same 6 icon and 4 MultiSized
+   entries as Xcode 27's actool, including pad 167 px. A universal-icon demo
+   now passes 38 of 38 checks.
+
+`ship.sh` now compiles the app icon with the Linux `actool --app-icon`, so the
+separate `xcassets` tool is gone. IceCubes' iOS icon is an Icon Composer
+`AppIcon.icon`, which AssetKit cannot compile; `APP_ICON=Icon` uses its
+legacy `Icon.appiconset`, without the dark and tinted variants. On a Mac,
+`codesign --verify --deep --strict` reports `valid on disk` and `satisfies its
+Designated Requirement` for the IceCubes `.ipa`.
+
+Still missing at run time: `.icon` icons, alternate icons, symbol sets,
+solid image stacks, HEIC images, dark and tinted icons (all skipped with a
+warning), and App Intents metadata (Apple's `appintentsmetadataprocessor`
+is macOS-only).
+Receipt: `receipts/2026-10-04-icecubes-ship.md`.

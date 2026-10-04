@@ -151,9 +151,10 @@ From an xtool project directory:
 ~/omarchy-apple-dev/ship.sh
 ```
 
-`ship.sh` builds a release `.app`, compiles the project's one `.xcassets`
-catalog (Xcode's single-size 1024 AppIcon is expanded to the App Store
-sizes), stamps the build-environment keys App Store processing reads
+`ship.sh` builds a release `.app`, compiles the app's `AppIcon` set with the
+Linux `actool --app-icon` (Xcode's single-size 1024 icon is expanded to the
+App Store sizes; `APP_ICON=<name>` picks another set), stamps the
+build-environment keys App Store processing reads
 (`DTXcode`, `DTSDKName`, …, and a UTC `CFBundleVersion`), signs it with
 `rcodesign`, packages `xtool/<App>.ipa`, and validates the `.ipa` offline:
 bundle layout, Info.plist keys and version formats, Mach-O arch and minimum
@@ -183,21 +184,20 @@ Distribution certificate (the private key stays in
 uploads through the App Store Connect build-upload API and prints Apple's
 processing result. **The upload step is unproven** (FINDINGS.md item 23).
 
-Known gap: iPad apps fail validation on the iPad Pro 167 px icon, because
-AssetKit 1.0.0 cannot store it next to the 152 px icon (FINDINGS.md item 23).
-iPhone-only apps (`UIDeviceFamily` = `[1]` in the app's Info.plist) pass.
-
 ## Real projects
 
 `install-toolchain.sh` also installs Linux stand-ins for Apple's `actool` and
 `xcstringstool` into the darwin SDK, so packages that declare `.xcassets` or
-`.xcstrings` resources build. Large projects need more open files than a login
-shell allows: run `ulimit -n 65536` before `xtool dev build`.
+`.xcstrings` resources build, and an OpenAppleMacros build with SwiftData
+(`@Model`, `@Query`, …) and Foundation (`#Predicate`, `#Expression`) macros.
+Large projects need more open files than a login shell allows: run
+`ulimit -n 65536` before `xtool dev build`.
 
-Known limits (FINDINGS.md item 24): branch-pinned dependencies fail in xtool
-1.20.1; SwiftData `@Model` has no Linux macro plugin yet; asset types AssetKit
-lacks (alternate app icons, symbol sets, HEIC) are left out with a warning.
-`compat/icecubes/setup.sh` reproduces the IceCubesApp run.
+Known limits (FINDINGS.md items 24, 26): branch-pinned dependencies fail in
+xtool 1.20.1; asset types AssetKit lacks (Icon Composer `.icon`, alternate app
+icons, symbol sets, HEIC, dark and tinted icons) are left out with a warning.
+`compat/icecubes/setup.sh` reproduces the IceCubesApp run, which builds and
+passes `ship.sh`'s offline checks.
 
 ## Scripts
 
@@ -211,19 +211,20 @@ lacks (alternate app icons, symbol sets, HEIC) are left out with a warning.
   `--rsd` modes for wireless deploys (unverified).
 - `ship.sh`: App Store `.ipa` build, offline validation, and `--upload`.
   Helpers: `tools/asc.py` (stamp, identity, validate, upload) and
-  `tools/darwin-tools` (`xcassets` and the Linux `actool`, on AssetKit) and
+  `tools/darwin-tools` (the Linux `actool`, on AssetKit) and
   `tools/xcstringstool` (String Catalogs).
 
 ## Findings
 
-[FINDINGS.md](FINDINGS.md) records the twenty-four findings behind the working
+[FINDINGS.md](FINDINGS.md) records the twenty-six findings behind the working
 run: what broke and how each was fixed (SDK install failures, a clang version
 mismatch that breaks SwiftUI, the unstated prerequisites for debugging on
 iOS 17+), the Swift/Xcode version matrix (items 15-16), why a toolchain
 swap breaks SDK registration and how `--repair` restores it (item 19),
 the mise/ncurses soname story (items 20-21), the move to xtool 1.20 +
-Swift 6.4 + Xcode 27 (item 22), the App Store path (item 23), and the
-IceCubesApp compatibility run (item 24).
+Swift 6.4 + Xcode 27 (item 22), the App Store path (item 23), the
+IceCubesApp compatibility run (items 24 and 26), and the no-sudo install
+(item 25).
 
 ## Notes
 

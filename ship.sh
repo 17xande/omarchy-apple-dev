@@ -16,7 +16,7 @@ set -euo pipefail
 here=$(dirname "$(readlink -f "$0")")
 PY="$HOME/pymobile3-venv/bin/python"
 ASC="$here/tools/asc.py"
-XCASSETS="$here/tools/darwin-tools/.build/release/xcassets"
+ACTOOL="$HOME/.swiftpm/swift-sdks/darwin.artifactbundle/Developer/Platforms/iPhoneOS.platform/Developer/usr/bin/actool"
 PATH="$(dirname "$(readlink -f "$(command -v swift)")"):$HOME/.local/bin:$PATH"
 export PATH
 
@@ -32,24 +32,35 @@ if [ "$upload" = 1 ]; then
   export ASC_KEY_ID ASC_ISSUER_ID ASC_KEY_PATH
 fi
 
+stage=$(mktemp -d)
+trap 'rm -rf "$stage"' EXIT
 echo "== 1. Release build =="
 xtool dev build --configuration release
 app=$(find xtool -maxdepth 1 -name '*.app' -print -quit)
 [ -n "$app" ] || { echo "no .app under xtool/" >&2; exit 1; }
 
 echo "== 2. App icon catalog =="
-# The catalog with the .appiconset goes into the app's own Assets.car. Catalogs that
-# packages declare as resources are compiled by SwiftBuild through actool already.
-mapfile -t catalogs < <(find . -name '*.appiconset' -type d -not -path './.build/*' -not -path './xtool/*' \
-  -exec dirname {} \; | sort -u)
+# As in Xcode's app target, actool --app-icon puts the icon into the app's own Assets.car and
+# Info.plist. Search the app target (Sources/<App>) first, then the project: vendored packages
+# and their test apps carry their own catalogs. APP_ICON names the set (default AppIcon).
+icon=${APP_ICON:-AppIcon}
+catalogs=()
+for src in "Sources/$(basename "$app" .app)" .; do
+  [ -d "$src" ] || continue
+  mapfile -t catalogs < <(find -L "$src" -name "$icon.appiconset" -type d -not -path '*/.build/*' \
+    -not -path '*/xtool/*' -exec dirname {} \; | sort -u)
+  [ "${#catalogs[@]}" = 0 ] || break
+done
 case "${#catalogs[@]}" in
-  0) echo "no .appiconset in the project; App Store upload needs an AppIcon" ;;
+  0) echo "no $icon.appiconset in the project; App Store upload needs an app icon" ;;
   1)
-    [ -x "$XCASSETS" ] || (cd "$here/tools/darwin-tools" && swift build -c release --product xcassets)
     min=$("$PY" -c 'import plistlib,sys; print(plistlib.load(open(sys.argv[1],"rb"))["MinimumOSVersion"])' "$app/Info.plist")
-    "$XCASSETS" "${catalogs[0]}" "$app" "$min"
+    "$ACTOOL" "${catalogs[0]}" --compile "$app" --platform iphoneos --app-icon "$icon" \
+      --minimum-deployment-target "$min" --output-partial-info-plist "$stage/icon.plist"
+    "$PY" -c 'import plistlib,sys; p=sys.argv[1]; d=plistlib.load(open(p,"rb")); d.update(plistlib.load(open(sys.argv[2],"rb")))
+plistlib.dump(d, open(p,"wb"), fmt=plistlib.FMT_BINARY)' "$app/Info.plist" "$stage/icon.plist"
     ;;
-  *) echo "more than one catalog with an .appiconset: ${catalogs[*]}" >&2; exit 1 ;;
+  *) echo "more than one $icon.appiconset: ${catalogs[*]}" >&2; exit 1 ;;
 esac
 
 echo "== 3. App Store Info.plist keys =="
@@ -70,8 +81,6 @@ rcodesign sign --pem-file "$sign_dir/key.pem" --certificate-der-file "$sign_dir/
 echo "== 5. Package =="
 name=$(basename "$app" .app)
 ipa="$PWD/xtool/$name.ipa"
-stage=$(mktemp -d)
-trap 'rm -rf "$stage"' EXIT
 mkdir "$stage/Payload"
 cp -a "$app" "$stage/Payload/"
 rm -f "$ipa"

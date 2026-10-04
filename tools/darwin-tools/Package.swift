@@ -6,8 +6,9 @@ let package = Package(
     name: "darwin-tools",
     platforms: [.macOS(.v13)],
     dependencies: [
-        // AssetKit 1.0.0 plus named-color fixes (actool's CSI layout, system colors); FINDINGS.md item 24.
-        .package(url: "https://github.com/joshuaswarren/AssetKit", revision: "890b8ef031a46099e394682b682eed3541b5cf96"),
+        // AssetKit 1.0.0 plus named-color fixes (actool's CSI layout, system colors; FINDINGS.md 24)
+        // and per-size icon renditions (Icon Index, MultiSized Image; FINDINGS.md 26).
+        .package(url: "https://github.com/joshuaswarren/AssetKit", revision: "0521ae7c9d991713c0e9f4ade9f555815345dc0b"),
         .package(url: "https://github.com/tayloraswift/swift-png", from: "4.5.0"),
     ],
     targets: [
@@ -18,9 +19,7 @@ let package = Package(
                 .product(name: "PNG", package: "swift-png"),
             ]
         ),
-        // ship.sh: compile the app's AppIcon catalog into the built .app.
-        .executableTarget(name: "xcassets", dependencies: ["DarwinAssets", .product(name: "AssetKit", package: "AssetKit")]),
-        // Linux stand-in for Apple's actool, for SwiftBuild under xtool.
+        // Linux stand-in for Apple's actool: SwiftBuild under xtool, and ship.sh for the app icon.
         .executableTarget(name: "actool", dependencies: ["DarwinAssets", .product(name: "AssetKit", package: "AssetKit")]),
     ]
 )

@@ -29,8 +29,9 @@ let package = Package(
                 .product(name: "Nuke", package: "Nuke"),
                 .product(name: "NukeUI", package: "Nuke"),
             ],
+            // Xcode excludes Intents/ListEntity.swift from the app target (widget-only file).
             exclude: ["App/App/IceCubesApp.entitlements", "App/App/IceCubesApp-release.entitlements",
-                      "App/Info.plist"],
+                      "App/Info.plist", "Intents/ListEntity.swift"],
             resources: [
                 .process("App/Assets.xcassets"),
                 .process("App/Resources"),

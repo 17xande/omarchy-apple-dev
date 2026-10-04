@@ -4,14 +4,11 @@ import PNG
 // Xcode 14+ app icons are one 1024 pt "universal" image with no scale; actool
 // derives the device sizes from it. AssetKit 1.0.0 needs every size listed
 // with a scale, so expand that form into the sizes the App Store checks.
-// ponytail: no 83.5@2x (iPad Pro, 167 px). AssetKit keys icon renditions by
-// idiom+scale only, so it collides with 76@2x in Assets.car; add it back when
-// AssetKit keys by size.
 public enum SingleSizeIcon {
     /// (idiom, point size, scale)
     static let sizes: [(String, String, Int)] = [
         ("iphone", "60x60", 2), ("iphone", "60x60", 3),
-        ("ipad", "76x76", 2),
+        ("ipad", "76x76", 2), ("ipad", "83.5x83.5", 2),
         ("ios-marketing", "1024x1024", 1),
     ]
 
@@ -22,12 +19,17 @@ public enum SingleSizeIcon {
         guard let iconSet = try fm.contentsOfDirectory(at: catalog, includingPropertiesForKeys: nil)
             .first(where: { $0.pathExtension == "appiconset" }) else { return catalog }
         let contentsURL = iconSet.appendingPathComponent("Contents.json")
+        // ponytail: dark and tinted variants ("appearances", iOS 18) are dropped; only the
+        // default image is expanded. Add them when AssetKit writes appearance renditions.
         guard let contents = try JSONSerialization.jsonObject(with: Data(contentsOf: contentsURL)) as? [String: Any],
               let images = contents["images"] as? [[String: Any]],
-              images.count == 1, let only = images.first,
-              only["idiom"] as? String == "universal", only["size"] as? String == "1024x1024",
-              only["scale"] == nil, let filename = only["filename"] as? String
+              images.allSatisfy({ $0["idiom"] as? String == "universal" && $0["scale"] == nil }),
+              let only = images.first(where: { $0["appearances"] == nil }),
+              only["size"] as? String == "1024x1024", let filename = only["filename"] as? String
         else { return catalog }
+        if images.count > 1 {
+            FileHandle.standardError.write(Data("\(iconSet.path): warning: dark and tinted icon variants are not compiled on Linux\n".utf8))
+        }
 
         guard let source = try PNG.Image.decompress(path: iconSet.appendingPathComponent(filename).path) else {
             throw CocoaError(.fileReadNoSuchFile)
