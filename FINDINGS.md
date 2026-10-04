@@ -828,3 +828,20 @@ RUNPATH `[$ORIGIN]`, OpenAppleMacros cb003a1); the template builds to
 builds with 15 dylibs and its widget and share extensions and passes 39 of 39.
 Apple's `codesign --verify --deep --strict` accepts the NetNewsWire `.ipa`. The
 whole run took 14 min 22 s. Receipt: `receipts/2026-10-04-aarch64-full.md`.
+
+## A valid TestFlight build, Linux except one file, 2026-10-04
+
+**35. Apple's processing accepts the Linux-built, Linux-signed app; only the
+Linux `Assets.car` is rejected.** Diagnostic upload: the same demo app, Linux
+binary and `rcodesign` signature, but with the `Assets.car`, loose icon PNGs
+and partial Info.plist that Apple's `actool` 27.0 makes from the same catalog
+(on a Mac). Result: `buildUpload ...: COMPLETE`, and App Store Connect lists
+build 1.0.0 (202610041830) as `VALID`, `APP_STORE_ELIGIBLE`. The two uploads
+with the Linux `Assets.car` (AssetKit, CoreUI 970 header, then a 1010 header)
+stay `INVALID` with error 90562. So signing, provisioning, the DT keys, the SDK
+stamp and the binary are accepted; the asset catalog is the last Mac
+dependency for TestFlight. Apple's own output also corrected the offline
+validator: for a single-size AppIcon, `actool` stores only the 1024 icon and
+names it inside `CFBundleIcons` (no top-level `CFBundleIconName`), so the
+validator now requires the full size set only for multi-size icons. Nothing
+was submitted for review.

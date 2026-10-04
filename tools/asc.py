@@ -289,7 +289,7 @@ def install_identity(app_dir, out_dir, prov, key_path, cert_path):
 REQUIRED_INFO_KEYS = (
     "CFBundleIdentifier", "CFBundleExecutable", "CFBundleName", "CFBundleShortVersionString", "CFBundleVersion",
     "CFBundlePackageType", "CFBundleSupportedPlatforms", "CFBundleInfoDictionaryVersion", "MinimumOSVersion",
-    "UIDeviceFamily", "UIRequiredDeviceCapabilities", "CFBundleIconName", "CFBundleIcons",
+    "UIDeviceFamily", "UIRequiredDeviceCapabilities", "CFBundleIcons",
     "DTCompiler", "DTPlatformBuild", "DTPlatformName", "DTPlatformVersion", "DTSDKBuild", "DTSDKName",
     "DTXcode", "DTXcodeBuild",
 )
@@ -408,15 +408,21 @@ def validate(ipa):
         car = app / "Assets.car"
         sizes = {(w, h) for w, h, _ in car_renditions(car)} if car.exists() else set()
         check(car.exists(), f"Assets.car present ({len(sizes)} rendition sizes)")
-        needed = {(1024, 1024): "App Store 1024", (120, 120): "iPhone 60@2x"}
-        if ipad:
-            needed.update({(152, 152): "iPad 76@2x", (167, 167): "iPad Pro 83.5@2x"})
+        # actool 27.0 stores only the 1024 icon for a single-size AppIcon (the form App Store
+        # processing accepted, FINDINGS.md 35); a multi-size set must then be complete.
+        needed = {(1024, 1024): "App Store 1024"}
+        if sizes & {(120, 120), (180, 180), (152, 152), (167, 167)}:
+            needed[(120, 120)] = "iPhone 60@2x"
+            if ipad:
+                needed.update({(152, 152): "iPad 76@2x", (167, 167): "iPad Pro 83.5@2x"})
         for size, label in needed.items():
             check(size in sizes, f"Assets.car has the {label} icon ({size[0]}x{size[1]})")
-        marketing = app / f"{info.get('CFBundleIconName', 'AppIcon')}1024x1024.png"
+        primary = info.get("CFBundleIcons", {}).get("CFBundlePrimaryIcon", {})
+        check(bool(primary.get("CFBundleIconName")), "CFBundleIcons names the primary icon (CFBundleIconName)")
+        marketing = app / f"{primary.get('CFBundleIconName', 'AppIcon')}1024x1024.png"
         if marketing.exists():
             check(not png_info(marketing)[2], "App Store icon has no alpha channel")
-        primary = info.get("CFBundleIcons", {}).get("CFBundlePrimaryIcon", {})
+
         for stem in primary.get("CFBundleIconFiles", []):
             check(any(app.glob(f"{stem}*.png")), f"declared icon file {stem}*.png is in the bundle")
 
