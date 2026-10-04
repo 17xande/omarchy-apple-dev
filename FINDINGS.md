@@ -856,7 +856,7 @@ variant. Xcode keeps those variants (its build of a 3-package repro has one
 diagnostic). The SwiftPM 6.4.0 command line turned the variants off, so the
 same graph fails with `Swift package product 'SwiftSoup-product' is linked as
 a static library by 'Mastodon-App-product' and 'MastodonSDKDynamic-product'`.
-SwiftPM release/6.4.2 (081eb087) restores them; with a 6.4.2 `swift-build`
+SwiftPM release/6.4.2 restores them (b3613845, "Enable promotion of automatic libraries to dynamic libraries"); with a 6.4.2 `swift-build`
 (xtool honors `SWIFTPM_CUSTOM_BIN_DIR`), the graph plans and SwiftSoup is
 built once. Turning the diagnostic off instead (`DISABLE_DIAMOND_PROBLEM_DIAGNOSTIC`)
 builds, but links SwiftSoup into both binaries, which Xcode does not do. The
