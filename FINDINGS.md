@@ -595,7 +595,10 @@ passes 38 of 38 offline checks.** Four more walls after item 24:
    instead of reporting `cannot find type 'ListsWidgetConfiguration' in
    scope`. The project file excludes `IceCubesAppIntents/ListEntity.swift`
    from the app target (a `PBXFileSystemSynchronizedBuildFileExceptionSet`);
-   the compat `Package.swift` now excludes it too.
+   the compat `Package.swift` now excludes it too. The crash is a compiler
+   bug, not a Linux one: a 9-line file (a property wrapper with an unknown
+   generic argument on a type in the const-extract protocol list) crashes
+   both the Linux swift-6.4-RELEASE and Xcode 27's `swiftc` (6.4.0.34.1).
 4. **iPad Pro icon.** `joshuaswarren/AssetKit@omarchy/color-csi` (0521ae7)
    writes one Icon Index per size and the MultiSized Image entries. For the
    same images, `assetutil --info` lists the same 6 icon and 4 MultiSized
