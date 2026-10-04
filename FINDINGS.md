@@ -816,3 +816,15 @@ build-upload API (no Transporter, no Mac). Apple's processing then returned:
    AssetKit-built `Assets.car`, but App Store processing rejects it. Open.
 
 Nothing was submitted for review.
+
+## aarch64, full pipeline, 2026-10-04
+
+**34. On aarch64 the installer builds the fixed xtool and the macro server,
+and NetNewsWire ships with its extensions.** jwm1 (M1), a new user with no
+sudo, the swift.org `swift-6.4.0-RELEASE-ubi10-aarch64` tarball, repo at
+c7216e9: `install-toolchain.sh --user-only` exits 0 (xtool 3cbf66b with
+RUNPATH `[$ORIGIN]`, OpenAppleMacros cb003a1); the template builds to
+`Mach-O 64-bit arm64`; the SwiftData resource app passes 39 of 39; NetNewsWire
+builds with 15 dylibs and its widget and share extensions and passes 39 of 39.
+Apple's `codesign --verify --deep --strict` accepts the NetNewsWire `.ipa`. The
+whole run took 14 min 22 s. Receipt: `receipts/2026-10-04-aarch64-full.md`.
