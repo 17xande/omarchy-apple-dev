@@ -9,7 +9,7 @@ script as a fresh user (FINDINGS.md item 22):
 | Tool | Version | Source |
 |------|---------|--------|
 | Swift | 6.4.0 | AUR `swift-bin` |
-| xtool | 1.20.1 | xtool-org/xtool AppImage |
+| xtool | 1.20.1 + 4 fixes (xtool-org/xtool#290-#293) | built from source by the installer |
 | pymobiledevice3 | latest from PyPI at install time | venv |
 | LLDB | 21.0.0 (Swift toolchain) | bundled with `swift-bin` |
 | iOS SDK | iPhoneOS 27.0 | Xcode 27.0 |
@@ -25,8 +25,8 @@ Works with a free Apple ID. Paid membership not required for device installs.
 ## What you need
 
 - An Apple Silicon or x86_64 Linux box running Omarchy (Arch-based). Both
-  architectures are covered: AUR `swift-bin` ships aarch64 and x86_64, and
-  xtool publishes an AppImage for each.
+  architectures are covered: AUR `swift-bin` ships aarch64 and x86_64, and the
+  installer builds xtool from source on either.
 - An iOS device and a USB cable.
 - An Apple ID (free) for **one download from Apple**: `Xcode.xip` from
   developer.apple.com. The download works from any OS — no Mac, no macOS
@@ -222,7 +222,7 @@ it cannot map (FINDINGS.md item 27).
 
 ## Findings
 
-[FINDINGS.md](FINDINGS.md) records the twenty-eight findings behind the working
+[FINDINGS.md](FINDINGS.md) records the thirty findings behind the working
 run: what broke and how each was fixed (SDK install failures, a clang version
 mismatch that breaks SwiftUI, the unstated prerequisites for debugging on
 iOS 17+), the Swift/Xcode version matrix (items 15-16), why a toolchain

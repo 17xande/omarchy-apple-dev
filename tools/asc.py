@@ -341,6 +341,8 @@ def validate(ipa):
             sys.exit(1)
         z.extractall(tmp)
         app = Path(tmp) / "Payload" / apps[0]
+        nested = sorted(p.parent.name for p in app.glob("PlugIns/*.appex/Frameworks"))
+        check(not nested, f"app extensions carry no Frameworks/ (ITMS-90206){': ' + ', '.join(nested) if nested else ''}")
 
         with (app / "Info.plist").open("rb") as f:
             info = plistlib.load(f)

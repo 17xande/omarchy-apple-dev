@@ -43,45 +43,9 @@ sed -i '5i import UIKit' \
 	"$dir/iOS/Settings/TimelineHeaderView.swift" \
 	"$dir/iOS/Settings/TimelineCustomizerCollectionViewController.swift"
 
-# iOS/Resources/Info.plist carries Xcode placeholders that Xcode substitutes
-# from build settings ($(EXECUTABLE_NAME), $(MARKETING_VERSION), ...); xtool
-# merges the plist verbatim, which would break the bundle. Substitute every
-# $(VAR) with the value from the xcconfig tree; drop keys with no value (e.g.
-# CFBundleExecutable - xtool writes its own).
-python3 - "$dir" <<'PYEOF'
-import plistlib, pathlib, re, sys
-root = pathlib.Path(sys.argv[1])
-p = root / "iOS/Resources/Info.plist"
-d = plistlib.load(open(p, "rb"))
-vals = {}
-for f in (root / "xcconfig").rglob("*.xcconfig"):
-    for line in f.read_text(errors="replace").splitlines():
-        m = re.match(r"([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)", line.split("//")[0])
-        if m:
-            vals.setdefault(m.group(1), m.group(2).strip().rstrip(";").strip())
-for k, v in list(d.items()):
-    if not isinstance(v, str):
-        continue
-    def sub(m):
-        return vals.get(m.group(1), m.group(0))
-    nv = re.sub(r"\$\(([A-Za-z_][A-Za-z0-9_]*)\)", sub, v)
-    if "$(" in nv:
-        del d[k]
-    elif nv != v:
-        d[k] = nv
-plistlib.dump(d, open(p, "wb"))
-print("placeholders resolved")
-PYEOF
-
-python3 "$here/../tools/xcodeproj2xtool.py" "$dir/NetNewsWire.xcodeproj"
-# Defaults printed by the generator: APP_ICON=AppIcon; xtool.yml gets
-# bundleID com.ranchero.NetNewsWire.iOS and infoPath ../iOS/Resources/Info.plist.
-#
-# Status (2026-10-04, Xcode 27.0 SDK): with stock xtool 1.20.1 the app link
-# fails on NetNewsWire's `type: .dynamic` packages (FINDINGS.md 27.3). It
-# builds end to end and ship.sh passes 38/38 only with three changes that are
-# not upstream yet: SDK toolset-swb.json linker extraCLIOptions
-# ["-lswiftCore", "-L<sdk>/usr/lib/swift", "-all_load"], and two xtool
-# PackLib patches (link each dynamic product into the app; embed each once).
-# The generator excludes NetNewsWire's 7 storyboards/xibs (no ibtool on
-# Linux) with a warning; the app builds but its UIKit UI cannot load.
+python3 "$here/../../tools/xcodeproj2xtool.py" "$dir/NetNewsWire.xcodeproj"
+# The generator resolves the Xcode placeholders in iOS/Resources/Info.plist from
+# the xcconfig files and prints APP_ICON=AppIcon. NetNewsWire's 15 local packages
+# are `type: .dynamic`; the xtool that install-toolchain.sh builds links them
+# (FINDINGS.md 27.3). The generator excludes NetNewsWire's 7 storyboards/xibs (no
+# ibtool on Linux) with a warning; the app builds but its UIKit UI cannot load.

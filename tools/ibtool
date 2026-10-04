@@ -1,0 +1,17 @@
+#!/bin/sh
+# Linux stand-in for Apple's ibtool. SwiftBuild probes `ibtool --version` for every iOS target
+# (app extensions included) and stops the build when the probe fails. There is no Interface
+# Builder compiler on Linux: answer the probe with Xcode 27.0's version, refuse everything else.
+if [ "$1" = --version ]; then
+  cat <<'EOF'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict><key>com.apple.ibtool.version</key><dict>
+<key>bundle-version</key><string>25098</string>
+<key>short-bundle-version</key><string>27.0</string>
+</dict></dict></plist>
+EOF
+  exit 0
+fi
+echo "ibtool: storyboards and xibs cannot be compiled on Linux ($*)" >&2
+exit 1

@@ -708,3 +708,46 @@ icon images and MultiSized entries as for an appiconset. Against Apple's
 same composition, but flat. One `warning:` line each names what is not
 rendered: Liquid Glass, specular highlights, shadows, translucency, blur,
 non-normal blend modes, and the dark and tinted variants.
+
+## The installer builds the fixed xtool, 2026-10-04
+
+**30. `install-toolchain.sh` now builds xtool from source with four fixes, so
+NetNewsWire builds with no manual steps.** The fixes are on
+`joshuaswarren/xtool@omarchy/1.20.1-fixes` (9cdd470: release 1.20.1 plus
+xtool-org/xtool#290 branch-pinned dependencies, #291 a dynamic library embedded
+twice, #292 dynamic products linked into the app, #293 the SDK toolset's dylib
+link flags). The installer builds it once per commit (about 7 minutes on
+x86_64) with `-no-toolchain-stdlib-rpath` and copies the Swift runtime
+libraries it uses next to it, so its RUNPATH is `$ORIGIN` only and a toolchain
+swap cannot break it. The AppImage, and with it the FUSE requirement, is gone;
+the build needs `base-devel`, `git`, `libimobiledevice` and `openssl`. The
+installer also adds `-lswiftCore -L/usr/lib/swift -all_load` to the SDK
+toolset (ld64 resolves `-L/usr/lib/swift` under `-syslibroot`, so the path
+works wherever the SDK lives; without `-all_load` the app link fails with
+`undefined symbol: $s6DynLib8dynValueSiyF`), and an `ibtool` that answers
+SwiftBuild's `--version` probe and refuses real work (the probe runs for every
+iOS target and stops the build when it fails).
+
+A new user in a clean Arch x86_64 root: installer exit 0, xtool RUNPATH
+`[$ORIGIN]`, template `Build complete!`. With that toolchain the regression set
+passes: a `branch:` dependency and a `.dynamic` product build, the demo apps
+ship 35/35 and 38/38, IceCubesApp ships 38/38.
+
+The generator now converts the app extensions an app embeds (one target,
+product and `xtool.yml` entry each, with its own Info.plist), honors Xcode's
+"add this file to another target" exception sets, and stops re-declaring
+products that a declared local product already carries. NetNewsWire builds
+with its widget and share extensions: 15 dylibs in `Frameworks/`, two `.appex`
+bundles in `PlugIns/`, and Apple's `codesign --verify --deep --strict` accepts
+the `.ipa`. The offline validator gained a check that fails it: xtool copies
+each extension's dylibs into `PlugIns/<ext>.appex/Frameworks/`, which App
+Store processing rejects (ITMS-90206). Open.
+
+Third project, Mastodon for iOS (mastodon/mastodon-ios @ c52a630; widgets,
+share, notification-service and intents extensions, Core Data):
+`compat/mastodon/setup.sh` generates the adapter. Walls: Core Data needs
+`momc` (`Could not determine generated file paths for Core Data code
+generation`), and SwiftPM reports `Swift package product 'SwiftSoup-product'
+is linked as a static library by 'Mastodon-App-product' and
+'MastodonSDKDynamic-product'` (probably a real second path through MastoParse;
+unverified).

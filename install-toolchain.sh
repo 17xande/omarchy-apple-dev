@@ -38,6 +38,40 @@ sdk_install_from() {
 REPO_DIR=$(dirname "$(readlink -f "$0")")
 DARWIN_SDK_BUNDLE="$HOME/.swiftpm/swift-sdks/darwin.artifactbundle"
 
+# Shallow-fetch one commit of a repo into a cache dir (kept; the build reuses it).
+fetch_commit() { # repo sha dir
+  if [ ! -d "$3/.git" ]; then
+    git init -q "$3"
+    git -C "$3" fetch -q --depth 1 "$1" "$2"
+    git -C "$3" checkout -q FETCH_HEAD
+  fi
+}
+
+# xtool 1.20.1 plus four fixes not released yet (xtool-org/xtool#290-#293): branch-pinned
+# dependencies, and `type: .dynamic` package products (FINDINGS.md 24.1, 27.3). Built from
+# source with its Swift runtime libraries next to it ($ORIGIN only), so a toolchain swap or
+# upgrade cannot break it.
+XTOOL_REPO=https://github.com/joshuaswarren/xtool
+XTOOL_SHA=9cdd4708e7eecbf973f827d4abe93b6c2119993c
+install_xtool() {
+  local src="$HOME/.cache/omarchy-apple-dev/xtool-$XTOOL_SHA"
+  local dest="$HOME/.local/lib/omarchy-apple-dev/xtool-$XTOOL_SHA"
+  if [ ! -x "$dest/xtool" ]; then
+    fetch_commit "$XTOOL_REPO" "$XTOOL_SHA" "$src"
+    echo "Building xtool $XTOOL_SHA (first run: about 7 minutes)"
+    (cd "$src" && swift build -c release --product xtool -Xswiftc -no-toolchain-stdlib-rpath >/dev/null)
+    local bin runtime
+    bin=$(cd "$src" && swift build -c release --show-bin-path)
+    runtime="$(dirname "$(dirname "$(readlink -f "$(command -v swift)")")")/lib/swift/linux"
+    mkdir -p "$dest"
+    install -m755 "$bin/xtool" "$bin/libXADI.so" "$dest/"
+    LD_LIBRARY_PATH="$runtime" ldd "$dest/xtool" | awk -v rt="$runtime/" 'index($3, rt) == 1 { print $3 }' |
+      xargs -r install -m644 -t "$dest"
+  fi
+  mkdir -p "$HOME/.local/bin"
+  ln -sfn "$dest/xtool" "$HOME/.local/bin/xtool"
+}
+
 # xtool's SDK ships OpenAppleMacros v1.3.0 as the Darwin macro plugin server; it has no
 # SwiftData macros, and the toolchain's own FoundationMacros emit `FoundationEssentials.`
 # (#Predicate fails). Build the fork that adds both and register its modules with empty
@@ -47,11 +81,7 @@ OAM_SHA=a517a2a60c05b69be4e28b3d51161b3cafaea589
 install_oam() {
   local src="$HOME/.cache/omarchy-apple-dev/oam-$OAM_SHA"
   local plugins="$DARWIN_SDK_BUNDLE/Developer/Platforms/iPhoneOS.platform/Developer/usr/lib/swift/host/plugins"
-  if [ ! -d "$src/.git" ]; then
-    git init -q "$src"
-    git -C "$src" fetch -q --depth 1 "$OAM_REPO" "$OAM_SHA"
-    git -C "$src" checkout -q FETCH_HEAD
-  fi
+  fetch_commit "$OAM_REPO" "$OAM_SHA" "$src"
   echo "Building OpenAppleMacrosServer $OAM_SHA (first run: about 5 minutes)"
   (cd "$src" && swift build -c release --build-system native --static-swift-stdlib \
     --product OpenAppleMacrosServer >/dev/null)
@@ -65,12 +95,15 @@ install_oam() {
 # Developer/usr/bin. Install the Linux stand-ins there, give .strings copies an
 # input encoding (SwiftBuild detects encodings only on macOS), and turn on Swift
 # cross-import overlays (StoreKit + SwiftUI = StoreView, ...). FINDINGS.md 24.
+# Dylib links of `type: .dynamic` products need the Swift runtime (-L/usr/lib/swift
+# resolves under ld64's -syslibroot, the iPhoneOS SDK) and -all_load (SwiftPM builds
+# their modules as archives). FINDINGS.md 27.3; also in xtool-org/xtool#293.
 install_darwin_tools() {
   local bin="$DARWIN_SDK_BUNDLE/Developer/Platforms/iPhoneOS.platform/Developer/usr/bin"
   (cd "$REPO_DIR/tools/darwin-tools" && swift build -c release --product actool >/dev/null)
   mkdir -p "$bin"
   install -m755 "$REPO_DIR/tools/darwin-tools/.build/release/actool" "$bin/actool"
-  install -m755 "$REPO_DIR/tools/xcstringstool" "$bin/xcstringstool"
+  install -m755 "$REPO_DIR/tools/xcstringstool" "$REPO_DIR/tools/ibtool" "$bin/"
   install -m644 "$REPO_DIR/tools/xcstrings_symbols.py" "$bin/xcstrings_symbols.py"
   python3 - "$DARWIN_SDK_BUNDLE" <<'PY'
 import json, os, plistlib, sys
@@ -86,11 +119,12 @@ toolset = os.path.join(bundle, "toolset-swb.json")
 with open(toolset) as f:
     data = json.load(f)
 data.setdefault("swiftCompiler", {})["extraCLIOptions"] = ["-Xfrontend", "-enable-cross-import-overlays"]
+data.setdefault("linker", {})["extraCLIOptions"] = ["-lswiftCore", "-L/usr/lib/swift", "-all_load"]
 with open(toolset + ".tmp", "w") as f:
     json.dump(data, f, indent=4)
 os.replace(toolset + ".tmp", toolset)
 PY
-  echo "Installed actool and xcstringstool into $bin"
+  echo "Installed actool, xcstringstool and ibtool (version probe only) into $bin"
 }
 
 # Build the portable darwin.xtoolsdk from an Xcode.xip or Xcode.app ($1),
@@ -267,14 +301,16 @@ fi
 if [ "${1:-}" = "--user-only" ]; then
   echo "== 1-2. User-only install: using $(command -v swift || echo 'no swift on PATH')"
   swift --version | head -n1
-  for tool in fusermount3 zip python3 git; do
+  for tool in zip python3 git cc pkg-config; do
     command -v "$tool" >/dev/null || echo "WARNING: $tool is missing; ask an admin for it"
   done
+  pkg-config --exists libimobiledevice-1.0 openssl ||
+    echo "WARNING: libimobiledevice or openssl headers are missing (xtool build); ask an admin for them"
 else
-echo "== 1. usbmuxd (device multiplexer; udev starts it on plug), fuse3, zip =="
-# fuse3 provides fusermount3; the xtool AppImage runtime cannot mount without it.
-# zip packages the .ipa in ship.sh.
-sudo pacman -S --needed --noconfirm usbmuxd fuse3 zip
+echo "== 1. usbmuxd (device multiplexer; udev starts it on plug), zip, xtool build deps =="
+# zip packages the .ipa in ship.sh. base-devel, git, libimobiledevice and openssl
+# build xtool from source (step 3).
+sudo pacman -S --needed --noconfirm usbmuxd zip base-devel git libimobiledevice openssl
 # usbmuxd.service is static on Arch: it is triggered by udev, do not enable it.
 
 echo "== 2. Swift toolchain (AUR binary package: swift, clang, lldb) =="
@@ -287,23 +323,9 @@ pydep=$(pacman -Qi swift-bin | grep -oE 'python3[0-9]+' | head -n1)
 if [ -n "$pydep" ]; then yay -S --needed --noconfirm --asdeps "$pydep"; fi
 fi
 
-echo "== 3. xtool AppImage and rcodesign (aarch64 and x86_64 releases) =="
-mkdir -p "$HOME/.local/bin"
-curl -fL "https://github.com/xtool-org/xtool/releases/latest/download/xtool-$(uname -m).AppImage" \
-  -o "$HOME/.local/bin/xtool.AppImage"
-chmod +x "$HOME/.local/bin/xtool.AppImage"
-rm -f "$HOME/.local/bin/xtool"
-if command -v fusermount3 >/dev/null; then
-  mv "$HOME/.local/bin/xtool.AppImage" "$HOME/.local/bin/xtool"
-else
-  # No FUSE (containers, --user-only hosts without fuse3): run it unpacked.
-  appdir="$HOME/.local/share/xtool-appdir"
-  rm -rf "$appdir" "$HOME/.local/bin/squashfs-root"
-  mkdir -p "$(dirname "$appdir")"
-  (cd "$HOME/.local/bin" && ./xtool.AppImage --appimage-extract >/dev/null && mv squashfs-root "$appdir")
-  rm "$HOME/.local/bin/xtool.AppImage"
-  ln -s "$appdir/AppRun" "$HOME/.local/bin/xtool"
-fi
+echo "== 3. xtool (built from source) and rcodesign (aarch64 and x86_64 releases) =="
+toolchain_first_on_path
+install_xtool
 "$HOME/.local/bin/xtool" --version
 # rcodesign (apple-codesign) signs App Store builds for ship.sh; pinned + checksummed.
 RCODESIGN_VERSION=0.29.0
