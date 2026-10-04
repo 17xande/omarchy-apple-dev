@@ -50,6 +50,14 @@ public enum CatalogMerge {
                     } else {
                         skipped.append("\(where_): not the --app-icon set")
                     }
+                case "icon":
+                    // Icon Composer source. The one matching --app-icon is
+                    // rendered flat; others (alternate icons) are skipped.
+                    if child.deletingPathExtension().lastPathComponent == appIcon {
+                        try mergeIconComposerIcon(child, into: dest, appIcon: appIcon, skipped: &skipped)
+                    } else {
+                        skipped.append("\(where_): alternate .icon icons are not supported by AssetKit")
+                    }
                 case "" where isDir:
                     try fm.createDirectory(at: target, withIntermediateDirectories: true)
                     let folderContents = child.appendingPathComponent("Contents.json")
@@ -93,8 +101,39 @@ public enum CatalogMerge {
         }
 
         for catalog in catalogs {
+            if catalog.pathExtension == "icon" {
+                // An Icon Composer .icon passed as its own catalog input
+                // (SwiftBuild passes folder.iconcomposer.icon paths through).
+                try mergeIconComposerIcon(catalog, into: merged, appIcon: appIcon, skipped: &skipped)
+                continue
+            }
             try copy(catalog, into: merged, catalog: catalog)
         }
         return Prepared(catalog: merged, skipped: skipped)
+    }
+
+    /// Renders an Icon Composer `.icon` and installs the resulting
+    /// appiconset when it is the `--app-icon`; other .icon files (alternate
+    /// icons) are skipped with a warning.
+    static func mergeIconComposerIcon(
+        _ icon: URL, into merged: URL, appIcon: String?, skipped: inout [String]
+    ) throws {
+        let name = icon.deletingPathExtension().lastPathComponent
+        let where_ = icon.path
+        guard name == appIcon else {
+            skipped.append("\(where_): alternate .icon icons are not supported by AssetKit")
+            return
+        }
+        guard let appIcon = appIcon else {
+            skipped.append("\(where_): no --app-icon to attach it to")
+            return
+        }
+        let rendered = try IconComposerIcon.render(catalog: icon, appIcon: appIcon)
+        skipped.append(contentsOf: rendered.warnings.map { "\(where_): \($0)" })
+        let target = merged.appendingPathComponent("\(appIcon).appiconset")
+        guard !FileManager.default.fileExists(atPath: target.path) else {
+            throw DuplicateEntry(name: target.lastPathComponent)
+        }
+        try FileManager.default.copyItem(at: rendered.catalog.appendingPathComponent("\(appIcon).appiconset"), to: target)
     }
 }

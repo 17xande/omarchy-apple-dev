@@ -41,18 +41,27 @@ app=$(find xtool -maxdepth 1 -name '*.app' -print -quit)
 
 echo "== 2. App icon catalog =="
 # As in Xcode's app target, actool --app-icon puts the icon into the app's own Assets.car and
-# Info.plist. Search the app target (Sources/<App>) first, then the project: vendored packages
-# and their test apps carry their own catalogs. APP_ICON names the set (default AppIcon).
+# Info.plist. Search the app target (Sources/<App>) first, then the top of the project (4 levels:
+# ./AppIcon.icon, ./Resources/Assets.xcassets/AppIcon.appiconset); deeper catalogs belong to
+# vendored packages and their test apps. APP_ICON names the set (default AppIcon). actool takes
+# the .xcassets dir for an appiconset, and the Icon Composer .icon dir itself.
 icon=${APP_ICON:-AppIcon}
 catalogs=()
 for src in "Sources/$(basename "$app" .app)" .; do
   [ -d "$src" ] || continue
-  mapfile -t catalogs < <(find -L "$src" -name "$icon.appiconset" -type d -not -path '*/.build/*' \
-    -not -path '*/xtool/*' -exec dirname {} \; | sort -u)
+  depth=; [ "$src" = . ] && depth="-maxdepth 4"
+  # shellcheck disable=SC2086
+  mapfile -t catalogs < <(find -L "$src" $depth \( -name .build -o -name xtool \) -prune -o \
+    \( -name "$icon.appiconset" -o -name "$icon.icon" \) -type d -print | while read -r found; do
+      case "$found" in
+        *.appiconset) dirname "$found" ;;
+        *) echo "$found" ;;
+      esac
+    done | sort -u)
   [ "${#catalogs[@]}" = 0 ] || break
 done
 case "${#catalogs[@]}" in
-  0) echo "no $icon.appiconset in the project; App Store upload needs an app icon" ;;
+  0) echo "no $icon.appiconset or $icon.icon in the project; App Store upload needs an app icon" ;;
   1)
     min=$("$PY" -c 'import plistlib,sys; print(plistlib.load(open(sys.argv[1],"rb"))["MinimumOSVersion"])' "$app/Info.plist")
     "$ACTOOL" "${catalogs[0]}" --compile "$app" --platform iphoneos --app-icon "$icon" \
@@ -60,7 +69,7 @@ case "${#catalogs[@]}" in
     "$PY" -c 'import plistlib,sys; p=sys.argv[1]; d=plistlib.load(open(p,"rb")); d.update(plistlib.load(open(sys.argv[2],"rb")))
 plistlib.dump(d, open(p,"wb"), fmt=plistlib.FMT_BINARY)' "$app/Info.plist" "$stage/icon.plist"
     ;;
-  *) echo "more than one $icon.appiconset: ${catalogs[*]}" >&2; exit 1 ;;
+  *) echo "more than one $icon.appiconset or $icon.icon: ${catalogs[*]}" >&2; exit 1 ;;
 esac
 
 echo "== 3. App Store Info.plist keys =="

@@ -690,3 +690,21 @@ OpenAppleMacros build), the template builds to `Mach-O 64-bit arm64`, an app wit
 38 of 38 checks. Apple's `codesign --verify --deep --strict` accepts the `.ipa`.
 The whole run, SDK and macro server builds included, took 7 min 20 s.
 Receipt: `receipts/2026-10-04-user-only-aarch64.md`.
+
+## Icon Composer icons, 2026-10-04
+
+**29. The Linux `actool` renders Icon Composer `.icon` app icons, flat.** Xcode
+26+ icons made in Icon Composer are a folder with `icon.json` and layer images.
+Apple's `actool` 27.0 compiles them into 1024 px icon images per appearance plus
+the layered iOS 26 icon (IconImageStack, IconGroup, gradients). The Linux
+`actool` now paints the background fill (the `system-light` preset is white to
+92.5% gray, decoded from Apple's output) and every visible PNG or SVG layer at
+its scale and offset onto a 1024 px canvas, then compiles that like a
+single-size app icon. `ship.sh` finds `AppIcon.icon` as well as
+`AppIcon.appiconset`. IceCubesApp now ships with its real `AppIcon.icon` and no
+`APP_ICON` override: 38 of 38 checks, and Apple's `assetutil` lists the same
+icon images and MultiSized entries as for an appiconset. Against Apple's
+120 px rendering of the same icon, the mean pixel difference is 11.3 of 255:
+same composition, but flat. One `warning:` line each names what is not
+rendered: Liquid Glass, specular highlights, shadows, translucency, blur,
+non-normal blend modes, and the dark and tinted variants.
