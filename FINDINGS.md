@@ -906,3 +906,18 @@ Linux car now differs from an accepted hybrid only in content Apple accepts
 (item 37). The regression set passes with it: demo 36/36, iPad demo 37/37,
 IceCubesApp and NetNewsWire with their extensions 37/37. Nothing was submitted
 for review. Receipt: `receipts/2026-10-04-testflight-all-linux.md`.
+
+## SiriKit intents, 2026-10-04
+
+**39. `tools/intentbuilderc` generates SiriKit intent classes on Linux; the
+generator runs it, so no SwiftPM change is needed.** Xcode generates Swift
+classes for every intent, custom type and enum in an `.intentdefinition`
+file. SwiftPM's SwiftBuild backend does not route `.intentdefinition` package
+files to the intent compiler at all (it does for Core Data and Core ML
+models), so a package build never asks for them. The stand-in (Python
+stdlib) writes the same Swift text as Xcode 27's `intentbuilderc`: all 8 files
+for Mastodon's two definitions are byte-identical. `xcodeproj2xtool.py` runs
+it at conversion time with Xcode's arguments, symlinks the output into the
+target's sources, and keeps the `.intentdefinition` as a resource. With it,
+Mastodon has no missing intent types; the build stops only at its pinned Nuke
+10.11.2, which Xcode 27 cannot compile either (item 36).
