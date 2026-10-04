@@ -222,7 +222,7 @@ it cannot map (FINDINGS.md item 27).
 
 ## Findings
 
-[FINDINGS.md](FINDINGS.md) records the twenty-seven findings behind the working
+[FINDINGS.md](FINDINGS.md) records the twenty-eight findings behind the working
 run: what broke and how each was fixed (SDK install failures, a clang version
 mismatch that breaks SwiftUI, the unstated prerequisites for debugging on
 iOS 17+), the Swift/Xcode version matrix (items 15-16), why a toolchain
@@ -230,7 +230,8 @@ swap breaks SDK registration and how `--repair` restores it (item 19),
 the mise/ncurses soname story (items 20-21), the move to xtool 1.20 +
 Swift 6.4 + Xcode 27 (item 22), the App Store path (item 23), the
 IceCubesApp compatibility run (items 24 and 26), the no-sudo install
-(item 25), and the `.xcodeproj` adapter generator (item 27).
+(item 25, and on aarch64 in item 28), and the `.xcodeproj` adapter generator
+(item 27).
 
 ## Notes
 

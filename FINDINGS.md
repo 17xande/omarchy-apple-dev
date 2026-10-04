@@ -656,3 +656,14 @@ generator. It stops at three platform walls, in build order:
    every module compiles, but the app link fails: all 15 local packages declare
    `type: .dynamic` products, and the app sees `ld64.lld: error: undefined
    symbol: $s2os6LoggerV6RSCoreE12nnwSubsystemSSvau` and 19 more.
+
+## aarch64 parity, 2026-10-04
+
+**28. The same no-sudo path works on aarch64 Omarchy.** On jwm1 (M1), as a new
+user with no sudo and the swift.org `swift-6.4.0-RELEASE-ubi10-aarch64` tarball:
+`install-toolchain.sh --user-only` exits 0 (SDK, actool, xcstringstool, the
+OpenAppleMacros build), the template builds to `Mach-O 64-bit arm64`, an app with
+`.xcassets`, `.xcstrings`, `@Model` and `#Predicate` builds, and `ship.sh` passes
+38 of 38 checks. Apple's `codesign --verify --deep --strict` accepts the `.ipa`.
+The whole run, SDK and macro server builds included, took 7 min 20 s.
+Receipt: `receipts/2026-10-04-user-only-aarch64.md`.
