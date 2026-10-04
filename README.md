@@ -41,6 +41,10 @@ install script prints the matching Xcode when it stops at the SDK step.
 
 ## Install
 
+New here? [GETTING-STARTED.md](GETTING-STARTED.md) walks from the Omarchy
+Install menu to a TestFlight upload. On Omarchy, **Install > Development > iOS**
+runs the steps below for you.
+
 ```
 git clone https://github.com/joshuaswarren/omarchy-apple-dev
 cd omarchy-apple-dev
