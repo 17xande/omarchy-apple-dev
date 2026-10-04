@@ -845,3 +845,23 @@ validator: for a single-size AppIcon, `actool` stores only the 1024 icon and
 names it inside `CFBundleIcons` (no top-level `CFBundleIconName`), so the
 validator now requires the full size set only for multi-size icons. Nothing
 was submitted for review.
+
+## Mastodon: a toolchain fix and a dependency wall, 2026-10-04
+
+**36. Mastodon's duplicate-library error is a SwiftPM 6.4.0 bug, fixed in
+6.4.2; then old Nuke does not compile with Swift 6.4.** SwiftBuild resolves
+"diamond" package graphs by promoting a shared static library to its dynamic
+variant. Xcode keeps those variants (its build of a 3-package repro has one
+`SLib.framework`, linked by the app and by the dynamic product, and no
+diagnostic). The SwiftPM 6.4.0 command line turned the variants off, so the
+same graph fails with `Swift package product 'SwiftSoup-product' is linked as
+a static library by 'Mastodon-App-product' and 'MastodonSDKDynamic-product'`.
+SwiftPM release/6.4.2 (081eb087) restores them; with a 6.4.2 `swift-build`
+(xtool honors `SWIFTPM_CUSTOM_BIN_DIR`), the graph plans and SwiftSoup is
+built once. Turning the diagnostic off instead (`DISABLE_DIAMOND_PROBLEM_DIAGNOSTIC`)
+builds, but links SwiftSoup into both binaries, which Xcode does not do. The
+next wall is Mastodon's own pin: Nuke 10.11.2 fails with Swift 6.4
+(`ImagePipeline.swift:286:47: error: cannot convert value of type
+'Result<(data: Data, response: URLResponse?), ImagePipeline.Error>'`). The
+installer will pick up the SwiftPM fix with the first 6.4.2 toolchain; no
+workaround is shipped.

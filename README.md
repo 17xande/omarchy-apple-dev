@@ -222,7 +222,7 @@ it cannot map (FINDINGS.md item 27).
 
 ## Findings
 
-[FINDINGS.md](FINDINGS.md) records the thirty-five findings behind the working
+[FINDINGS.md](FINDINGS.md) records the thirty-six findings behind the working
 run: what broke and how each was fixed (SDK install failures, a clang version
 mismatch that breaks SwiftUI, the unstated prerequisites for debugging on
 iOS 17+), the Swift/Xcode version matrix (items 15-16), why a toolchain
