@@ -38,6 +38,7 @@ TEST_IDENTITY_DIR = Path.home() / ".config/omarchy-apple-dev/test-identity"
 TEST_TEAM = "TEST000000"
 SDK = Path(os.environ.get("DARWIN_SDK", Path.home() / ".swiftpm/swift-sdks/darwin.artifactbundle"))
 XCODE_VERSION_PLISTS = sorted(Path.home().glob(".cache/xtool/darwin-*.xtoolsdk.version.plist"))
+APP_GROUPS = [g for g in os.environ.get("APP_GROUPS", "").split(",") if g]
 
 
 def die(msg):
@@ -95,10 +96,7 @@ def stamp(app_dir, build_number):
         if not xcode_version or not xcode_build:
             die("no Xcode version recorded with the SDK; set XCODE_VERSION (27.0) and XCODE_BUILD (27A266a)")
     major, minor, patch = (xcode_version.split(".") + ["0", "0"])[:3]
-    info_path = Path(app_dir) / "Info.plist"
-    with info_path.open("rb") as f:
-        info = plistlib.load(f)
-    info.update({
+    keys = {
         "CFBundleVersion": build_number,
         "DTCompiler": "com.apple.compilers.llvm.clang.1_0",
         "DTPlatformBuild": sdk_build,
@@ -108,9 +106,23 @@ def stamp(app_dir, build_number):
         "DTSDKName": settings["CanonicalName"],
         "DTXcode": f"{int(major):02d}{minor}{patch}",
         "DTXcodeBuild": xcode_build,
-    })
-    with info_path.open("wb") as f:
-        plistlib.dump(info, f, fmt=plistlib.FMT_BINARY)
+    }
+    # App extensions need the same keys, the app's versions (ITMS-90473) and arm64 in
+    # UIRequiredDeviceCapabilities (ITMS-90502), as Xcode writes them.
+    info = None
+    for info_path in [Path(app_dir) / "Info.plist", *sorted(Path(app_dir).glob("PlugIns/*.appex/Info.plist"))]:
+        with info_path.open("rb") as f:
+            bundle_info = plistlib.load(f)
+        bundle_info.update(keys)
+        if info is None:
+            info = bundle_info
+        else:
+            bundle_info["CFBundleShortVersionString"] = info["CFBundleShortVersionString"]
+            caps = bundle_info.get("UIRequiredDeviceCapabilities", [])
+            if isinstance(caps, list) and "arm64" not in caps:
+                bundle_info["UIRequiredDeviceCapabilities"] = [*caps, "arm64"]
+        with info_path.open("wb") as f:
+            plistlib.dump(bundle_info, f, fmt=plistlib.FMT_BINARY)
     # The Linux link writes the deployment target into LC_BUILD_VERSION's sdk field; App Store
     # processing reads the SDK version from there (ITMS-90725). Record the SDK actually used.
     sdk_raw = sum(int(p) << s for p, s in zip((settings["Version"].split(".") + ["0", "0"])[:3], (16, 8, 0)))
@@ -184,12 +196,15 @@ def bundle_id(identifier):
     }}})["data"]["id"]
 
 
-def profile(identifier, cert_id):
+def profile(identifier, cert_id, force_create=False):
     name = f"omarchy-apple-dev {identifier} {cert_id[:8]}"
     found = call("GET", f"/v1/profiles?filter[name]={urllib.request.quote(name)}"
                         "&filter[profileType]=IOS_APP_STORE&filter[profileState]=ACTIVE")["data"]
-    if found:
+    if found and not force_create:
         return base64.b64decode(found[0]["attributes"]["profileContent"])
+    if found and force_create:
+        print(f"recreating App Store profile '{name}' to pick up newly enabled capabilities")
+        call("DELETE", f"/v1/profiles/{found[0]['id']}")
     print(f"creating App Store profile '{name}'")
     created = call("POST", "/v1/profiles", {"data": {
         "type": "profiles",
@@ -202,11 +217,47 @@ def profile(identifier, cert_id):
     return base64.b64decode(created["attributes"]["profileContent"])
 
 
+def ensure_app_groups(identifiers):
+    """Best-effort enable APP_GROUPS capability on each bundle id via the API. Returns the subset
+    of identifiers for which the call returned 201 (or the capability was already enabled), so the
+    caller can re-create the matching profiles to pick up the new grant. Per Apple's public OpenAPI
+    the bundleIdCapabilities endpoint exists but does not expose app-group identifiers in the
+    capability body; if the API rejects the request we report it and fall back to dropping the
+    entitlement."""
+    if not APP_GROUPS:
+        return set()
+    attached = set()
+    for ident in identifiers:
+        bid = bundle_id(ident)
+        try:
+            existing = call("GET", f"/v1/bundleIds/{bid}/bundleIdCapabilities")["data"]
+            if any(c.get("attributes", {}).get("capabilityType") == "APP_GROUPS" for c in existing):
+                print(f"APP_GROUPS capability already enabled for {ident}")
+                attached.add(ident)
+                continue
+            call("POST", "/v1/bundleIdCapabilities", {"data": {
+                "type": "bundleIdCapabilities",
+                "attributes": {"capabilityType": "APP_GROUPS"},
+                "relationships": {"bundleId": rel("bundleIds", bid)},
+            }})
+            print(f"enabled APP_GROUPS capability for {ident}")
+            attached.add(ident)
+        except urllib.error.HTTPError as e:
+            body = e.read().decode(errors="replace") if e.fp else ""
+            print(f"warning: cannot enable APP_GROUPS for {ident}: HTTP {e.code} {e.reason} {body[:160]}")
+    return attached
+
+
 def identity(app_dir, out_dir):
-    """Apple identity via the API: write embedded.mobileprovision into the app; key, cert and
-    entitlements into out_dir."""
+    """Apple identity via the API: register each bundle id, write embedded.mobileprovision into the
+    app and every PlugIns/*.appex, and write per-bundle entitlements and the signing key/cert into
+    out_dir."""
     cert_id, key_path, cert_path = certificate()
-    install_identity(app_dir, out_dir, profile(bundle_identifier(app_dir), cert_id), key_path, cert_path)
+    idents = [ident for _, ident in bundles(app_dir)]
+    attached = ensure_app_groups(idents)
+    prov_for = lambda ident, c=attached, ci=cert_id: profile(
+        ident, ci, force_create=(ident in c))
+    install_all_bundles(app_dir, out_dir, prov_for, key_path, cert_path)
 
 
 def test_identity(app_dir, out_dir):
@@ -237,23 +288,77 @@ def test_identity(app_dir, out_dir):
         cert_path.write_bytes(cert.public_bytes(serialization.Encoding.DER))
     key = serialization.load_pem_private_key(key_path.read_bytes(), password=None)
     cert = x509.load_der_x509_certificate(cert_path.read_bytes())
-    identifier = bundle_identifier(app_dir)
+    install_all_bundles(app_dir, out_dir,
+                        lambda ident: make_test_profile(ident, key, cert, now), key_path, cert_path)
+    print(f"TEST identity (self-signed, team {team}): Apple will reject this signature; use it to check the pipeline")
+
+
+def make_test_profile(identifier, key, cert, now):
+    team = TEST_TEAM
+    entitlements = {
+        "application-identifier": f"{team}.{identifier}", "com.apple.developer.team-identifier": team,
+        "beta-reports-active": True, "get-task-allow": False, "keychain-access-groups": [f"{team}.*"],
+    }
+    if APP_GROUPS:
+        entitlements["com.apple.security.application-groups"] = list(APP_GROUPS)
     payload = plistlib.dumps({
         "AppIDName": identifier, "ApplicationIdentifierPrefix": [team], "Platform": ["iOS"],
         "CreationDate": now.replace(tzinfo=None), "ExpirationDate": cert.not_valid_after_utc.replace(tzinfo=None),
-        "DeveloperCertificates": [cert_path.read_bytes()],
-        "Entitlements": {
-            "application-identifier": f"{team}.{identifier}", "com.apple.developer.team-identifier": team,
-            "beta-reports-active": True, "get-task-allow": False, "keychain-access-groups": [f"{team}.*"],
-        },
+        "DeveloperCertificates": [cert_path_bytes()],
+        "Entitlements": entitlements,
         "Name": f"omarchy-apple-dev TEST profile {identifier} (not from Apple)",
         "TeamIdentifier": [team], "TeamName": "omarchy-apple-dev TEST", "TimeToLive": 365,
         "UUID": str(uuid.uuid4()).upper(), "Version": 1,
     })
-    prov = (pkcs7.PKCS7SignatureBuilder().set_data(payload)
+    return (pkcs7.PKCS7SignatureBuilder().set_data(payload)
             .add_signer(cert, key, hashes.SHA256()).sign(serialization.Encoding.DER, []))
-    print(f"TEST identity (self-signed, team {team}): Apple will reject this signature; use it to check the pipeline")
-    install_identity(app_dir, out_dir, prov, key_path, cert_path)
+
+
+def cert_path_bytes():
+    return (TEST_IDENTITY_DIR / "cert.der").read_bytes()
+
+
+def bundles(app_dir):
+    """The app and every PlugIns/*.appex, in deterministic order, each paired with its bundle id."""
+    app = Path(app_dir)
+    out = [(app, bundle_identifier(app))]
+    for appex in sorted(app.glob("PlugIns/*.appex")):
+        out.append((appex, bundle_identifier(appex)))
+    return out
+
+
+def install_all_bundles(app_dir, out_dir, prov_for, key_path, cert_path):
+    """For every bundle (app + each PlugIns/*.appex): embed the profile, write a per-bundle
+    entitlements plist (application-identifier, team-identifier, beta-reports-active if granted,
+    get-task-allow false; com.apple.security.application-groups if the profile grants it; if a
+    requested APP_GROUPS group is dropped, emit one warning naming it)."""
+    out = Path(out_dir)
+    out.mkdir(parents=True, exist_ok=True)
+    groups_warned = False
+    for path, ident in bundles(app_dir):
+        prov = prov_for(ident)
+        (path / "embedded.mobileprovision").write_bytes(prov)
+        payload = profile_payload(prov)
+        granted = payload["Entitlements"]
+        entitlements = {k: granted[k] for k in (
+            "application-identifier", "com.apple.developer.team-identifier", "beta-reports-active")
+            if k in granted}
+        entitlements["get-task-allow"] = False
+        granted_groups = set(granted.get("com.apple.security.application-groups", []))
+        if granted_groups:
+            entitlements["com.apple.security.application-groups"] = sorted(granted_groups)
+        elif APP_GROUPS and not groups_warned:
+            print(f"warning: com.apple.security.application-groups dropped for {ident} "
+                  f"(profile grants none; requested {', '.join(APP_GROUPS)})")
+            groups_warned = True
+        ent_name = "entitlements.plist" if path == Path(app_dir) else f"{path.stem}-entitlements.plist"
+        (out / ent_name).write_bytes(plistlib.dumps(entitlements))
+        print(f"identity for {entitlements['application-identifier']}: profile {payload['UUID']}, "
+              f"expires {payload['ExpirationDate']:%Y-%m-%d}")
+    for name, src in (("key.pem", key_path), ("cert.der", cert_path)):
+        dest = out / name
+        dest.unlink(missing_ok=True)
+        dest.symlink_to(src)
 
 
 def bundle_identifier(app_dir):
@@ -264,24 +369,6 @@ def bundle_identifier(app_dir):
 def profile_payload(prov):
     # A profile is CMS-signed; its payload is a plain XML plist.
     return plistlib.loads(prov[prov.index(b"<?xml"):prov.index(b"</plist>") + len(b"</plist>")])
-
-
-def install_identity(app_dir, out_dir, prov, key_path, cert_path):
-    (Path(app_dir) / "embedded.mobileprovision").write_bytes(prov)
-    payload = profile_payload(prov)
-    granted = payload["Entitlements"]
-    entitlements = {k: granted[k] for k in (
-        "application-identifier", "com.apple.developer.team-identifier", "beta-reports-active") if k in granted}
-    entitlements["get-task-allow"] = False
-    out = Path(out_dir)
-    out.mkdir(parents=True, exist_ok=True)
-    (out / "entitlements.plist").write_bytes(plistlib.dumps(entitlements))
-    for name, src in (("key.pem", key_path), ("cert.der", cert_path)):
-        dest = out / name
-        dest.unlink(missing_ok=True)
-        dest.symlink_to(src)
-    print(f"identity for {entitlements['application-identifier']}: profile {payload['UUID']}, "
-          f"expires {payload['ExpirationDate']:%Y-%m-%d}")
 
 
 # -- validate ----------------------------------------------------------------
@@ -479,6 +566,70 @@ def validate(ipa):
             signers = {c.public_bytes(serialization.Encoding.DER) for c in pkcs7.load_pem_pkcs7_certificates(cms)}
             check(bool(signers & set(prov.get("DeveloperCertificates", []))),
                   "signing certificate is one of the profile's DeveloperCertificates")
+
+        for appex in sorted(app.glob("PlugIns/*.appex")):
+            with (appex / "Info.plist").open("rb") as f:
+                ainfo = plistlib.load(f)
+            check(ainfo.get("DTPlatformName") == "iphoneos" and ainfo.get("DTXcode") == info.get("DTXcode"),
+                  f"appex {appex.name}: build-environment keys (ITMS-90507)")
+            check(ainfo.get("CFBundleVersion") == info.get("CFBundleVersion")
+                  and ainfo.get("CFBundleShortVersionString") == info.get("CFBundleShortVersionString"),
+                  f"appex {appex.name}: versions match the app (ITMS-90473)")
+            check("arm64" in ainfo.get("UIRequiredDeviceCapabilities", []),
+                  f"appex {appex.name}: UIRequiredDeviceCapabilities has arm64 (ITMS-90502)")
+            aexe = appex / ainfo.get("CFBundleExecutable", "")
+            aprov = appex / "embedded.mobileprovision"
+            if check(aprov.exists(), f"appex {appex.name}: embedded.mobileprovision present"):
+                aprov_pl = profile_payload(aprov.read_bytes())
+                ateam = (aprov_pl.get("TeamIdentifier") or [""])[0]
+                agranted = aprov_pl["Entitlements"]
+                aapp_id = agranted.get("application-identifier", "")
+                check("ProvisionedDevices" not in aprov_pl and not aprov_pl.get("ProvisionsAllDevices"),
+                      f"appex {appex.name}: App Store profile")
+                check(aapp_id in (f"{ateam}.{ainfo.get('CFBundleIdentifier')}", f"{ateam}.*"),
+                      f"appex {appex.name}: profile app id {aapp_id} covers {ainfo.get('CFBundleIdentifier')}")
+            else:
+                continue
+            verify = subprocess.run([rcodesign, "verify", str(aexe)], capture_output=True, text=True, check=False)
+            check(verify.returncode == 0,
+                  f"appex {appex.name}: rcodesign verify {aexe.name}"
+                  f"{'' if verify.returncode == 0 else ': ' + verify.stderr.strip()[-200:]}")
+            acd = subprocess.run([rcodesign, "extract", "code-directory", str(aexe)],
+                                 capture_output=True, text=True, check=True).stdout
+            acd_team = re.search(r'team_name: Some\(\s*"([^"]*)"', acd)
+            check(bool(acd_team) and acd_team.group(1) == ateam,
+                  f"appex {appex.name}: CodeDirectory team id matches profile")
+            aslots = dict(re.findall(r"(Info|Resources) \(\d\): ([0-9a-f]{64})", acd))
+            aseal = appex / "_CodeSignature" / "CodeResources"
+            check(aslots.get("Info") == hashlib.sha256((appex / "Info.plist").read_bytes()).hexdigest(),
+                  f"appex {appex.name}: Info.plist matches its sealed hash")
+            check(aseal.exists() and aslots.get("Resources") == hashlib.sha256(aseal.read_bytes()).hexdigest(),
+                  f"appex {appex.name}: _CodeSignature/CodeResources matches its sealed hash")
+            afiles2 = plistlib.loads(aseal.read_bytes()).get("files2", {}) if aseal.exists() else {}
+            achanged = [p for p, v in afiles2.items() if not (isinstance(v, dict) and v.get("optional")) and (
+                not (appex / p).is_file()
+                or (v["hash2"] if isinstance(v, dict) else v) != hashlib.sha256((appex / p).read_bytes()).digest())]
+            aunsealed = [str(p.relative_to(appex)) for p in appex.rglob("*") if p.is_file()
+                         and str(p.relative_to(appex)) not in afiles2 and p != aexe and p != appex / "Info.plist"
+                         and p.relative_to(appex).parts[0] != "_CodeSignature"]
+            check(not achanged and not aunsealed, f"appex {appex.name}: every file is sealed"
+                  f"{f'; changed {achanged}' if achanged else ''}"
+                  f"{f'; unsealed {aunsealed}' if aunsealed else ''}")
+            axml = signature_blob(rcodesign, aexe, b"\xfa\xde\x71\x71")
+            asent_ent = plistlib.loads(axml) if axml else {}
+            check(asent_ent.get("application-identifier") == aapp_id
+                  and asent_ent.get("com.apple.developer.team-identifier") == ateam,
+                  f"appex {appex.name}: signed entitlements match its profile")
+            check(asent_ent.get("get-task-allow") is False, f"appex {appex.name}: signed get-task-allow is false")
+            aextra = set(asent_ent) - set(agranted)
+            check(not aextra,
+                  f"appex {appex.name}: signed entitlements are a subset of its profile"
+                  f"{': extra ' + str(aextra) if aextra else ''}")
+            acms = subprocess.run([rcodesign, "extract", "cms-pem", str(aexe)],
+                                  capture_output=True, check=True).stdout
+            asigners = {c.public_bytes(serialization.Encoding.DER) for c in pkcs7.load_pem_pkcs7_certificates(acms)}
+            check(bool(asigners & set(aprov_pl.get("DeveloperCertificates", []))),
+                  f"appex {appex.name}: signing certificate is one of the profile's DeveloperCertificates")
 
     failed = results.count(False)
     print(f"{len(results) - failed}/{len(results)} checks passed")

@@ -84,8 +84,21 @@ else
 fi
 team=$("$PY" -c 'import plistlib,sys; print(plistlib.load(open(sys.argv[1],"rb"))["com.apple.developer.team-identifier"])' \
   "$sign_dir/entitlements.plist")
-rcodesign sign --pem-file "$sign_dir/key.pem" --certificate-der-file "$sign_dir/cert.der" --team-name "$team" \
-  --entitlements-xml-file "$sign_dir/entitlements.plist" "$app"
+# Inside-out: every dylib and each PlugIns/*.appex is signed with its own entitlements BEFORE
+# the app, so the app's _CodeSignature seals already-signed nested code. rcodesign's app sign
+# preserves the pre-signed appex signatures; the bare --entitlements-xml-file applies to the
+# main entity only (verified empirically).
+sign_args=(--pem-file "$sign_dir/key.pem" --certificate-der-file "$sign_dir/cert.der" --team-name "$team")
+shopt -s nullglob
+for dylib in "$app"/Frameworks/*.dylib; do
+  rcodesign sign "${sign_args[@]}" "$dylib"
+done
+for appex in "$app"/PlugIns/*.appex; do
+  stem=$(basename "$appex" .appex)
+  rcodesign sign "${sign_args[@]}" --entitlements-xml-file "$sign_dir/$stem-entitlements.plist" "$appex"
+done
+shopt -u nullglob
+rcodesign sign "${sign_args[@]}" --entitlements-xml-file "$sign_dir/entitlements.plist" "$app"
 
 echo "== 5. Package =="
 name=$(basename "$app" .app)
