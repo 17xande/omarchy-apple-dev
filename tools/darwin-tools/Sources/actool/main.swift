@@ -86,7 +86,9 @@ if symbolFlags.contains(where: { options[$0] != nil }) {
 // SwiftBuild passes every catalog of a target in one call; AssetKit compiles one catalog and
 // only some asset types. Everything left out is reported as a warning.
 let prepared = try CatalogMerge.prepare(inputs, appIcon: option("--app-icon"))
-let (source, singleSizeBundle) = try SingleSizeIcon.expandIfNeeded(catalog: prepared.catalog, appIcon: option("--app-icon") ?? "AppIcon")
+let (source, singleSizeBundle) = try SingleSizeIcon.expandIfNeeded(
+    catalog: prepared.catalog, appIcon: option("--app-icon") ?? "AppIcon",
+    idioms: options["--target-device"] ?? ["iphone", "ipad"])
 defer {
     for url in Set([prepared.catalog, source]) {
         try? FileManager.default.removeItem(at: url.deletingLastPathComponent())

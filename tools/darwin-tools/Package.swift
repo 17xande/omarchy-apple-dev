@@ -9,7 +9,7 @@ let package = Package(
         // AssetKit 1.0.0 plus actool 27.0 parity fixes: named colors in every Xcode color space
         // (FINDINGS.md 24, 27), per-size icon renditions (26), and actool's BOM layout and
         // single-size icon form (37).
-        .package(url: "https://github.com/joshuaswarren/AssetKit", revision: "410cf2fcf8a43e1c385fc772d40a04325e5bd67b"),
+        .package(url: "https://github.com/joshuaswarren/AssetKit", revision: "87cd7d6df62bb088390ffce3eaa104393169e701"),
         .package(url: "https://github.com/tayloraswift/swift-png", from: "4.5.0"),
     ],
     targets: [

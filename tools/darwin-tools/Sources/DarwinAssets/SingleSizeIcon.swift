@@ -3,66 +3,70 @@ import Foundation
 import PNG
 
 // Xcode 14+ app icons are one 1024 pt "universal" image with no scale; actool
-// derives everything from it. AssetKit needs one explicit entry, so rewrite
-// that form into the exact shape Apple's actool produces for it:
+// derives everything from it. AssetKit keys renditions per idiom and per
+// appearance, so rewrite that form into the exact shape Apple's actool
+// compiles for it (verified against Apple's actool 27.0 output for the NNW
+// catalog, oracle/nnwcar/apple):
 //
-// - one catalog entry (iphone, 1024x1024, 1x, source renamed icon.png) so
-//   AssetKit emits Apple's two renditions (the 1024 bitmap + a MultiSized
-//   container listing it),
+// - one 1024x1024 1x entry per target device and appearance variant
+//   (default, dark, tinted), source filenames kept: actool stores them in
+//   the CSI name field,
 // - loose AppIcon60x60@2x.png (120 px) and AppIcon76x76@2x~ipad.png (152 px)
 //   downsamples, as Apple writes for this form,
 // - an AppIconBundle with Apple's partial-plist shape.
 //
+// Everything else in the catalog is preserved: only the AppIcon.appiconset
+// is replaced, so imagesets and colorsets keep compiling.
+//
 // Classic appiconsets that list every size are left untouched (the classic
 // multi-rendition car is what those apps have always shipped).
 public enum SingleSizeIcon {
-    public struct Expanded {
-        /// Catalog for AssetKit (temporary directory).
-        public var catalog: URL
-        /// Apple-shaped bundle overriding AssetKit's appIconBundle.
-        public var bundle: AppIconBundle
-    }
-
     /// Returns `catalog` itself, or an expanded copy under a temporary
-    /// directory when its AppIcon uses the single-size form.
-    public static func expandIfNeeded(catalog: URL, appIcon: String) throws -> (URL, AppIconBundle?) {
+    /// directory when its AppIcon uses the single-size form. `idioms` are
+    /// actool's `--target-device` values.
+    public static func expandIfNeeded(catalog: URL, appIcon: String, idioms: [String]) throws -> (URL, AppIconBundle?) {
         let fm = FileManager.default
         guard let iconSet = try fm.contentsOfDirectory(at: catalog, includingPropertiesForKeys: nil)
             .first(where: { $0.pathExtension == "appiconset" }) else { return (catalog, nil) }
         let contentsURL = iconSet.appendingPathComponent("Contents.json")
         guard let contents = try JSONSerialization.jsonObject(with: Data(contentsOf: contentsURL)) as? [String: Any],
               let images = contents["images"] as? [[String: Any]],
-              images.allSatisfy({ $0["idiom"] as? String == "universal" && $0["scale"] == nil }),
-              let only = images.first(where: { $0["appearances"] == nil }),
-              only["size"] as? String == "1024x1024", let filename = only["filename"] as? String
+              !images.isEmpty,
+              images.allSatisfy({
+                  $0["idiom"] as? String == "universal"
+                      && $0["scale"] == nil
+                      && $0["size"] as? String == "1024x1024"
+              }),
+              let base = images.first(where: { $0["appearances"] == nil }),
+              let baseFilename = base["filename"] as? String
         else { return (catalog, nil) }
-        if images.count > 1 {
-            FileHandle.standardError.write(Data("\(iconSet.path): warning: dark and tinted icon variants are not compiled on Linux\n".utf8))
-        }
 
-        let sourceURL = iconSet.appendingPathComponent(filename)
+        let sourceURL = iconSet.appendingPathComponent(baseFilename)
         guard let source = try PNG.Image.decompress(path: sourceURL.path) else {
             throw CocoaError(.fileReadNoSuchFile)
         }
         let pixels = source.unpack(as: PNG.RGBA<UInt8>.self)
 
+        // Copy the merged catalog, replacing only the appiconset.
         let work = fm.temporaryDirectory.appendingPathComponent("xcassets-\(UUID().uuidString)")
         let expanded = work.appendingPathComponent(catalog.lastPathComponent)
-        let outSet = expanded.appendingPathComponent("AppIcon.appiconset")
-        try fm.createDirectory(at: outSet, withIntermediateDirectories: true)
+        try fm.copyItem(at: catalog, to: expanded)
+        let outSet = expanded.appendingPathComponent(iconSet.lastPathComponent)
 
-        // Catalog entry matching Apple's single-size car shape: one iphone
-        // 1024 entry named icon.png -> one bitmap rendition (scale 1, index 1)
-        // plus a MultiSized container listing it.
-        try fm.copyItem(at: sourceURL, to: outSet.appendingPathComponent("icon.png"))
+        // Entries matching Apple's compiled shape: every variant keyed once
+        // per target idiom, source filename preserved (actool puts it in the
+        // CSI name field; assetutil surfaces it as RenditionName).
+        let entries: [[String: Any]] = idioms.flatMap { idiom in
+            images.filter { $0["filename"] != nil }.map { image in
+                image.merging(["idiom": idiom, "scale": "1x"]) { $1 }
+            }
+        }
         let newContents: [String: Any] = [
-            "images": [["filename": "icon.png", "idiom": "iphone", "size": "1024x1024", "scale": "1x"]],
+            "images": entries,
             "info": ["author": "xcode", "version": 1],
         ]
-        try JSONSerialization.data(withJSONObject: newContents)
+        try JSONSerialization.data(withJSONObject: newContents, options: [.prettyPrinted, .sortedKeys])
             .write(to: outSet.appendingPathComponent("Contents.json"))
-        try Data(#"{"info":{"author":"xcode","version":1}}"#.utf8)
-            .write(to: expanded.appendingPathComponent("Contents.json"))
 
         // Loose PNGs Apple writes for this form: the home-screen sizes.
         var loose: [LooseFile] = []
@@ -88,11 +92,9 @@ public enum SingleSizeIcon {
             ] as [String: any Sendable],
         ]
         var additions: [String: any Sendable] = ["CFBundleIcons": primary]
-        additions["CFBundleIcons~ipad"] = [
-            "CFBundlePrimaryIcon": [
-                "CFBundleIconFiles": ["AppIcon60x60", "AppIcon76x76"],
-            ] as [String: any Sendable],
-        ] as [String: any Sendable]
+        var ipad: [String: any Sendable] = ["CFBundleIconFiles": ["AppIcon60x60", "AppIcon76x76"]]
+        if idioms.contains("ipad") { ipad["CFBundleIconName"] = appIcon }
+        additions["CFBundleIcons~ipad"] = ["CFBundlePrimaryIcon": ipad] as [String: any Sendable]
         let bundle = AppIconBundle(
             primaryIconName: appIcon,
             infoPlistAdditions: additions,
