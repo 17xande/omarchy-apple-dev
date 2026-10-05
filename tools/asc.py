@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""App Store steps for ship.sh: stamp, identity, test-identity, validate, upload.
+"""App Store steps for ship.sh: stamp, frameworks, identity, test-identity, validate, upload.
 
 Runs with the pymobiledevice3 venv's python, which already has `cryptography`.
 API key: ASC_KEY_ID, ASC_ISSUER_ID, and ASC_KEY_PATH (default
@@ -152,6 +152,81 @@ def set_macho_sdk(path, sdk_raw):
     if changed:
         path.write_bytes(data)
     return changed
+
+
+# LC_LOAD_DYLIB, LC_ID_DYLIB, LC_LOAD_WEAK_DYLIB, LC_REEXPORT_DYLIB, LC_LOAD_UPWARD_DYLIB
+DYLIB_COMMANDS = {0xC, 0xD, 0x80000018, 0x8000001F, 0x80000023}
+FRAMEWORK_INFO_KEYS = (
+    "CFBundleShortVersionString", "CFBundleVersion", "CFBundleSupportedPlatforms", "MinimumOSVersion",
+    "UIDeviceFamily", "DTCompiler", "DTPlatformBuild", "DTPlatformName", "DTPlatformVersion", "DTSDKBuild",
+    "DTSDKName", "DTXcode", "DTXcodeBuild",
+)
+
+
+def frameworks(app_dir):
+    """Wrap each Frameworks/lib<Name>.dylib (a SwiftPM .dynamic product) as <Name>.framework, as
+    Xcode does. App Store processing takes a loose dylib there for a Swift runtime library and
+    rejects the build for a missing SwiftSupport folder (ITMS-90426). Run after stamp."""
+    app = Path(app_dir)
+    with (app / "Info.plist").open("rb") as f:
+        info = plistlib.load(f)
+    renames = {}
+    for dylib in sorted(app.glob("Frameworks/lib*.dylib")):
+        name = dylib.name[len("lib"):-len(".dylib")]
+        framework = dylib.parent / f"{name}.framework"
+        framework.mkdir()
+        dylib.rename(framework / name)
+        renames[f"@rpath/{dylib.name}".encode()] = f"@rpath/{name}.framework/{name}".encode()
+        framework_info = {k: info[k] for k in FRAMEWORK_INFO_KEYS if k in info}
+        framework_info.update({
+            "CFBundleExecutable": name,
+            "CFBundleIdentifier": f"{info['CFBundleIdentifier']}.{re.sub(r'[^A-Za-z0-9.-]', '-', name)}",
+            "CFBundleInfoDictionaryVersion": "6.0",
+            "CFBundleName": name,
+            "CFBundlePackageType": "FMWK",
+        })
+        with (framework / "Info.plist").open("wb") as f:
+            plistlib.dump(framework_info, f, fmt=plistlib.FMT_BINARY)
+    for path in app.rglob("*"):
+        if renames and path.is_file() and not path.is_symlink():
+            rename_dylibs(path, renames)
+    print(f"wrapped {len(renames)} dylib(s) as frameworks")
+
+
+def rename_dylibs(path, renames):
+    """Rewrite dylib install names in the load commands of a thin 64-bit Mach-O, in place. The
+    longer names use the header padding before the first section."""
+    with path.open("rb") as f:
+        if f.read(4) != b"\xcf\xfa\xed\xfe":
+            return
+    data = bytearray(path.read_bytes())
+    ncmds, sizeofcmds = struct.unpack_from("<2I", data, 16)
+    off, commands, changed, first_section = 32, [], False, len(data)
+    for _ in range(ncmds):
+        cmd, size = struct.unpack_from("<2I", data, off)
+        raw = bytes(data[off:off + size])
+        if cmd in DYLIB_COMMANDS:
+            name = raw[struct.unpack_from("<I", raw, 8)[0]:].split(b"\0", 1)[0]
+            if name in renames:
+                new_name = renames[name] + b"\0" * (8 - (len(renames[name]) % 8))
+                raw = struct.pack("<3I", cmd, 24 + len(new_name), 24) + raw[12:24] + new_name
+                changed = True
+        elif cmd == 0x19:  # LC_SEGMENT_64
+            for i in range(struct.unpack_from("<I", raw, 64)[0]):
+                sect_offset, = struct.unpack_from("<I", raw, 72 + i * 80 + 48)
+                sect_type = struct.unpack_from("<I", raw, 72 + i * 80 + 64)[0] & 0xFF
+                if sect_offset and sect_type not in (0x1, 0xC, 0x12):  # zerofill sections have no bytes
+                    first_section = min(first_section, sect_offset)
+        commands.append(raw)
+        off += size
+    if not changed:
+        return
+    new = b"".join(commands)
+    if 32 + len(new) > first_section:
+        die(f"{path}: no header room to rename its dylibs (link with -headerpad_max_install_names)")
+    struct.pack_into("<I", data, 20, len(new))
+    data[32:32 + max(len(new), sizeofcmds)] = new.ljust(sizeofcmds, b"\0")
+    path.write_bytes(data)
 
 
 # -- identity ----------------------------------------------------------------
@@ -459,6 +534,15 @@ def validate(ipa):
         app = Path(tmp) / "Payload" / apps[0]
         nested = sorted(p.parent.name for p in app.glob("PlugIns/*.appex/Frameworks"))
         check(not nested, f"app extensions carry no Frameworks/ (ITMS-90206){': ' + ', '.join(nested) if nested else ''}")
+        loose = sorted(p.name for p in app.glob("Frameworks/*.dylib"))
+        check(not loose, f"no loose dylibs in Frameworks/ (ITMS-90426){': ' + ', '.join(loose) if loose else ''}")
+        for framework in sorted(app.glob("Frameworks/*.framework")):
+            with (framework / "Info.plist").open("rb") as f:
+                finfo = plistlib.load(f)
+            fexe = framework / finfo.get("CFBundleExecutable", "")
+            fverify = subprocess.run([rcodesign, "verify", str(fexe)], capture_output=True, text=True, check=False)
+            check(finfo.get("CFBundlePackageType") == "FMWK" and fexe.is_file() and fverify.returncode == 0,
+                  f"framework {framework.name}: FMWK Info.plist, signed executable")
 
         with (app / "Info.plist").open("rb") as f:
             info = plistlib.load(f)
@@ -690,9 +774,9 @@ def upload(ipa):
 
 
 if __name__ == "__main__":
-    commands = {"stamp": stamp, "identity": identity, "test-identity": test_identity,
+    commands = {"stamp": stamp, "frameworks": frameworks, "identity": identity, "test-identity": test_identity,
                 "validate": validate, "upload": upload}
     if len(sys.argv) < 2 or sys.argv[1] not in commands:
-        die("usage: asc.py stamp APP BUILD | identity APP OUTDIR | test-identity APP OUTDIR"
+        die("usage: asc.py stamp APP BUILD | frameworks APP | identity APP OUTDIR | test-identity APP OUTDIR"
             " | validate IPA | upload IPA")
     commands[sys.argv[1]](*sys.argv[2:])

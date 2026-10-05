@@ -72,8 +72,9 @@ plistlib.dump(d, open(p,"wb"), fmt=plistlib.FMT_BINARY)' "$app/Info.plist" "$sta
   *) echo "more than one $icon.appiconset or $icon.icon: ${catalogs[*]}" >&2; exit 1 ;;
 esac
 
-echo "== 3. App Store Info.plist keys =="
+echo "== 3. App Store Info.plist keys and frameworks =="
 "$PY" "$ASC" stamp "$app" "${BUILD_NUMBER:-$(date -u +%Y%m%d%H%M)}"
+"$PY" "$ASC" frameworks "$app"
 
 echo "== 4. Distribution identity and signature =="
 sign_dir=xtool/ship-signing
@@ -84,14 +85,14 @@ else
 fi
 team=$("$PY" -c 'import plistlib,sys; print(plistlib.load(open(sys.argv[1],"rb"))["com.apple.developer.team-identifier"])' \
   "$sign_dir/entitlements.plist")
-# Inside-out: every dylib and each PlugIns/*.appex is signed with its own entitlements BEFORE
-# the app, so the app's _CodeSignature seals already-signed nested code. rcodesign's app sign
-# preserves the pre-signed appex signatures; the bare --entitlements-xml-file applies to the
-# main entity only (verified empirically).
+# Inside-out: every framework, then each PlugIns/*.appex with its own entitlements, is signed
+# BEFORE the app, so the app's _CodeSignature seals already-signed nested code. rcodesign's app
+# sign preserves the pre-signed nested signatures; the bare --entitlements-xml-file applies to
+# the main entity only (verified empirically).
 sign_args=(--pem-file "$sign_dir/key.pem" --certificate-der-file "$sign_dir/cert.der" --team-name "$team")
 shopt -s nullglob
-for dylib in "$app"/Frameworks/*.dylib; do
-  rcodesign sign "${sign_args[@]}" "$dylib"
+for framework in "$app"/Frameworks/*.framework; do
+  rcodesign sign "${sign_args[@]}" "$framework"
 done
 for appex in "$app"/PlugIns/*.appex; do
   stem=$(basename "$appex" .appex)
