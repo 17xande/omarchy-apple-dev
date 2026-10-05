@@ -959,3 +959,20 @@ renditions match Apple's `assetutil` output). Symbol sets are still skipped.
 The regression set passes: demo 37/37, iPad demo 38/38, IceCubesApp 98/98,
 NetNewsWire 83/83. IceCubesApp (without its extensions) is VALID with the same
 toolchain. Receipt: `receipts/2026-10-05-netnewswire-testflight.md`.
+
+## Mastodon builds and ships offline, 2026-10-05
+
+**41. Mastodon for iOS builds on Linux with the stock Swift 6.4.0 toolchain and
+passes all 114 offline App Store checks.** `compat/mastodon/setup.sh` applies
+two documented overlay changes before the generator runs. Nuke moves from
+10.11.2, which neither Swift 6.4 nor Xcode 27 compiles (item 36), to 12.9.0;
+the one call site moves to the `NukeExtensions` module. The SwiftSoup diamond
+(item 36) is removed from the project side instead of with SwiftPM 6.4.2,
+which has no release: MastoParse (3 files) is vendored into the MastodonSDK
+package as a target of `MastodonSDKDynamic`, so both SwiftSoup users sit in
+the dylib and SwiftSoup is linked once, as Xcode's build does (the app binary
+has no SwiftSoup strings; the framework has them). A fresh run:
+`setup=0`, `Build complete! (96.71 secs)`, `ship.sh`: `114/114 checks passed`
+with the TEST identity. The app and its 5 extensions need App Store Connect
+records before an upload. The launch and main storyboards are still excluded
+(no `ibtool`).

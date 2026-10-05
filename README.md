@@ -205,10 +205,11 @@ Known limits: storyboards and xibs cannot be compiled (no `ibtool`), Icon
 Composer icons render flat, and alternate app icons, symbol sets and HEIC
 images are left out with a warning (FINDINGS.md items 24, 27, 29). PDF
 imagesets need poppler's `pdftocairo`, which the installer adds.
-`compat/icecubes/` and `compat/nnw/` reproduce IceCubesApp and NetNewsWire,
-which build with their app extensions and pass `ship.sh`'s offline checks;
-NetNewsWire is also `VALID` in App Store Connect. `compat/mastodon/` stops at
-the walls in FINDINGS.md item 36.
+`compat/icecubes/`, `compat/nnw/` and `compat/mastodon/` reproduce IceCubesApp,
+NetNewsWire and Mastodon for iOS, which build with their app extensions and
+pass `ship.sh`'s offline checks; NetNewsWire and IceCubesApp are also `VALID`
+in App Store Connect. Mastodon needs two overlay changes, applied by its setup
+script (FINDINGS.md item 41).
 
 For your own Xcode project, `tools/xcodeproj2xtool.py App.xcodeproj` writes an
 xtool adapter (`omarchy-xtool/`) next to it and prints a warning for each thing
