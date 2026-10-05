@@ -72,3 +72,15 @@ demo 38/38, IceCubesApp 98/98, NetNewsWire 83/83.
 Open: upload 8198e86f (the Linux build with Apple's `actool` car for the same
 catalog, compiled on a Mac) also stayed in `PROCESSING`. That car came from a
 standalone `actool` run, not from an Xcode build, and is not explained yet.
+
+## IceCubesApp, same toolchain
+
+IceCubesApp from `regress-full.sh` (`reg-icecubes-0853`), its extensions left
+out because their bundle IDs have no App Store Connect records, uploaded under
+the NetNewsWire record as a diagnostic: `buildUpload 531e358f: COMPLETE`, then
+
+```
+531e358f-a804-4f65-ba84-702a88d746ac 202610050911 VALID 2026-10-05T02:12:47-07:00 False 18.5 APP_STORE_ELIGIBLE
+```
+
+Before AssetKit 1f23d61, the same app stayed in `PROCESSING`.

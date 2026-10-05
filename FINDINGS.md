@@ -954,4 +954,5 @@ The Linux `actool` also compiles PDF imagesets now (a vector rendition and
 1x/2x/3x bitmaps through poppler's `pdftocairo`; 76 of 76 NetNewsWire PDF
 renditions match Apple's `assetutil` output). Symbol sets are still skipped.
 The regression set passes: demo 37/37, iPad demo 38/38, IceCubesApp 98/98,
-NetNewsWire 83/83. Receipt: `receipts/2026-10-05-netnewswire-testflight.md`.
+NetNewsWire 83/83. IceCubesApp (without its extensions) is VALID with the same
+toolchain. Receipt: `receipts/2026-10-05-netnewswire-testflight.md`.
