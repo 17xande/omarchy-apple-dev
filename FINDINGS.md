@@ -991,3 +991,11 @@ byte-identical to the 36 files in Xcode's own NetNewsWire.app. `tools/nibarchive
 dumps a nib as a readable object graph and diffs two nibs; its self-test
 decodes all 33 golden nibs. This is the comparison harness for a Linux `ibtool`;
 nothing compiles storyboards on Linux yet.
+
+The generator now replaces a launch storyboard it can express as the
+`UILaunchScreen` Info.plist dictionary (one bare view with a background color,
+plus at most one centered named image) instead of dropping it. NetNewsWire's
+two launch storyboards (system background, nothing else) become
+`UILaunchScreen = {}`, and its "launch UI will be missing" warning is gone.
+Mastodon's launch storyboard is also its main interface, so it stays excluded
+with the warning.

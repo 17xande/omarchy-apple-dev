@@ -50,5 +50,8 @@ python3 "$here/../../tools/xcodeproj2xtool.py" "$dir/NetNewsWire.xcodeproj" ${BU
 # The generator resolves the Xcode placeholders in iOS/Resources/Info.plist from
 # the xcconfig files and prints APP_ICON=AppIcon. NetNewsWire's 15 local packages
 # are `type: .dynamic`; the xtool that install-toolchain.sh builds links them
-# (FINDINGS.md 27.3). The generator excludes NetNewsWire's 7 storyboards/xibs (no
-# ibtool on Linux) with a warning; the app builds but its UIKit UI cannot load.
+# (FINDINGS.md 27.3). NetNewsWire's 7 storyboards/xibs are excluded (no ibtool
+# on Linux) with a warning; the two launch storyboards (bare system-background
+# views) are replaced by the UILaunchScreen Info.plist dictionary, but
+# Main/Settings/Inspector and the xib cells are gone, so the app's UIKit UI
+# cannot load.
