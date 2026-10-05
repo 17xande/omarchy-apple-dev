@@ -482,6 +482,42 @@ def macho(path):
     return cputype, filetype, flags, minos, sdk, signed
 
 
+def loads_dylib(path, needle):
+    """True if a thin 64-bit Mach-O has a load/weak/reexport/upward dylib command naming needle."""
+    data = Path(path).read_bytes()
+    if data[:4] != b"\xcf\xfa\xed\xfe":
+        return False
+    ncmds = struct.unpack_from("<I", data, 16)[0]
+    off = 32
+    for _ in range(ncmds):
+        cmd, size = struct.unpack_from("<2I", data, off)
+        if cmd in DYLIB_COMMANDS - {0xD}:
+            name_off = struct.unpack_from("<I", data, off + 8)[0]
+            if needle in data[off + name_off:off + size].split(b"\0", 1)[0]:
+                return True
+        off += size
+    return False
+
+
+# Protocol descriptors a binary imports when it declares an AppIntent, AppEntity, AppEnum or
+# EntityQuery type (an App Shortcuts provider needs an AppIntent too).
+APP_INTENTS_TYPE_SYMBOLS = (b"_$s10AppIntents0A6IntentMp", b"_$s10AppIntents0A6EntityMp",
+                            b"_$s10AppIntents0A4EnumMp", b"_$s10AppIntents11EntityQueryMp")
+
+
+def check_app_intents(check, bundle, exe):
+    """Xcode writes Metadata.appintents for a bundle that links AppIntents and declares App Intents
+    types (none when it only links the framework); without it the system registers none of the
+    bundle's intents, App Shortcuts or widget configurations."""
+    if not exe.is_file() or not loads_dylib(exe, b"/AppIntents.framework/"):
+        return
+    meta = bundle / "Metadata.appintents"
+    data = exe.read_bytes()
+    if any(s in data for s in APP_INTENTS_TYPE_SYMBOLS) or meta.exists():
+        check((meta / "extract.actionsdata").is_file() and (meta / "version.json").is_file(),
+              f"{bundle.name} declares App Intents types and has Metadata.appintents/extract.actionsdata + version.json")
+
+
 def car_renditions(path):
     """(width, height, rendition name) for every CSI header in an Assets.car."""
     data, out, i = Path(path).read_bytes(), [], 0
@@ -581,6 +617,7 @@ def validate(ipa):
                   f"LC_BUILD_VERSION iOS minos {minos} <= MinimumOSVersion {info.get('MinimumOSVersion')}")
             check(sdk is not None and sdk >= (26, 0, 0), f"LC_BUILD_VERSION sdk {sdk} is iOS 26 or later (ITMS-90725)")
             check(signed, "LC_CODE_SIGNATURE present")
+        check_app_intents(check, app, exe)
 
         car = app / "Assets.car"
         sizes = {(w, h) for w, h, _ in car_renditions(car)} if car.exists() else set()
@@ -676,6 +713,7 @@ def validate(ipa):
                 check((appex / f"{script}.js").is_file(),
                       f"appex {appex.name}: NSExtensionJavaScriptPreprocessingFile {script}.js at its root (ITMS-90362)")
             aexe = appex / ainfo.get("CFBundleExecutable", "")
+            check_app_intents(check, appex, aexe)
             aprov = appex / "embedded.mobileprovision"
             if check(aprov.exists(), f"appex {appex.name}: embedded.mobileprovision present"):
                 aprov_pl = profile_payload(aprov.read_bytes())

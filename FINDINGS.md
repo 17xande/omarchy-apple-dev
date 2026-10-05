@@ -1083,3 +1083,20 @@ with App Store profiles that carry the group; 99/99 offline checks passed;
 `buildUpload 157008db: COMPLETE`, build 202610051936 `VALID`. Still left out:
 alternate and extension icon sets, the HEIC avatar, and App Intents metadata.
 Receipt: `receipts/2026-10-05-icecubes-extensions-testflight.md`.
+
+## App Intents metadata, 2026-10-05
+
+**46. `ship.sh` builds `Metadata.appintents` on Linux, and IceCubesApp with
+its App Intents metadata is VALID.** `tools/appintentsmeta.py` replaces
+Xcode's `appintentsmetadataprocessor` and the App Shortcuts training step. It
+reads the `.swiftconstvalues` files that swift-build already writes, so no new
+compiler flags are needed. On a minimal App Intents app built by `xcodebuild`,
+all five output files are byte-identical to Xcode 27.0's. For IceCubesApp,
+Xcode's processors and ours, run on the same Linux const values, give identical
+`extract.actionsdata`, `version.json` and `root.ssu.yaml`; `nlu.lzfse` differs
+only in its creation time. Like Xcode, the tool writes nothing for an extension
+without App Intents types, and it stops with `error:` on any construct it has
+not reproduced. The validator requires the metadata in every bundle that
+declares App Intents types. IceCubesApp (app and 4 extensions):
+`buildUpload 633e191b: COMPLETE`, build 202610052033 `VALID`.
+Receipt: `receipts/2026-10-05-app-intents-metadata.md`.

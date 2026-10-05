@@ -165,6 +165,10 @@ sdk_build_and_install() {
   # ship.sh stamps DTXcode/DTXcodeBuild from this. A .xip hides it; set
   # XCODE_VERSION and XCODE_BUILD for ship.sh instead.
   if [ -f "$1/Contents/version.plist" ]; then cp "$1/Contents/version.plist" "$cached.version.plist"; fi
+  # ship.sh trains App Shortcuts (Metadata.appintents/nlu) with Xcode's phrase lists from here. A
+  # .xip hides them too; set SSU_RESOURCES for ship.sh to a copy of this directory instead.
+  ssu_src="$1/Contents/Frameworks/SiriSSUKitModel.framework/Versions/A/Resources"
+  if [ -d "$ssu_src" ]; then rm -rf "$cached.SiriSSUKitModel"; cp -R "$ssu_src" "$cached.SiriSSUKitModel"; fi
   sdk_install_from "$cached"
 }
 

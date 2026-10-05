@@ -94,7 +94,31 @@ echo "== 4. App Store Info.plist keys and frameworks =="
 "$PY" "$ASC" stamp "$app" "${BUILD_NUMBER:-$(date -u +%Y%m%d%H%M)}"
 "$PY" "$ASC" frameworks "$app"
 
-echo "== 5. Distribution identity and signature =="
+echo "== 5. App Intents metadata =="
+# Xcode's ExtractAppIntentsMetadata and AppIntentsSSUTraining, for the app and each extension:
+# the target's .swiftconstvalues (swift-build emits them) become <bundle>/Metadata.appintents/.
+# The tool skips a bundle that does not load AppIntents.framework and exits nonzero on anything it
+# cannot reproduce exactly. App Shortcuts training needs Xcode's SiriSSUKitModel resources, which
+# install-toolchain.sh keeps next to the SDK cache (or set SSU_RESOURCES).
+ssu=${SSU_RESOURCES:-$(ls -dt "$HOME"/.cache/xtool/darwin-*.xtoolsdk.SiriSSUKitModel 2>/dev/null | head -n1 || true)}
+sdk_root="$HOME/.swiftpm/swift-sdks/darwin.artifactbundle/Developer/Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS.sdk"
+for bundle in "$app" "$app"/PlugIns/*.appex; do
+  [ -d "$bundle" ] || continue
+  # exe = the product (build dir name); module = its C99 identifier, as Xcode's PRODUCT_MODULE_NAME.
+  IFS=$'\t' read -r exe module bid xcbuild < <("$PY" -c 'import plistlib,re,sys; d=plistlib.load(open(sys.argv[1],"rb"))
+e = d["CFBundleExecutable"]; m = re.sub(r"\W", "_", e, flags=re.A); m = "_" + m if m[0].isdigit() else m
+print(e, m, d["CFBundleIdentifier"], d.get("DTXcodeBuild", ""), sep="\t")' "$bundle/Info.plist")
+  mapfile -t constvals < <(find .build/out/Intermediates.noindex \
+    -path "*/Release-iphoneos/$exe-t.build/Objects-normal/arm64/*.swiftconstvalues" 2>/dev/null | sort)
+  cv_args=()
+  [ "${#constvals[@]}" = 0 ] || cv_args=(--const-values "${constvals[@]}")
+  "$PY" "$here/tools/appintentsmeta.py" --module-name "$module" --bundle-identifier "$bid" \
+    --output "$bundle" --binary-file "$bundle/$exe" --sdk-root "$sdk_root" \
+    --xcode-version "${xcbuild:-27A266a}" --timestamp "${SOURCE_DATE_EPOCH:-$(date +%s)}" \
+    ${ssu:+--ssu-resources "$ssu"} "${cv_args[@]}"
+done
+
+echo "== 6. Distribution identity and signature =="
 sign_dir=xtool/ship-signing
 if [ -n "${ASC_KEY_ID:-}" ]; then
   "$PY" "$ASC" identity "$app" "$sign_dir"
@@ -119,7 +143,7 @@ done
 shopt -u nullglob
 rcodesign sign "${sign_args[@]}" --entitlements-xml-file "$sign_dir/entitlements.plist" "$app"
 
-echo "== 6. Package =="
+echo "== 7. Package =="
 name=$(basename "$app" .app)
 ipa="$PWD/xtool/$name.ipa"
 mkdir "$stage/Payload"
@@ -128,10 +152,10 @@ rm -f "$ipa"
 (cd "$stage" && zip -qry "$ipa" Payload)
 echo "wrote $ipa"
 
-echo "== 7. Offline App Store validation =="
+echo "== 8. Offline App Store validation =="
 "$PY" "$ASC" validate "$ipa"
 
 if [ "$upload" = 1 ]; then
-  echo "== 8. Upload to App Store Connect =="
+  echo "== 9. Upload to App Store Connect =="
   "$PY" "$ASC" upload "$ipa"
 fi
