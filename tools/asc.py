@@ -668,6 +668,13 @@ def validate(ipa):
                   f"appex {appex.name}: versions match the app (ITMS-90473)")
             check("arm64" in ainfo.get("UIRequiredDeviceCapabilities", []),
                   f"appex {appex.name}: UIRequiredDeviceCapabilities has arm64 (ITMS-90502)")
+            extension = ainfo.get("NSExtension", {})
+            if storyboard := extension.get("NSExtensionMainStoryboard"):
+                check(any(appex.glob(f"**/{storyboard}.storyboardc")),
+                      f"appex {appex.name}: NSExtensionMainStoryboard '{storyboard}' is compiled in it (ITMS-90357)")
+            if script := extension.get("NSExtensionAttributes", {}).get("NSExtensionJavaScriptPreprocessingFile"):
+                check((appex / f"{script}.js").is_file(),
+                      f"appex {appex.name}: NSExtensionJavaScriptPreprocessingFile {script}.js at its root (ITMS-90362)")
             aexe = appex / ainfo.get("CFBundleExecutable", "")
             aprov = appex / "embedded.mobileprovision"
             if check(aprov.exists(), f"appex {appex.name}: embedded.mobileprovision present"):

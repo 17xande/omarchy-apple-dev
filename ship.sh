@@ -39,22 +39,23 @@ xtool dev build --configuration release
 app=$(find xtool -maxdepth 1 -name '*.app' -print -quit)
 [ -n "$app" ] || { echo "no .app under xtool/" >&2; exit 1; }
 
-echo "== 2. App-target Interface Builder placement =="
-# SwiftPM compiles the app target's .storyboard/.xib resources into
-# <App>_<App>.bundle (its resource bundle). UIKit and App Store processing
-# resolve UIMainStoryboardFile*/UILaunchStoryboardName* against the APP bundle
-# itself (root or <lang>.lproj) - ITMS-90029 - so move the compiled
-# .storyboardc/.nib up to where Xcode's CopyStoryboards step puts them.
-# Bundles inside Frameworks/ or PlugIns/ keep their own IB.
-resbundle=$(find "$app" -maxdepth 1 -type d \
-    -name "$(basename "$app" .app)_*.bundle" -print -quit)
-if [ -n "$resbundle" ]; then
+echo "== 2. Interface Builder and extension file placement =="
+# SwiftPM puts each target's resources in its resource bundle (<Package>_<Target>.bundle), but UIKit
+# and App Store processing look for these at the root of the app or extension, where Xcode puts them:
+# compiled storyboards and nibs (UIMainStoryboardFile, NSExtensionMainStoryboard: ITMS-90029/90357)
+# and an action extension's NSExtensionJavaScriptPreprocessingFile (ITMS-90362).
+for target in "$app" "$app"/PlugIns/*.appex; do
+  [ -d "$target" ] || continue
+  name=$(basename "${target%.*}")
+  resbundle=$(find "$target" -maxdepth 1 -type d -name "*_$name.bundle" -print -quit)
+  [ -n "$resbundle" ] || continue
+  js=$("$PY" -c 'import plistlib,sys; print(plistlib.load(open(sys.argv[1],"rb")).get("NSExtension",{}).get("NSExtensionAttributes",{}).get("NSExtensionJavaScriptPreprocessingFile",""))' "$target/Info.plist")
   while IFS= read -r -d '' rel; do
     rel=${rel#./}
-    mkdir -p "$app/$(dirname "$rel")"
-    mv "$resbundle/$rel" "$app/$rel"
-  done < <(cd "$resbundle" && find . \( -name '*.storyboardc' -o -name '*.nib' \) -prune -print0)
-fi
+    mkdir -p "$target/$(dirname "$rel")"
+    mv "$resbundle/$rel" "$target/$rel"
+  done < <(cd "$resbundle" && find . \( -name '*.storyboardc' -o -name '*.nib' ${js:+-o -name "$js.js"} \) -prune -print0)
+done
 
 echo "== 3. App icon catalog =="
 # As in Xcode's app target, actool --app-icon puts the icon into the app's own Assets.car and

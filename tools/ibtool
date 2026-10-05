@@ -186,6 +186,23 @@ def _build_color_new(b, name, where, resources):
     raise XibError(f"unsupported color {name!r} ({where})")
 
 
+def build_rgb_color(b, color, where):
+    """An inline sRGB <color red= green= blue= alpha=>. Only components exact in float32 are
+    supported: Apple's golden (MainInterface.storyboard, all zero) stores no -Double values for them."""
+    if color.get("colorSpace") != "custom" or color.get("customColorSpace") != "sRGB":
+        raise XibError(f"<color> {dict(color.attrib)} is not an sRGB color ({where})")
+    comps = [float(_attr(color, k, where)) for k in ("red", "green", "blue", "alpha")]
+    if any(struct.unpack("<f", struct.pack("<f", v))[0] != v for v in comps):
+        raise XibError(f"<color> {comps} needs -Double components, not derived yet ({where})")
+    c = b.new("UIColor")
+    c.add("UIColorComponentCount", *b.int8(4))
+    for k, v in zip(("UIRed", "UIGreen", "UIBlue", "UIAlpha"), comps):
+        c.add(k, *b.float32(v))
+    c.add("NSRGB", N.DATA, " ".join(f"{v:.3g}" for v in comps).encode("ascii"))
+    c.add("NSColorSpace", *b.int8(2))
+    return c
+
+
 def build_font(b, fd, where):
     if fd.get("style") is not None:
         key = ("style", fd.get("style"))
@@ -322,11 +339,13 @@ def build_view(b, el, where):
     color = el.find("color[@key='backgroundColor']")
     if color is not None:
         sysname = color.get("systemColor")
-        if sysname is None:
-            raise XibError(f"<view> backgroundColor must use systemColor ({where})")
-        o.add("UIBackgroundColor", *b.ref(build_color(b, sysname, where)))
+        if sysname is not None:
+            o.add("UIBackgroundColor", *b.ref(build_color(b, sysname, where)))
+        else:
+            o.add("UIBackgroundColor", *b.ref(build_rgb_color(b, color, where)))
     o.add("UIDeepDrawRect", *b.boolean(False))
-    o.add("UIOpaque", *b.boolean(False))
+    if el.get("opaque") != "NO":  # Apple stores UIOpaque=false only for the default (opaque) view
+        o.add("UIOpaque", *b.boolean(False))
     o.add("UIAutoresizeSubviews", *b.boolean(False))
     mask_el = el.find("autoresizingMask[@key='autoresizingMask']")
     mask = 0
@@ -743,18 +762,7 @@ def finalize(b, root):
 
 SELF_TEST_NIBS = ("TinyView", "TinyLabel", "SettingsTableViewCell")
 
-# (label, src rel under SRC, golden rel under GOLDEN)
-SB_SELF_TEST = (
-    ("LaunchScreenPhone.storyboardc",
-     "NetNewsWire/Base.lproj/LaunchScreenPhone.storyboard",
-     "Base.lproj/LaunchScreenPhone.storyboardc"),
-    ("LaunchScreenPad.storyboardc",
-     "NetNewsWire/Base.lproj/LaunchScreenPad.storyboard",
-     "Base.lproj/LaunchScreenPad.storyboardc"),
-    ("Mastodon Main.storyboardc",
-     "Mastodon/Base.lproj/Main.storyboard",
-     "Mastodon/Base.lproj/Main.storyboardc"),
-)
+
 def _bplist_bytes(plist):
     """Serialize {str: dict|str|int} exactly like Apple's storyboardc
     Info.plist: bplist00, pre-order object assignment (dict keys before
@@ -1003,6 +1011,127 @@ def _scene_vc_nib(vc_el, view_nib_name, where):
     return finalize(b, root), vc_name
 
 
+def _swift_class(el):
+    """The runtime class name for a customClass, mangled with its module like Apple's ibtool."""
+    cls = el.get("customClass")
+    if not cls:
+        return None
+    module = TARGET_MODULE if el.get("customModuleProvider") == "target" and TARGET_MODULE else el.get("customModule")
+    return f"_TtC{len(module)}{module}{len(cls)}{cls}" if module else cls
+
+
+NAV_ATTRS = {"automaticallyAdjustsScrollViewInsets", "id", "sceneMemberID"}
+NAV_BAR_ATTRS = {"key", "contentMode", "id"}
+
+
+def _scene_nav_nib(nav, root, root_view_nib, where):
+    """A UINavigationController scene with its rootViewController, object for object as Apple's
+    ibtool 27.0 writes Mastodon's MainInterface.storyboard (tests/ibtool/golden)."""
+    if set(nav.attrib) - NAV_ATTRS or nav.get("automaticallyAdjustsScrollViewInsets") != "NO":
+        raise XibError(f"<navigationController> attributes {dict(nav.attrib)} not supported ({where})")
+    bar_el = nav.find("navigationBar[@key='navigationBar']")
+    if bar_el is None or set(bar_el.attrib) - NAV_BAR_ATTRS or bar_el.get("contentMode") != "scaleToFill":
+        raise XibError(f"<navigationController> needs a plain navigationBar ({where})")
+    mask = bar_el.find("autoresizingMask[@key='autoresizingMask']")
+    rect = bar_el.find("rect[@key='frame']")
+    if mask is None or set(mask.attrib) != {"key"} or rect is None:
+        raise XibError(f"<navigationBar> frame/autoresizingMask not supported ({where})")
+    extra = {c.tag for c in nav} - {"toolbarItems", "navigationBar", "nil", "connections"}
+    item_el = root.find("navigationItem[@key='navigationItem']")
+    if extra or nav.find("toolbarItems/*") is not None or item_el is None or len(item_el) or \
+            set(item_el.attrib) != {"key", "id"}:
+        raise XibError(f"<navigationController>/root navigationItem shape not supported ({where})")
+    nav_name = f"UINavigationController-{nav.get('id')}"
+    b = Builder()
+    root_obj = b.new("NSObject")
+    top = b.new("NSArray")
+    sb_child = _proxy(b, "UIStoryboardPlaceholder")
+    fo = _proxy(b, "IBFilesOwner")
+    fr = _proxy(b, "IBFirstResponder")
+    sb_nav = b.new("UIProxyObject")
+    sb_nav.add("UIProxiedObjectIdentifier", *b.ref(b.string("UIStoryboardPlaceholder")))
+    nav_sw = b.new("UIClassSwapper")
+    children = b.new("NSMutableArray")
+    vc_sw = b.new("UIClassSwapper")
+    item = b.new("UINavigationItem")
+    empty = b.new("NSArray")
+    ext = b.new("NSDictionary")
+    nib_name = b.string(root_view_nib)
+    cls_name = b.string(_swift_class(root) or "UIViewController")
+    orig_name = b.string("UIViewController")
+    vcs = b.new("NSMutableArray")
+    bar = b.new("UINavigationBar")
+    hugging = b.string("{250, 250}")
+    items = b.new("NSMutableArray")
+    nav_cls = b.string("UINavigationController")
+    objarr = b.new("NSArray")
+    conn_arr = b.new("NSArray")
+    c1 = b.new("UIRuntimeOutletConnection")
+    storyboard = b.string("storyboard")
+    c2 = b.new("UIRuntimeOutletConnection")
+    c3 = b.new("UIRuntimeOutletConnection")
+    scene_vc = b.string("sceneViewController")
+
+    def fill(arr, refs):
+        arr.add("NSInlinedValue", *b.boolean(False))
+        for r in refs:
+            arr.add("UINibEncoderEmptyKey", *b.ref(r))
+
+    nav_sw.add("UIChildViewControllers", *b.ref(children))
+    nav_sw.add("UIKeyAutomaticallyAdjustsScrollViewInsets", *b.int8(0))
+    nav_sw.add("UIViewControllers", *b.ref(vcs))
+    nav_sw.add("UINavigationBar", *b.ref(bar))
+    nav_sw.add("UIClassName", *b.ref(nav_cls))
+    nav_sw.add("UIOriginalClassName", *b.ref(nav_cls))
+    fill(children, [vc_sw])
+    vc_sw.add("UINavigationItem", *b.ref(item))
+    vc_sw.add("UIExternalObjectsTableForViewLoading", *b.ref(ext))
+    vc_sw.add("UINibName", *b.ref(nib_name))
+    vc_sw.add("UIParentViewController", *b.ref(nav_sw))
+    vc_sw.add("UIClassName", *b.ref(cls_name))
+    vc_sw.add("UIOriginalClassName", *b.ref(orig_name))
+    item.add("UICenterItemGroups", *b.ref(empty))
+    item.add("UILargeTitleDisplayMode", *b.int8(0))
+    item.add("UINavigationBar", *b.ref(bar))
+    fill(empty, [])
+    ext.add("NSInlinedValue", *b.boolean(False))
+    fill(vcs, [vc_sw])
+    # Apple ignores the XML width/height: zero width, 54 pt tall, at the frame's y.
+    y = float(_attr(rect, "y", where))
+    bar.add("UIBounds", *b.geom(0, 0, 0, 54))
+    bar.add("UICenter", *b.geom(0, y + 27))
+    bar.add("UIDeepDrawRect", *b.boolean(False))
+    bar.add("UIAutoresizeSubviews", *b.boolean(False))
+    bar.add("UIAutoresizingMask", *b.int8(2))
+    bar.add("UIViewContentHuggingPriority", *b.ref(hugging))
+    bar.add("UIViewLayoutMargins", *b.geom(0, 0, 0, 0))
+    bar.add("UIViewLayoutMarginsAreDirectional", *b.boolean(False))
+    bar.add("UIViewSemanticContentAttribute", *b.int8(0))
+    bar.add("UIViewLargeContentStoredProperties", N.NIL, None)
+    bar.add("UIIsLocked", *b.boolean(False))
+    bar.add("UIItems", *b.ref(items))
+    bar.add("UIDelegate", *b.ref(nav_sw))
+    bar.add("UIBarPosition", *b.int8(2))
+    bar.add("UIBarTranslucence", *b.int8(1))
+    fill(items, [item])
+    fill(top, [sb_child, fo, fr, sb_nav, nav_sw])
+    fill(objarr, [sb_child, fo, fr, sb_nav, nav_sw, bar, vc_sw, item])
+    fill(conn_arr, [c1, c2, c3])
+    for c, label, src, dst in ((c1, storyboard, nav_sw, sb_nav), (c2, storyboard, vc_sw, sb_child),
+                               (c3, scene_vc, fo, nav_sw)):
+        c.add("UILabel", *b.ref(label))
+        c.add("UISource", *b.ref(src))
+        c.add("UIDestination", *b.ref(dst))
+    root_obj.add("UINibTopLevelObjectsKey", *b.ref(top))
+    root_obj.add("UINibObjectsKey", *b.ref(objarr))
+    root_obj.add("UINibConnectionsKey", *b.ref(conn_arr))
+    for key in ("UINibVisibleWindowsKey", "UINibAccessibilityConfigurationsKey",
+                "UINibTraitStorageListsKey", "UINibKeyValuePairsKey"):
+        root_obj.add(key, *b.ref(empty))
+    root_obj.add("IBUINibLNEVersionKey", *b.int8(1))
+    return finalize(b, root_obj), nav_name
+
+
 def compile_storyboard(path, compilation_dir):
     """Xcode's CompileStoryboard: write <dir>/<name>.storyboardc/."""
     tree = ET.parse(path)
@@ -1030,8 +1159,32 @@ def compile_storyboard(path, compilation_dir):
     sbc = os.path.join(compilation_dir, f"{name}.storyboardc")
     os.makedirs(sbc, exist_ok=True)
     where = os.path.basename(path)
+    # A navigation controller's rootViewController is encoded inside the controller's nib;
+    # only its view gets a nib of its own.
+    embedded = {}
+    for scene in scenes:
+        nav = scene.find("objects/navigationController")
+        if nav is not None:
+            segues = nav.findall("connections/segue")
+            if len(segues) != 1 or segues[0].get("kind") != "relationship" \
+                    or segues[0].get("relationship") != "rootViewController":
+                raise XibError(f"{where}: navigationController {nav.get('id')} needs exactly one rootViewController")
+            embedded[segues[0].get("destination")] = nav.get("id")
+    vcs = {vc.get("id"): vc for vc in doc.iterfind("scenes/scene/objects/viewController")}
     for si, scene in enumerate(scenes):
         objs = scene.find("objects")
+        nav = objs.find("navigationController") if objs is not None else None
+        if nav is not None:
+            root = vcs.get(next((k for k, v in embedded.items() if v == nav.get("id")), None))
+            root_view = root.find("view[@key='view']") if root is not None else None
+            if root_view is None:
+                raise XibError(f"{where}: navigationController {nav.get('id')} root has no view")
+            arch, vc_name = _scene_nav_nib(nav, root, f"{root.get('id')}-view-{root_view.get('id')}", where)
+            with open(os.path.join(sbc, vc_name + ".nib"), "wb") as f:
+                f.write(arch)
+            identifiers[vc_name] = vc_name
+            id_to_name[nav.get("id")] = vc_name
+            continue
         vc_el = objs.find("viewController") if objs is not None else None
         if vc_el is None:
             raise XibError(f"{where}: scene #{si} has no viewController (unsupported scene kind)")
@@ -1042,12 +1195,14 @@ def compile_storyboard(path, compilation_dir):
         if not vc_id:
             raise XibError(f"{where}: scene #{si} viewController has no id")
         view_nib = f"{vc_id}-view-{view_el.get('id')}"
-        arch, vc_name = _scene_vc_nib(vc_el, view_nib, where)
-        with open(os.path.join(sbc, vc_name + ".nib"), "wb") as f:
-            f.write(arch)
         varch, _ = _scene_view_nib(vc_el, view_el, view_nib, where, resources)
         with open(os.path.join(sbc, view_nib + ".nib"), "wb") as f:
             f.write(varch)
+        if vc_id in embedded:
+            continue
+        arch, vc_name = _scene_vc_nib(vc_el, view_nib, where)
+        with open(os.path.join(sbc, vc_name + ".nib"), "wb") as f:
+            f.write(arch)
         identifiers[vc_name] = vc_name
         id_to_name[vc_id] = vc_name
     entry = (id_to_name.get(entry_id) if entry_id else None) or next(iter(identifiers))
@@ -1097,6 +1252,9 @@ SB_SELF_TEST = (
     ("Mastodon Main.storyboardc",
      "Mastodon/Base.lproj/Main.storyboard",
      "Mastodon/Base.lproj/Main.storyboardc"),
+    ("Mastodon ShareActionExtension MainInterface.storyboardc",
+     "ShareActionExtension/Base.lproj/MainInterface.storyboard",
+     "ShareActionExtension/Base.lproj/MainInterface.storyboardc"),
 )
 
 
