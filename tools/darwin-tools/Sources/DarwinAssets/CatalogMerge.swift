@@ -76,13 +76,13 @@ public enum CatalogMerge {
             try fm.copyItem(at: source, to: target)
         }
 
-        /// The first source file extension AssetKit cannot read (it reads PNG, JPEG and SVG).
+        /// The first source file extension AssetKit cannot read (it reads PNG, JPEG, SVG and PDF).
         func unsupportedImageFormat(_ imageSet: URL) -> String? {
             guard let data = try? Data(contentsOf: imageSet.appendingPathComponent("Contents.json")),
                   let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                   let images = json["images"] as? [[String: Any]] else { return nil }
             return images.compactMap { ($0["filename"] as? String).map { URL(fileURLWithPath: $0).pathExtension.lowercased() } }
-                .first { !["png", "jpg", "jpeg", "svg"].contains($0) }
+                .first { !["png", "jpg", "jpeg", "svg", "pdf"].contains($0) }
         }
 
         /// Copies a colorset without its color-less entries (Xcode's empty AccentColor placeholder).

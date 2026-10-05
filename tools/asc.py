@@ -633,7 +633,8 @@ def validate(ipa):
                 not (app / p).is_file()
                 or (v["hash2"] if isinstance(v, dict) else v) != hashlib.sha256((app / p).read_bytes()).digest())]
             unsealed = [str(p.relative_to(app)) for p in app.rglob("*") if p.is_file()
-                        and str(p.relative_to(app)) not in files2 and p != exe and p != app / "Info.plist"
+                        and str(p.relative_to(app)) not in files2
+                        and p not in (exe, app / "Info.plist", app / "PkgInfo")
                         and p.relative_to(app).parts[0] != "_CodeSignature"]
             check(not changed and not unsealed, "every bundle file is sealed with a matching hash"
                   f"{f'; changed {changed}' if changed else ''}{f'; unsealed {unsealed}' if unsealed else ''}")
@@ -694,7 +695,8 @@ def validate(ipa):
                 not (appex / p).is_file()
                 or (v["hash2"] if isinstance(v, dict) else v) != hashlib.sha256((appex / p).read_bytes()).digest())]
             aunsealed = [str(p.relative_to(appex)) for p in appex.rglob("*") if p.is_file()
-                         and str(p.relative_to(appex)) not in afiles2 and p != aexe and p != appex / "Info.plist"
+                         and str(p.relative_to(appex)) not in afiles2
+                         and p not in (aexe, appex / "Info.plist", appex / "PkgInfo")
                          and p.relative_to(appex).parts[0] != "_CodeSignature"]
             check(not achanged and not aunsealed, f"appex {appex.name}: every file is sealed"
                   f"{f'; changed {achanged}' if achanged else ''}"
