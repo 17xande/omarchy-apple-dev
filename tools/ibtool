@@ -942,6 +942,19 @@ def build_constraint(b, el, owner, id_map, where):
     rel = RELATIONS.get(el.get("relation", "equal"))
     if rel is not None:
         o.add("NSRelation", *b.int8(rel))
+    # Margin-attribute constraints carry a legacy NSConstant next to (or
+    # instead of) NSConstantV2: the resolved offset in the pre-margin space.
+    # Default margins are 8pt: leading/top/bottom resolve +8, trailing -8
+    # (oracle-verified on 27.0, probes m-base/m-exp2/m-expconst).
+    legacy_offset = 0.0
+    margin = False
+    for attr in (el.get("firstAttribute"), el.get("secondAttribute")):
+        if attr == "leadingMargin" or attr == "topMargin" or attr == "bottomMargin":
+            margin = True
+            legacy_offset = 8.0
+        elif attr == "trailingMargin":
+            margin = True
+            legacy_offset = -8.0
     if el.get("symbolic") == "YES":
         o.add("NSSymbolicConstant", *b.ref(b.string("NSSpace")))
         o.add("NSShouldBeArchived", *b.boolean(False))
@@ -949,7 +962,10 @@ def build_constraint(b, el, owner, id_map, where):
         c = float(el.get("constant"))
         o.add("NSConstantV2", *b.float64(c))
         o.add("NSShouldBeArchived", *b.boolean(False))
-        o.add("NSConstant", *b.float64(c))
+        o.add("NSConstant", *b.float64(c + legacy_offset if margin else c))
+    elif margin:
+        o.add("NSConstant", *b.float64(legacy_offset))
+        o.add("NSShouldBeArchived", *b.boolean(False))
     else:
         o.add("NSShouldBeArchived", *b.boolean(False))
     return o
