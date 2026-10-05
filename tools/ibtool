@@ -14,6 +14,7 @@ golden bytes. The global key-table order is the one piece Apple does not lay
 down for us: it is the iteration order of an __NSSetM of the keys (keyorder.py).
 """
 
+import math
 import os
 import plistlib
 import struct
@@ -489,7 +490,7 @@ def build_content_view(b, el, where, resources, roles, id_map):
         subs.add("UINibEncoderEmptyKey", *b.ref(k))
     cons_el = el.find("constraints")
     if cons_el is not None:
-        arr, cons = build_constraints_block(b, cons_el, o, id_map, where)
+        arr, cons = build_constraints_block(b, el, o, id_map, where)
         o.add("UIViewAutolayoutConstraints", *b.ref(arr))
         groups.append(cons)
     if el.get("preservesSuperviewLayoutMargins") is not None:
@@ -868,11 +869,66 @@ def build_constraint(b, el, owner, id_map, where):
     return o
 
 
-def build_constraints_block(b, el, owner, id_map, where):
-    """<constraints> of a view -> (NSMutableArray shell, constraint objects)."""
+# Apple's order of a view's constraints array (oracle probes, ibtool 27.0). Each
+# constraint belongs to its first item, or to its second item when the first is
+# the owner view. Layout-guide groups come first, then view groups by the
+# distance of the item's frame origin from (0, 0), then by x. Inside a group:
+# constraints to the owner view first (same attribute on both sides, in
+# OWNER_ORDER), then the rest in OTHER_ORDER of the group item's attribute;
+# ties by relation (<=, >=, =), then by the other item's subview index.
+OWNER_ORDER = ("width", "height", "centerX", "centerY", "trailing", "leading", "bottom", "top")
+OTHER_ORDER = ("centerX", "trailing", "leading", "centerY", "bottom", "top", "width", "height")
+RELATION_ORDER = {"lessThanOrEqual": 0, "greaterThanOrEqual": 1, "equal": 2}
+
+
+def _constraint_order(view_el, cons, where):
+    owner = view_el.get("id")
+    guides = [g.get("id") for g in view_el.findall("viewLayoutGuide")]
+    subs = view_el.find("subviews")
+    index, origin = {}, {}
+    for i, sv in enumerate(subs if subs is not None else ()):
+        index[sv.get("id")] = i
+        r = sv.find("rect[@key='frame']")
+        if r is not None:
+            origin[sv.get("id")] = (float(r.get("x")), float(r.get("y")))
+
+    def key(c):
+        first, second = c.get("firstItem", owner), c.get("secondItem")
+        fa, sa = c.get("firstAttribute"), c.get("secondAttribute")
+        if second is None:
+            item, attr, other, oattr = first, fa, None, None
+        elif first == owner:
+            item, attr, other, oattr = second, sa, first, fa
+        else:
+            item, attr, other, oattr = first, fa, second, sa
+        if item in guides:
+            gkey = (0, guides.index(item), 0.0)
+        elif item in origin:
+            x, y = origin[item]
+            gkey = (1, math.hypot(x, y), x)
+        elif item == owner and other is None:
+            gkey = (1, 0.0, 0.0)
+        else:
+            raise XibError(f"constraint {c.get('id')}: no frame for item {item!r}; Apple's order unknown ({where})")
+        if other == owner:
+            if MARGIN_BASE.get(oattr, oattr) != attr or attr not in OWNER_ORDER:
+                raise XibError(f"constraint {c.get('id')}: {attr}/{oattr} to the owner view; "
+                               f"Apple's order unknown ({where})")
+            return gkey + (0, OWNER_ORDER.index(attr), 0, 0)
+        if attr not in OTHER_ORDER or (oattr is not None and oattr not in ATTRIBUTES):
+            raise XibError(f"constraint {c.get('id')}: attribute {attr}/{oattr}; Apple's order unknown ({where})")
+        rel = RELATION_ORDER[c.get("relation", "equal")]
+        return gkey + (1, OTHER_ORDER.index(attr), rel, index.get(other, -1))
+
+    return sorted(cons, key=key)
+
+
+def build_constraints_block(b, view_el, owner, id_map, where):
+    """A view's <constraints> -> (NSMutableArray shell, constraint objects), in Apple's order."""
     arr = b.new("NSMutableArray")
     arr.add("NSInlinedValue", *b.boolean(False))
-    cons = [build_constraint(b, c, owner, id_map, where) for c in el.findall("constraint")]
+    els = _constraint_order(view_el, view_el.find("constraints").findall("constraint"), where)
+    cons = [build_constraint(b, c, owner, id_map, where) for c in els]
     for c in cons:
         arr.add("UINibEncoderEmptyKey", *b.ref(c))
     return arr, cons
@@ -905,7 +961,7 @@ def build_image_view(b, el, where, id_map):
     group = []
     cons_el = el.find("constraints")
     if cons_el is not None:
-        arr, cons = build_constraints_block(b, cons_el, o, id_map, where)
+        arr, cons = build_constraints_block(b, el, o, id_map, where)
         o.add("UIViewAutolayoutConstraints", *b.ref(arr))
         group.append(cons)
     if el.get("horizontalHuggingPriority") is not None:
