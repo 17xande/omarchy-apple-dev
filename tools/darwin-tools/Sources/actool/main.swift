@@ -104,8 +104,10 @@ if !prepared.skipped.isEmpty {
     }
     print("")
 }
+var iconComposer = prepared.iconComposer
+iconComposer?.idioms = options["--target-device"] ?? ["iphone", "ipad"]
 let result = try await XCAssetCompiler(deploymentTarget: option("--minimum-deployment-target") ?? "17.0")
-    .compile(catalog: source)
+    .compile(catalog: source, iconComposer: iconComposer)
 let car = outputDir.appendingPathComponent("Assets.car")
 try result.carData.write(to: car)
 var outputs = [car]

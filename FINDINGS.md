@@ -1051,3 +1051,22 @@ multi-page BOM trees (Apple's `assetutil` refused a 778-entry single leaf),
 `provides-namespace` folder names, and symbol templates whose guides are
 `<path>` elements. Regression: demo 37/37, iPad demo 38/38, IceCubesApp 99/99,
 NetNewsWire 84/84. Receipt: `receipts/2026-10-05-mastodon-testflight.md`.
+
+## Icon Composer icons with their layers, 2026-10-05
+
+**44. The Linux `actool` compiles an Icon Composer `.icon` into the same
+layered renditions as `actool` 27.0, and IceCubesApp with that icon is VALID.**
+Item 29's flat render is gone. For IceCubes' `AppIcon.icon` the car now holds
+the icon image stack, its groups, layers, named gradients and colors, with the
+glass, shadow, translucency and blend parameters as Apple stores them (the
+device renders the glass from this description), plus the pre-rendered icon
+per appearance: Apple's `assetutil` lists 30 of 30 renditions identical to
+Apple's car for the compared fields, and `partial.plist` is equal. The
+pre-rendered pixels differ by a mean of 8.5/255 (light), 10.3 (dark) and 12.6
+(tinted), because the Liquid Glass highlights are not reproduced; the layer
+bitmap is stored LZFSE where Apple uses its deepmap2 codec. Neither stopped
+App Store processing: IceCubesApp (extensions left out, uploaded under the
+NetNewsWire record) `buildUpload d71302cc: COMPLETE`, build 202610051832
+`VALID`. Code: AssetKit f5502f0 (`IconComposerCompiler`), and `actool` hands
+the `--app-icon` `.icon` to it. Regression: demo 37/37, iPad demo 38/38,
+IceCubesApp 99/99, NetNewsWire 84/84.

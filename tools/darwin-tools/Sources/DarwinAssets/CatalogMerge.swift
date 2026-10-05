@@ -1,3 +1,4 @@
+import AssetKit
 import Foundation
 
 /// Prepare actool's input catalogs for AssetKit: AssetKit compiles one catalog, knows imagesets,
@@ -14,6 +15,9 @@ public enum CatalogMerge {
         public let catalog: URL
         /// Entries left out, as "<catalog>/<relative path>: <reason>".
         public let skipped: [String]
+        /// The --app-icon Icon Composer source, compiled layered by
+        /// XCAssetCompiler instead of through the appiconset path.
+        public let iconComposer: IconComposerCompiler.Input?
     }
 
     /// - Parameter appIcon: the one .appiconset to keep (actool's --app-icon); others are skipped.
@@ -26,6 +30,7 @@ public enum CatalogMerge {
         try Data(#"{"info":{"author":"xcode","version":1}}"#.utf8)
             .write(to: merged.appendingPathComponent("Contents.json"))
         var skipped: [String] = []
+        var iconComposer: IconComposerCompiler.Input? = nil
 
         func copy(_ dir: URL, into dest: URL, catalog: URL) throws {
             for child in try fm.contentsOfDirectory(at: dir, includingPropertiesForKeys: [.isDirectoryKey])
@@ -54,9 +59,9 @@ public enum CatalogMerge {
                     }
                 case "icon":
                     // Icon Composer source. The one matching --app-icon is
-                    // rendered flat; others (alternate icons) are skipped.
+                    // compiled layered; others (alternate icons) are skipped.
                     if child.deletingPathExtension().lastPathComponent == appIcon {
-                        try mergeIconComposerIcon(child, into: dest, appIcon: appIcon, skipped: &skipped)
+                        iconComposer = recordIconComposerIcon(child, appIcon: appIcon, where_: where_, skipped: &skipped)
                     } else {
                         skipped.append("\(where_): alternate .icon icons are not supported by AssetKit")
                     }
@@ -106,36 +111,31 @@ public enum CatalogMerge {
             if catalog.pathExtension == "icon" {
                 // An Icon Composer .icon passed as its own catalog input
                 // (SwiftBuild passes folder.iconcomposer.icon paths through).
-                try mergeIconComposerIcon(catalog, into: merged, appIcon: appIcon, skipped: &skipped)
+                iconComposer = recordIconComposerIcon(
+                    catalog, appIcon: appIcon, where_: catalog.path, skipped: &skipped)
                 continue
             }
             try copy(catalog, into: merged, catalog: catalog)
         }
-        return Prepared(catalog: merged, skipped: skipped)
+        return Prepared(catalog: merged, skipped: skipped, iconComposer: iconComposer)
     }
 
-    /// Renders an Icon Composer `.icon` and installs the resulting
-    /// appiconset when it is the `--app-icon`; other .icon files (alternate
-    /// icons) are skipped with a warning.
-    static func mergeIconComposerIcon(
-        _ icon: URL, into merged: URL, appIcon: String?, skipped: inout [String]
-    ) throws {
+    /// Records an Icon Composer `.icon` as the layered app-icon input when
+    /// it is the `--app-icon`; other .icon files (alternate icons) are
+    /// skipped with a warning. Idioms are filled in by the caller from
+    /// actool's --target-device flags.
+    static func recordIconComposerIcon(
+        _ icon: URL, appIcon: String?, where_: String, skipped: inout [String]
+    ) -> IconComposerCompiler.Input? {
         let name = icon.deletingPathExtension().lastPathComponent
-        let where_ = icon.path
-        guard name == appIcon else {
-            skipped.append("\(where_): alternate .icon icons are not supported by AssetKit")
-            return
-        }
         guard let appIcon = appIcon else {
             skipped.append("\(where_): no --app-icon to attach it to")
-            return
+            return nil
         }
-        let rendered = try IconComposerIcon.render(catalog: icon, appIcon: appIcon)
-        skipped.append(contentsOf: rendered.warnings.map { "\(where_): \($0)" })
-        let target = merged.appendingPathComponent("\(appIcon).appiconset")
-        guard !FileManager.default.fileExists(atPath: target.path) else {
-            throw DuplicateEntry(name: target.lastPathComponent)
+        guard name == appIcon else {
+            skipped.append("\(where_): alternate .icon icons are not supported by AssetKit")
+            return nil
         }
-        try FileManager.default.copyItem(at: rendered.catalog.appendingPathComponent("\(appIcon).appiconset"), to: target)
+        return IconComposerCompiler.Input(name: appIcon, directory: icon, idioms: [])
     }
 }

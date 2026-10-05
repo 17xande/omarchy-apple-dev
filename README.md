@@ -201,15 +201,16 @@ build with SwiftData (`@Model`, `@Query`, …), Foundation (`#Predicate`,
 `#Expression`) and `#Preview` macros. Large projects need more open files than
 a login shell allows: run `ulimit -n 65536` before `xtool dev build`.
 
-Known limits: storyboards and xibs cannot be compiled (no `ibtool`), Icon
-Composer icons render flat, and alternate app icons, symbol sets and HEIC
-images are left out with a warning (FINDINGS.md items 24, 27, 29). PDF
-imagesets need poppler's `pdftocairo`, which the installer adds.
-`compat/icecubes/`, `compat/nnw/` and `compat/mastodon/` reproduce IceCubesApp,
-NetNewsWire and Mastodon for iOS, which build with their app extensions and
-pass `ship.sh`'s offline checks; NetNewsWire and IceCubesApp are also `VALID`
-in App Store Connect. Mastodon needs two overlay changes, applied by its setup
-script (FINDINGS.md item 41).
+The Linux `actool` compiles imagesets (PNG, JPEG, SVG, PDF), colorsets, custom
+SF Symbol sets, app icons and Icon Composer `.icon` icons with their layers
+(FINDINGS.md items 40, 43, 44); PDF imagesets need poppler's `pdftocairo`,
+which the installer adds. `tools/ibtool` compiles the storyboards and xibs it
+can reproduce exactly (Apple's bytes, `tests/ibtool`); the generator leaves the
+rest out with a warning (item 42). Alternate app icons and HEIC images are left
+out with a warning. `compat/icecubes/`, `compat/nnw/` and `compat/mastodon/`
+reproduce IceCubesApp, NetNewsWire and Mastodon for iOS, which build with
+their app extensions and are `VALID` in App Store Connect. Mastodon needs two
+overlay changes, applied by its setup script (FINDINGS.md item 41).
 
 For your own Xcode project, `tools/xcodeproj2xtool.py App.xcodeproj` writes an
 xtool adapter (`omarchy-xtool/`) next to it and prints a warning for each thing
