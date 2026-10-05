@@ -23,17 +23,18 @@ find src -name '*.storyboard' -o -name '*.xib' | sort | while read -r f; do
   # storyboard names (two Base.lproj/Main.storyboards) cannot overwrite.
   mod=${rel%%/*}; [ "$mod" = "$rel" ] && mod=
   root=; if [ -n "$mod" ] && [ "$mod" != NetNewsWire ]; then root=$mod; fi
-  mkdir -p "golden/$root${lproj:+/$lproj}" "stage/$root${lproj:+/$lproj}"
+  sub="$root${lproj:+/$lproj}"; sub="${sub#/}"
+  mkdir -p "golden/$sub" "stage/$sub"
   case "$f" in
     *.storyboard)
       # --link keeps the input's .lproj parent, so compile into stage/<lproj> and link into golden/.
-      xcrun ibtool "${common[@]}" "${module[@]}" --output-partial-info-plist "stage/$root${lproj:+/$lproj}/$name-SBPartialInfo.plist" \
-        --auto-activate-custom-fonts "${target[@]}" "$f" --compilation-directory "stage/$root${lproj:+/$lproj}" >&2
+      xcrun ibtool "${common[@]}" "${module[@]}" --output-partial-info-plist "stage/$sub/$name-SBPartialInfo.plist" \
+        --auto-activate-custom-fonts "${target[@]}" "$f" --compilation-directory "stage/$sub" >&2
       xcrun ibtool "${common[@]}" "${module[@]}" "${target[@]}" --link "golden/$root" \
-        "stage/$root${lproj:+/$lproj/}$name.storyboardc" >&2 ;;
+        "stage/$sub/$name.storyboardc" >&2 ;;
     *.xib)
-      xcrun ibtool "${common[@]}" "${module[@]}" --output-partial-info-plist "stage/$root${lproj:+/$lproj}/$name-PartialInfo.plist" \
-        --auto-activate-custom-fonts "${target[@]}" --compile "golden/$root${lproj:+/$lproj/}$name.nib" "$f" >&2 ;;
+      xcrun ibtool "${common[@]}" "${module[@]}" --output-partial-info-plist "stage/$sub/$name-PartialInfo.plist" \
+        --auto-activate-custom-fonts "${target[@]}" --compile "golden/$sub/$name.nib" "$f" >&2 ;;
   esac
 done
 xcrun ibtool --version --output-format xml1 >&2

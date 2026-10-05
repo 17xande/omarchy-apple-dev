@@ -109,6 +109,30 @@ _KEY_LAYOUT_LISTS = [
     UILayoutGuideShouldBeArchived UIProxiedObjectIdentifier
     UIViewSemanticContentAttribute UIBackgroundColor UIDeepDrawRect NSColorSpace
     UIColorComponentCount UIAutoresizingMask UILabel UINibObjectsKey""".split(),
+    # SettingsComboTableViewCell.nib
+    """UIFontMaximumPointSizeAfterScaling UISource
+    UIDisableUpdateTextColorOnTraitCollectionChange NSFirstAttributeV2 NS.bytes
+    UIViewDoesNotTranslateAutoresizingMaskIntoConstraints
+    UIViewSemanticContentAttribute UINibTopLevelObjectsKey UIFontPointSize
+    UIContentView UIViewPreservesSuperviewMargins UINibVisibleWindowsKey UIFont
+    UIViewContentHuggingPriority UIClassName UINibObjectsKey UILabel
+    UIImageView UIViewAutolayoutConstraints UIViewInsetsLayoutMarginsFromSafeArea
+    UINibKeyValuePairsKey UIBounds UIOriginalClassName UIFontTextStyleForScaling
+    UINibTraitStorageListsKey UINibConnectionsKey UIDeepDrawRect UISubviews
+    UICenter UIAdjustsFontForContentSizeCategory UIOpaque UIClipsToBounds
+    NSFirstAttribute NSSecondAttributeV2 UITextColor
+    UIViewLargeContentStoredProperties UISystemColorName NSConstant UISystemFont
+    UIShadowOffset UIAutoresizeSubviews UIAccessoryType UIIBTextStyle
+    NSShouldBeArchived UIContentMode UIFontName NSConstantV2 UITextLabel
+    NSRelation NSInlinedValue NSFirstItem UIDetailTextLabel
+    UIUserInteractionDisabled UINibEncoderEmptyKey NSWhite NSColorSpace
+    UITextAlignment UIIndentationWidth UIAutoresizingMask
+    UINibAccessibilityConfigurationsKey UIProxiedObjectIdentifier
+    UIViewPreservesSpecificSuperviewMargins UIAlpha UIFontPointSizeForScaling
+    UIWhite NSSecondItem UIFontTraits IBUINibLNEVersionKey NSSize
+    NSSecondAttribute UIColorComponentCount UIText UIMultipleTouchEnabled
+    UIContentConfigurationView UIDestination UISystemBackgroundView
+    NSSymbolicConstant NSName""".split(),
 ]
 KEY_LAYOUTS = {frozenset(k): k for k in _KEY_LAYOUT_LISTS}
 
@@ -121,7 +145,17 @@ FONT_STYLE_SIZES = {  # UICTFontTextStyle -> point size at deployment target 17
     "UICTFontTextStyleBody": 14.0,
 }
 
-CONTENT_MODES = {"scaleToFill": 0, "center": 4, "left": 7}
+CONTENT_MODES = {"scaleToFill": 0, "center": 4, "left": 7, "scaleAspectFit": 1,
+                 "redraw": 3, "top": 5, "bottom": 6, "right": 8}
+# NSLayoutAttribute as Apple encodes it (standard order shifted by one).
+ATTRIBUTES = {"left": 1, "right": 2, "top": 3, "bottom": 4, "leading": 5,
+              "trailing": 6, "width": 7, "height": 8, "centerX": 9,
+              "centerY": 10, "baseline": 11}
+MARGIN_V2 = {"topMargin": 15, "bottomMargin": 16, "leadingMargin": 17,
+             "trailingMargin": 18}
+MARGIN_BASE = {"topMargin": "top", "bottomMargin": "bottom",
+               "leadingMargin": "leading", "trailingMargin": "trailing"}
+RELATIONS = {"equal": None, "greaterThanOrEqual": 1, "lessThanOrEqual": -1}
 TEXT_ALIGNMENTS = {"natural": 4, "left": 0, "center": 1, "right": 2}
 
 
@@ -326,7 +360,8 @@ ALLOWED_ATTRS = {
     "label": {"contentMode", "id", "opaque", "userInteractionEnabled", "text",
               "textAlignment", "horizontalHuggingPriority",
               "verticalHuggingPriority", "translatesAutoresizingMaskIntoConstraints",
-              "lineBreakMode", "baselineAdjustment", "adjustsFontSizeToFit"},
+              "lineBreakMode", "baselineAdjustment", "adjustsFontSizeToFit",
+              "adjustsFontForContentSizeCategory"},
     "placeholder": {"placeholderIdentifier", "id", "userLabel", "customClass"},
     "tableViewCell": {"clipsSubviews", "contentMode",
                       "preservesSuperviewLayoutMargins", "selectionStyle",
@@ -347,11 +382,14 @@ ALLOWED_ATTRS = {
 ALLOWED_SUBS = {
     "view": {"frame", "autoresizingMask", "backgroundColor", "canvasLocation",
              "viewLayoutGuide"},
-    "label": {"frame", "fontDescription", "highlightedColor", "canvasLocation"},
+    "label": {"frame", "fontDescription", "highlightedColor", "textColor",
+              "canvasLocation"},
+    "imageView": {"frame", "constraints"},
     "placeholder": set(),
-    "tableViewCell": {"frame", "autoresizingMask", "contentView",
+    "tableViewCell": {"frame", "autoresizingMask", "contentView", "connections",
                       "canvasLocation"},
-    "tableViewCellContentView": {"frame", "autoresizingMask", "subviews"},
+    "tableViewCellContentView": {"frame", "autoresizingMask", "subviews",
+                                 "constraints"},
     "cell-label": {"frame", "autoresizingMask", "fontDescription", "textColor",
                    "highlightedColor"},
 }
@@ -429,6 +467,9 @@ def build_label(b, el, where):
     o.add("UIViewSemanticContentAttribute", *b.int8(0))
     o.add("UIViewLargeContentStoredProperties", N.NIL, None)
     o.add("UIText", *b.ref(b.string(_attr(el, "text", where))))
+    adjusts = el.get("adjustsFontForContentSizeCategory")
+    if adjusts is not None:
+        o.add("UIAdjustsFontForContentSizeCategory", *b.boolean(False))
     o.add("UIFont", *b.ref(build_font(b, _sub(el, "fontDescription", where), where)))
     color_el = el.find("color[@key='textColor']")
     if color_el is None:
@@ -440,7 +481,7 @@ def build_label(b, el, where):
     if ta not in TEXT_ALIGNMENTS:
         raise XibError(f"<label> textAlignment={ta!r} not supported ({where})")
     o.add("UITextAlignment", *b.int8(TEXT_ALIGNMENTS[ta]))
-    o.add("UIDisableUpdateTextColorOnTraitCollectionChange", *b.boolean(False))
+    o.add("UIDisableUpdateTextColorOnTraitCollectionChange", *b.boolean(adjusts == "YES"))
     return o
 
 
@@ -485,10 +526,12 @@ def _cell_label(b, el, where, resources, role):
     return o
 
 
-def build_content_view(b, el, where, resources, roles):
+def build_content_view(b, el, where, resources, roles, id_map):
     _check_shape(el, where)
     (bx, by, bw, bh), (cx, cy) = _bounds_center(el)
     o = b.new("UITableViewCellContentView")
+    if el.get("id"):
+        id_map[el.get("id")] = o
     o.add("UIBounds", *b.geom(bx, by, bw, bh))
     o.add("UICenter", *b.geom(cx, cy))
     subs = b.new("NSMutableArray")  # shell first, elements after (golden order)
@@ -504,6 +547,31 @@ def build_content_view(b, el, where, resources, roles):
     o.add("UIContentMode", *b.int8(CONTENT_MODES[cm]))
     if el.get("clipsSubviews") is not None:
         o.add("UIClipsToBounds", *b.boolean(el.get("clipsSubviews") != "YES"))
+    sv = el.find("subviews")
+    if sv is None:
+        raise XibError(f"<tableViewCellContentView> has no subviews ({where})")
+    kids = []
+    groups = []
+    for child in sv:
+        cid = child.get("id")
+        if child.tag == "label":
+            kids.append(_cell_label(b, child, where, resources, roles.get(cid, ""))
+                        if cid in roles else build_label(b, child, where))
+        elif child.tag == "imageView":
+            kid, kgroup = build_image_view(b, child, where, id_map)
+            kids.append(kid)
+            groups.extend(kgroup)
+        else:
+            raise XibError(f"unsupported subview <{child.tag}> in contentView ({where})")
+        if cid:
+            id_map[cid] = kids[-1]
+    for k in kids:
+        subs.add("UINibEncoderEmptyKey", *b.ref(k))
+    cons_el = el.find("constraints")
+    if cons_el is not None:
+        arr, cons = build_constraints_block(b, cons_el, o, id_map, where)
+        o.add("UIViewAutolayoutConstraints", *b.ref(arr))
+        groups.append(cons)
     if el.get("preservesSuperviewLayoutMargins") is not None:
         o.add("UIViewPreservesSuperviewMargins", *b.boolean(False))
         o.add("UIViewPreservesSpecificSuperviewMargins", *b.int8(15))
@@ -511,24 +579,11 @@ def build_content_view(b, el, where, resources, roles):
         o.add("UIViewInsetsLayoutMarginsFromSafeArea", *b.int8(0))
     o.add("UIViewSemanticContentAttribute", *b.int8(0))
     o.add("UIViewLargeContentStoredProperties", N.NIL, None)
-    sv = el.find("subviews")
-    if sv is None:
-        raise XibError(f"<tableViewCellContentView> has no subviews ({where})")
-    kids = []
-    for child in sv:
-        if child.tag == "label":
-            lid = child.get("id")
-            kids.append(_cell_label(b, child, where, resources, roles.get(lid, "")))
-        else:
-            raise XibError(f"unsupported subview <{child.tag}> in contentView ({where})")
-    for k in kids:
-        subs.add("UINibEncoderEmptyKey", *b.ref(k))
-    return o, kids
-
-
+    return o, kids, groups
 def build_cell(b, el, where, resources):
     """<tableViewCell> -> UIClassSwapper (Apple wraps custom-class cells)."""
     _check_shape(el, where)
+    id_map = {}
     x, y, w, h = _frame(el)
     (_, _, _, _), (cx, cy) = _bounds_center(el)
     o = b.new("UIClassSwapper")
@@ -558,7 +613,9 @@ def build_cell(b, el, where, resources):
         roles[el.get("detailTextLabel")] = "detail"
     # Creation order = golden: contentView subtree, separator, then the
     # swapper's own strings (reuse identifier, class names).
-    cv, kids = build_content_view(b, cv_el, where, resources, roles)
+    if el.get("id"):
+        id_map[el.get("id")] = o
+    cv, kids, groups = build_content_view(b, cv_el, where, resources, roles, id_map)
     # Apple synthesizes the separator: 1pt full-width view at the cell bottom.
     sep = b.new("_UITableViewCellSeparatorView")
     sep.add("UIBounds", *b.geom(0.0, 0.0, w - 8.0, 1.0))
@@ -582,12 +639,13 @@ def build_cell(b, el, where, resources):
 
     if reuse is not None:
         o.add("UIReuseIdentifier", *b.ref(reuse))
-    style = _attr(el, "style", where)
+    style = el.get("style", "IBUITableViewCellStyleDefault")
     styles = {"IBUITableViewCellStyleDefault": 0, "IBUITableViewCellStyleValue1": 1,
               "IBUITableViewCellStyleSubtitle": 2, "IBUITableViewCellStyleValue2": 3}
     if style not in styles:
         raise XibError(f"<tableViewCell> style={style!r} not supported ({where})")
-    o.add("UITableViewCellStyle", *b.int8(styles[style]))
+    if styles[style]:
+        o.add("UITableViewCellStyle", *b.int8(styles[style]))
     acc = {"none": 0, "disclosureIndicator": 1, "detailDisclosureButton": 2,
            "checkmark": 3, "disclosureButton": 4}
     a = el.get("accessoryType", "none")
@@ -616,7 +674,20 @@ def build_cell(b, el, where, resources):
         decode_order.append(id_to_label[el.get("detailTextLabel")])
     if el.get("textLabel"):
         decode_order.append(id_to_label[el.get("textLabel")])
-    return o, decode_order
+    decode_order += [k for k in kids if k not in decode_order]
+    # constraints flattened in reverse group-creation order (golden-verified)
+    for group in reversed(groups):
+        decode_order += group
+    outlets = []
+    conns_el = el.find("connections")
+    if conns_el is not None:
+        for oc in conns_el.findall("outlet"):
+            prop = oc.get("property")
+            dst = id_map.get(oc.get("destination"))
+            if not prop or dst is None:
+                raise XibError(f"<tableViewCell> unparsable outlet {oc.attrib} ({where})")
+            outlets.append((prop, dst))
+    return o, decode_order, outlets
 
 
 def compile_xib(path):
@@ -644,7 +715,7 @@ def compile_xib(path):
     b = Builder()
     root = b.new("NSObject")
     top_array = b.new("NSArray")
-    main_obj = decode_order = None
+    main_obj = decode_order = outlets = None
     for i, el in enumerate(objects):
         w = f"{where} object #{i}"
         if el.tag == "placeholder":
@@ -664,12 +735,22 @@ def compile_xib(path):
             main_obj = build_label(b, el, w)
             decode_order = [main_obj]
         elif el.tag == "tableViewCell":
-            main_obj, decode_order = build_cell(b, el, w, resources)
+            main_obj, decode_order, outlets = build_cell(b, el, w, resources)
         else:
             raise XibError(f"unsupported element <{el.tag}> ({w})")
     if main_obj is None:
         raise XibError(f"{path}: no top-level object")
     objects_array = b.new("NSArray")
+    outlet_array = None
+    if outlets:
+        outlet_array = b.new("NSArray")
+        outlet_array.add("NSInlinedValue", *b.boolean(False))
+        for prop, target in outlets:
+            c = b.new("UIRuntimeOutletConnection")
+            c.add("UILabel", *b.ref(b.string(prop)))
+            c.add("UISource", *b.ref(main_obj))
+            c.add("UIDestination", *b.ref(target))
+            outlet_array.add("UINibEncoderEmptyKey", *b.ref(c))
     conn = b.new("NSArray")
 
     def fill_array(arr, items):
@@ -681,36 +762,42 @@ def compile_xib(path):
     # UINibObjectsKey lists decode-order targets, not creation order (golden);
     # decode_order starts with the main object itself.
     fill_array(objects_array, tops + decode_order)
-    fill_array(conn, [])
+    conn.add("NSInlinedValue", *b.boolean(False))
     root.add("UINibTopLevelObjectsKey", *b.ref(top_array))
     root.add("UINibObjectsKey", *b.ref(objects_array))
-    for key in ("UINibConnectionsKey", "UINibVisibleWindowsKey",
-                "UINibAccessibilityConfigurationsKey", "UINibTraitStorageListsKey",
-                "UINibKeyValuePairsKey"):
-        root.add(key, *b.ref(conn))
+    if outlet_array:
+        empty_arr = b.new("NSArray")
+        empty_arr.add("NSInlinedValue", *b.boolean(False))
+    else:
+        empty_arr = conn  # no outlets: all five root lists share one empty array
+    root.add("UINibConnectionsKey", *b.ref(outlet_array if outlet_array else conn))
+    for key in ("UINibVisibleWindowsKey", "UINibAccessibilityConfigurationsKey",
+                "UINibTraitStorageListsKey", "UINibKeyValuePairsKey"):
+        root.add(key, *b.ref(empty_arr))
     root.add("IBUINibLNEVersionKey", *b.int8(1))
     return finalize(b, root)
 
 
 def finalize(b, root):
-    """Serialize a built object graph: key-table remap, class table, encode."""
-    # Key table: remap from creation order to Apple's hash order for this set.
-    used = {k for o in b.objects for k, _ in o.values}
-    layout = KEY_LAYOUTS.get(frozenset(used))
-    if layout is None:
-        raise XibError(f"no known key-table layout for key set "
-                       f"{sorted(used)} (add it to KEY_LAYOUTS from golden bytes)")
-    key_bytes = [k.encode("ascii") for k in layout]
-    key_idx = {k: i for i, k in enumerate(layout)}
-
-    # Class table: first-use order, then the superclass entries Apple appends
-    # (a subclass's extra int is its superclass entry's index; superclasses
-    # with no extra of their own sort alphabetically at the end).
-    SUPERCLASS = {"UIColor": "NSColor", "UIFont": "NSFont",
-                  "UITableViewCellContentView": "UIView"}
+    """Serialize a built object graph: key table (__NSSetM simulation over the
+    first-intern order, KEY_LAYOUTS as fallback), class table, encode."""
+    # Flatten values in object order; classes in first-use order.
+    values = []
     classes = []
     class_idx = {}
+    creation_keys = []
+    creation_idx = {}
+    SUPERCLASS = {"UIColor": "NSColor", "UIFont": "NSFont",
+                  "UITableViewCellContentView": "UIView"}
     for o in b.objects:
+        o.value_start = len(values)
+        for key, v in o.values:
+            if key not in creation_idx:
+                creation_idx[key] = len(creation_keys)
+                creation_keys.append(key)
+            v.key_idx = creation_idx[key]
+            values.append(v)
+        o.value_count = len(values) - o.value_start
         if o.cls not in class_idx:
             class_idx[o.cls] = len(classes)
             classes.append([o.cls, ()])
@@ -721,25 +808,64 @@ def finalize(b, root):
         if c[0] in SUPERCLASS:
             c[1] = (class_idx[SUPERCLASS[c[0]]],)
 
+    # Key table: run the __NSSetM simulation over the first-intern order
+    # (inline DFS), derived from a probe archive of this exact graph.
+    creation_keys = []
+    seen = set()
+    for o in b.objects:
+        for key, _ in o.values:
+            if key not in seen:
+                seen.add(key)
+                creation_keys.append(key)
     arch = N.Archive()
     arch.version = 1
     arch.minor = 10
-    arch.keys = key_bytes
+    arch.keys = [k.encode("ascii") for k in creation_keys]
     arch.classes = [(name.encode("ascii") + b"\x00", extras) for name, extras in classes]
-    values = []
+    arch.objects = [N.Object(class_idx[o.cls], o.value_start, o.value_count)
+                    for o in b.objects]
+    arch.values = values
+    key_idx = {k: i for i, k in enumerate(creation_keys)}
     for o in b.objects:
-        o.value_start = len(values)
         for key, v in o.values:
             v.key_idx = key_idx[key]
-            values.append(v)
-        o.value_count = len(values) - o.value_start
-        arch.objects.append(N.Object(class_idx[o.cls], o.value_start, o.value_count))
-    arch.values = values
+
+    key_bytes = None
+    try:
+        import keyorder
+        arch_keys = keyorder.key_order(keyorder.first_use_order(arch))
+        if sorted(arch_keys) == sorted(creation_keys):
+            key_bytes = list(arch_keys)
+    except ImportError:
+        pass
+    if key_bytes is None:
+        layout = KEY_LAYOUTS.get(frozenset(seen))
+        if layout is None:
+            raise XibError(f"no known key-table layout for key set "
+                           f"{sorted(seen)} (add it to KEY_LAYOUTS from golden bytes)")
+        key_bytes = [k.encode("ascii") for k in layout]
+    remap = {k: i for i, k in enumerate(key_bytes)}
+    assert len(remap) == len(creation_keys) and all(k in remap for k in creation_keys)
+    for v in values:
+        v.key_idx = remap[creation_keys[v.key_idx]]
+    arch.keys = [k.encode("ascii") for k in key_bytes]
     return N.encode(arch)
 
 
 SELF_TEST_NIBS = ("TinyView", "TinyLabel", "SettingsTableViewCell")
 
+# (label, src rel under SRC, golden rel under GOLDEN)
+SB_SELF_TEST = (
+    ("LaunchScreenPhone.storyboardc",
+     "NetNewsWire/Base.lproj/LaunchScreenPhone.storyboard",
+     "Base.lproj/LaunchScreenPhone.storyboardc"),
+    ("LaunchScreenPad.storyboardc",
+     "NetNewsWire/Base.lproj/LaunchScreenPad.storyboard",
+     "Base.lproj/LaunchScreenPad.storyboardc"),
+    ("Mastodon Main.storyboardc",
+     "Mastodon/Base.lproj/Main.storyboard",
+     "Mastodon/Base.lproj/Main.storyboardc"),
+)
 def _bplist_bytes(plist):
     """Serialize {str: dict|str|int} exactly like Apple's storyboardc
     Info.plist: bplist00, pre-order object assignment (dict keys before
@@ -794,6 +920,87 @@ def _layout_guide(b, el, where):
     g.add("UILayoutGuideShouldBeArchived", N.TRUE, None)
     g.add("UILayoutGuideAllowsNegativeDimensions", N.TRUE, None)
     return g
+
+
+def build_constraint(b, el, owner, id_map, where):
+    o = b.new("NSLayoutConstraint")
+    first = el.get("firstItem")
+    o.add("NSFirstItem", *b.ref(id_map[first] if first else owner))
+    fa = el.get("firstAttribute")
+    if fa is None:
+        raise XibError(f"<constraint> missing firstAttribute ({where})")
+    o.add("NSFirstAttributeV2", *b.int8(ATTRIBUTES.get(fa, MARGIN_V2.get(fa, 0))))
+    o.add("NSFirstAttribute", *b.int8(ATTRIBUTES.get(MARGIN_BASE.get(fa, fa), 0)))
+    second = el.get("secondItem")
+    if second is not None:
+        o.add("NSSecondItem", *b.ref(id_map[second]))
+        sa = el.get("secondAttribute")
+        if sa is None:
+            raise XibError(f"<constraint> secondItem without secondAttribute ({where})")
+        o.add("NSSecondAttributeV2", *b.int8(ATTRIBUTES.get(sa, MARGIN_V2.get(sa, 0))))
+        o.add("NSSecondAttribute", *b.int8(ATTRIBUTES.get(MARGIN_BASE.get(sa, sa), 0)))
+    rel = RELATIONS.get(el.get("relation", "equal"))
+    if rel is not None:
+        o.add("NSRelation", *b.int8(rel))
+    if el.get("symbolic") == "YES":
+        o.add("NSSymbolicConstant", *b.ref(b.string("NSSpace")))
+        o.add("NSShouldBeArchived", *b.boolean(False))
+    elif el.get("constant") is not None:
+        c = float(el.get("constant"))
+        o.add("NSConstantV2", *b.float64(c))
+        o.add("NSShouldBeArchived", *b.boolean(False))
+        o.add("NSConstant", *b.float64(c))
+    else:
+        o.add("NSShouldBeArchived", *b.boolean(False))
+    return o
+
+
+def build_constraints_block(b, el, owner, id_map, where):
+    """<constraints> of a view -> (NSMutableArray shell, constraint objects)."""
+    arr = b.new("NSMutableArray")
+    arr.add("NSInlinedValue", *b.boolean(False))
+    cons = [build_constraint(b, c, owner, id_map, where) for c in el.findall("constraint")]
+    for c in cons:
+        arr.add("UINibEncoderEmptyKey", *b.ref(c))
+    return arr, cons
+
+
+def build_image_view(b, el, where, id_map):
+    _check_shape(el, where, shape="imageView")
+    (bx, by, bw, bh), (cx, cy) = _bounds_center(el)
+    o = b.new("UIImageView")
+    if el.get("id"):
+        id_map[el.get("id")] = o
+    o.add("UIBounds", *b.geom(bx, by, bw, bh))
+    o.add("UICenter", *b.geom(cx, cy))
+    o.add("UIDeepDrawRect", *b.boolean(False))
+    o.add("UIOpaque", *b.boolean(False))
+    if el.get("userInteractionEnabled") is not None:
+        o.add("UIUserInteractionDisabled", *b.boolean(el.get("userInteractionEnabled") != "NO"))
+    o.add("UIAutoresizeSubviews", *b.boolean(False))
+    o.add("UIAutoresizingMask", *b.int8(36))
+    cm = _attr(el, "contentMode", where)
+    if cm not in CONTENT_MODES:
+        raise XibError(f"<imageView> contentMode={cm!r} not supported ({where})")
+    o.add("UIContentMode", *b.int8(CONTENT_MODES[cm]))
+    if el.get("clipsSubviews") is not None:
+        o.add("UIClipsToBounds", *b.boolean(el.get("clipsSubviews") != "YES"))
+    tr = el.get("translatesAutoresizingMaskIntoConstraints")
+    if tr is not None:
+        o.add("UIViewDoesNotTranslateAutoresizingMaskIntoConstraints",
+              *b.boolean(tr != "NO"))
+    group = []
+    cons_el = el.find("constraints")
+    if cons_el is not None:
+        arr, cons = build_constraints_block(b, cons_el, o, id_map, where)
+        o.add("UIViewAutolayoutConstraints", *b.ref(arr))
+        group.append(cons)
+    if el.get("horizontalHuggingPriority") is not None:
+        hug = f"{{{_attr(el, 'horizontalHuggingPriority', where)}, {_attr(el, 'verticalHuggingPriority', where)}}}"
+        o.add("UIViewContentHuggingPriority", *b.ref(b.string(hug)))
+    o.add("UIViewSemanticContentAttribute", *b.int8(0))
+    o.add("UIViewLargeContentStoredProperties", N.NIL, None)
+    return o, group
 
 
 def _scene_view_nib(vc_el, view_el, view_nib_name, where, resources):
