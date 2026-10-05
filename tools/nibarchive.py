@@ -93,23 +93,26 @@ class Archive:
 
     def __init__(self):
         self.version = self.minor = 0
-        self.keys = []     # [str]
-        self.classes = []  # [(name, extras tuple)]
+        self.keys = []     # [bytes] raw key bytes, in table order
+        self.classes = []  # [(bytes raw name incl. any NUL, extras tuple)]
         self.objects = []  # [Object]
         self.values = []   # [Value]
+
+    def key(self, idx):
+        return self.keys[idx].decode("utf-8")
 
     def object_values(self, obj):
         return self.values[obj.value_start:obj.value_start + obj.value_count]
 
     def object_class(self, idx):
-        return self.classes[self.objects[idx].class_idx][0]
+        return self.classes[self.objects[idx].class_idx][0].rstrip(b"\x00").decode("utf-8")
 
     def object_string(self, idx):
         """Text of an NSString object, or None."""
         if self.object_class(idx) not in ("NSString", "NSMutableString"):
             return None
         for v in self.object_values(self.objects[idx]):
-            if v.type == DATA and self.keys[v.key_idx] in STRING_KEYS:
+            if v.type == DATA and self.key(v.key_idx) in STRING_KEYS:
                 return v.payload.rstrip(b"\x00").decode("utf-8")
         return None
 
@@ -118,9 +121,9 @@ class Archive:
                f" values={len(self.values)} keys={len(self.keys)}"
                f" classes={len(self.classes)}"]
         for i, obj in enumerate(self.objects):
-            out.append(f"[{i}] {self.classes[obj.class_idx][0]}")
+            out.append(f"[{i}] {self.object_class(i)}")
             for v in self.object_values(obj):
-                out.append(f"    {self.keys[v.key_idx]} = {self.render(v)}")
+                out.append(f"    {self.key(v.key_idx)} = {self.render(v)}")
         return "\n".join(out)
 
     def render(self, v):
@@ -170,13 +173,13 @@ def parse(buf):
 
     r.pos = key_off
     for _ in range(key_count):
-        a.keys.append(r.take(r.vint()).decode("utf-8"))
+        a.keys.append(r.take(r.vint()))
 
     r.pos = cls_off
     for _ in range(cls_count):
         name_len = r.vint()
         extras = tuple(r.u32() for _ in range(r.vint()))
-        a.classes.append((r.take(name_len).rstrip(b"\x00").decode("utf-8"), extras))
+        a.classes.append((r.take(name_len), extras))
 
     r.pos = obj_off
     for _ in range(obj_count):
@@ -228,6 +231,61 @@ def load(path):
         return parse(f.read())
 
 
+def _vint(v):
+    if v < 0:
+        raise NibError(f"negative varint: {v}")
+    out = bytearray()
+    while True:
+        b = v & 0x7F
+        v >>= 7
+        if v:
+            out.append(b)          # low chunks first, high bit clear
+        else:
+            out.append(b | 0x80)   # terminal chunk carries the stop bit
+            return bytes(out)
+
+
+def encode(a):
+    """Serialize an Archive exactly the way Apple's ibtool lays the file out:
+    50-byte header, then the objects, keys, values and class-name tables
+    packed back to back. Round-trips every corpus nib byte-identically."""
+    objs = b"".join(_vint(o.class_idx) + _vint(o.value_start) + _vint(o.value_count)
+                    for o in a.objects)
+    keys = b"".join(_vint(len(k)) + k for k in a.keys)
+    signed = {INT8: "<b", INT16: "<h", INT32: "<i", INT64: "<q"}
+    floats = {FLOAT: "<f", DOUBLE: "<d"}
+    vals = bytearray()
+    for v in a.values:
+        vals += _vint(v.key_idx)
+        vals.append(v.type)
+        if v.type in signed:
+            vals += struct.pack(signed[v.type], v.payload)
+        elif v.type in floats:
+            vals += struct.pack(floats[v.type], v.payload)
+        elif v.type == DATA:
+            vals += _vint(len(v.payload)) + v.payload
+        elif v.type == OBJREF:
+            vals += struct.pack("<I", v.payload)
+        elif v.type not in (TRUE, FALSE, NIL):
+            raise NibError(f"unknown value type {v.type}")
+    clss = b"".join(
+        _vint(len(name)) + _vint(len(extras))
+        + b"".join(struct.pack("<I", e) for e in extras) + name
+        for name, extras in a.classes)
+
+    off = 50
+    obj_off = off; off += len(objs)
+    key_off = off; off += len(keys)
+    val_off = off; off += len(vals)
+    cls_off = off
+    header = (MAGIC + struct.pack("<II", a.version, a.minor)
+              + struct.pack("<II", len(a.objects), obj_off)
+              + struct.pack("<II", len(a.keys), key_off)
+              + struct.pack("<II", len(a.values), val_off)
+              + struct.pack("<II", len(a.classes), cls_off))
+    return header + objs + keys + bytes(vals) + clss + b"LNE\x00"
+
+
 # ---------------------------------------------------------------- self-test
 
 # Apple ibtool 27.0 output, byte-identical to Xcode 27.0's NetNewsWire.app (tests/ibtool/compile-golden.sh).
@@ -269,6 +327,28 @@ def self_test():
             if got[kind] != want:
                 failed.append(f"{rel}: {kind}={got[kind]!r} want {want!r}")
         checks.append(f"{rel}: objects={got['objects']} class0={got['class0']}")
+
+    # M1: parse -> encode is byte-identical for every golden nib
+    rt = 0
+    for path in nibs:
+        raw = open(path, "rb").read()
+        if encode(load(path)) == raw:
+            rt += 1
+        else:
+            failed.append(f"round-trip {os.path.relpath(path, root)}")
+    checks.append(f"round-trip {rt}/{len(nibs)}")
+
+    # M1: our xib compiler reproduces Apple's bytes for the tiny targets
+    ibtool = _load_ibtool()
+    for name in ibtool.SELF_TEST_NIBS:
+        src = os.path.join(ibtool.SRC, f"{name}.xib")
+        if not os.path.isfile(src):
+            src = os.path.join(ibtool.SRC, "NetNewsWire", f"{name}.xib")
+        out = ibtool.compile_xib(src)
+        if out == open(os.path.join(root, f"{name}.nib"), "rb").read():
+            checks.append(f"{name} byte-identical")
+        else:
+            failed.append(f"{name}.nib: compiled output differs from golden")
     if failed:
         raise SystemExit("self-test FAILED: " + "; ".join(failed))
 
@@ -278,6 +358,17 @@ def self_test():
     if a == b:
         raise SystemExit("self-test FAILED: distinct nibs dumped identical")
     print("self-test passed (" + "; ".join(checks) + ")")
+
+
+def _load_ibtool():
+    import importlib.machinery
+    import importlib.util
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ibtool")
+    loader = importlib.machinery.SourceFileLoader("ibtool_tool", path)
+    spec = importlib.util.spec_from_loader("ibtool_tool", loader)
+    mod = importlib.util.module_from_spec(spec)
+    loader.exec_module(mod)
+    return mod
 
 
 def main(argv=None):

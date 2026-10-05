@@ -999,3 +999,13 @@ two launch storyboards (system background, nothing else) become
 `UILaunchScreen = {}`, and its "launch UI will be missing" warning is gone.
 Mastodon's launch storyboard is also its main interface, so it stays excluded
 with the warning.
+
+M1 of the Linux `ibtool`: `tools/nibarchive.py` also writes NIBArchive files
+(all 33 golden nibs round-trip byte for byte; files end in `LNE\0`; varints
+are 7-bit little-endian with the high bit on the last byte), and
+`tools/ibtool --compile OUT.nib IN.xib` compiles a first xib subset: the two
+tiny test xibs and NetNewsWire's `SettingsTableViewCell.xib` are byte-identical
+to Apple's output. Any other element fails with an `error:` line and no output.
+One piece is not derived yet: Apple orders the nib's key table by a hash of
+the key set, so `tools/ibtool` carries the observed order per known key set.
+The generator still excludes storyboards and xibs.

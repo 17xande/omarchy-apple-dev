@@ -139,7 +139,7 @@ for sdk in sorted(os.listdir(sdks)) if os.path.isdir(sdks) else []:
     plistlib.dump(d, open(p + ".tmp", "wb"))
     os.replace(p + ".tmp", p)
 PY
-  echo "Installed actool, xcstringstool, momc and ibtool (version probe only) into $bin"
+  echo "Installed actool, xcstringstool, momc and ibtool (version probe; compiles a small xib subset) into $bin"
 }
 
 # Build the portable darwin.xtoolsdk from an Xcode.xip or Xcode.app ($1),
