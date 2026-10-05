@@ -69,9 +69,20 @@ above. The regression set at this commit (`regress-full.sh`, fresh clones):
 template, `branch:` dependency and `.dynamic` product build; demo 37/37, iPad
 demo 38/38, IceCubesApp 98/98, NetNewsWire 83/83.
 
-Open: upload 8198e86f (the Linux build with Apple's `actool` car for the same
-catalog, compiled on a Mac) also stayed in `PROCESSING`. That car came from a
-standalone `actool` run, not from an Xcode build, and is not explained yet.
+Upload 8198e86f (the Linux build with Apple's `actool` car for the main
+catalog) also stayed in `PROCESSING`, because the app has a second car. The
+SwiftPM resource bundle `NetNewsWire-iOS_NetNewsWire-iOS.bundle/Assets.car`
+(37 colors and 1 image, from another catalog) was still compiled by the old
+AssetKit. Two uploads of the Xcode-built control with our executable and
+Info.plist settle it:
+
+| Added `NetNewsWire-iOS_NetNewsWire-iOS.bundle` | Result |
+|---|---|
+| car from AssetKit 793a650 (sha256 `e12fff0e…`, the 8198e86f bundle) | stayed in `PROCESSING` |
+| car from AssetKit 16c561f (sha256 `3f68b3ba…`) | `fc19d596`, `VALID` |
+
+So App Store processing checks every `Assets.car` in the app, nested resource
+bundles included, and the theory holds: Apple's car was fine.
 
 ## IceCubesApp, same toolchain
 

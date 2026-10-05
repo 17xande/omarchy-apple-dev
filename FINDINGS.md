@@ -948,7 +948,10 @@ for review. Three App Store processing walls fell on the way:
    descriptor must be `(tokens + 4) * 4` bytes for the car's KEYFORMAT token
    count, with the icon's real group count and all-1 color slots. AssetKit
    1f23d61 and 16c561f write them as `actool` 27.0 does at 8, 9, 10, 13 and 14
-   tokens.
+   tokens. Processing checks every car in the app: the SwiftPM resource
+   bundle's `Assets.car` alone, from the old AssetKit, kept a build with
+   Apple's main car in `PROCESSING` (8198e86f); the same bundle from 16c561f
+   is VALID (fc19d596).
 
 The Linux `actool` also compiles PDF imagesets now (a vector rendition and
 1x/2x/3x bitmaps through poppler's `pdftocairo`; 76 of 76 NetNewsWire PDF
