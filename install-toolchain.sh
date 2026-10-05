@@ -105,6 +105,7 @@ install_darwin_tools() {
   mkdir -p "$bin"
   install -m755 "$REPO_DIR/tools/darwin-tools/.build/release/actool" "$bin/actool"
   install -m755 "$REPO_DIR/tools/xcstringstool" "$REPO_DIR/tools/ibtool" "$bin/"
+  install -m644 "$REPO_DIR/tools/nibarchive.py" "$REPO_DIR/tools/keyorder.py" "$bin/"
   install -m755 "$REPO_DIR/tools/momc" "$bin/momc"
   install -m644 "$REPO_DIR/tools/xcstrings_symbols.py" "$bin/xcstrings_symbols.py"
   python3 - "$DARWIN_SDK_BUNDLE" <<'PY'

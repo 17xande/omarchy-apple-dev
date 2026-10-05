@@ -1,11 +1,9 @@
 #!/usr/bin/env python3
-"""Linux ibtool: SwiftBuild's version probe plus a real xib -> NIBArchive compiler.
+"""Linux ibtool: SwiftBuild's version probe plus a xib/storyboard -> NIBArchive compiler.
 
-M1 subset: `--compile OUT.nib IN.xib` for xibs whose objects are the tiny-view
-set (placeholders, one view or label) and produce bytes identical to Apple's
-ibtool 27.0 output (tests/ibtool/golden). Storyboards and other elements are
-rejected with a clear error; the --version probe answers exactly like the
-stand-in this replaces.
+Compiles the subset of xibs and storyboards whose output is byte-identical to Apple's
+ibtool 27.0 (tests/ibtool/golden); anything else fails with an `error:` line and no
+output. The --version probe answers exactly like Apple's.
 
 Object-graph rules are derived from the golden corpus: objects are appended in
 first-reference order (root, top-level array, each top-level object's closure,
@@ -13,8 +11,7 @@ objects array, the shared empty connections array); per-class value order,
 geometry data packing (0x07-tagged little-endian doubles) and the class table
 (first-use order plus the NSColor/NSFont superclass entries) all follow the
 golden bytes. The global key-table order is the one piece Apple does not lay
-down deterministically for us: it is a hash of the key set, so KEY_LAYOUTS
-carries the byte-derived order per known key set until the hash is replicated.
+down for us: it is the iteration order of an __NSSetM of the keys (keyorder.py).
 """
 
 import os
@@ -25,6 +22,7 @@ import xml.etree.ElementTree as ET
 
 _TOOLS = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, _TOOLS)
+import keyorder  # noqa: E402
 import nibarchive as N  # noqa: E402
 
 VERSION_XML = """<?xml version="1.0" encoding="UTF-8"?>
@@ -36,105 +34,8 @@ VERSION_XML = """<?xml version="1.0" encoding="UTF-8"?>
 """
 
 GOLDEN = os.path.join(_TOOLS, "..", "tests", "ibtool", "golden")
+TARGET_MODULE = None  # --module: the module for customModuleProvider="target" classes
 SRC = os.path.join(_TOOLS, "..", "tests", "ibtool", "src")
-
-# Byte-derived key-table order for each known key set (see module docstring).
-# Byte-derived key-table order per known key set: Apple orders this table by
-# an internal hash of the key strings, so until that hash is replicated the
-# order observed in the golden bytes is carried as data (see module docstring).
-_KEY_LAYOUT_LISTS = [
-    # TinyView.nib
-    """NSColorSpace UIAutoresizeSubviews UIColorComponentCount UIWhite
-    UIBackgroundColor UIDeepDrawRect UIViewLargeContentStoredProperties
-    UINibTopLevelObjectsKey UIViewSemanticContentAttribute UIAlpha NS.bytes
-    UINibKeyValuePairsKey UINibEncoderEmptyKey UIProxiedObjectIdentifier
-    UINibVisibleWindowsKey UINibAccessibilityConfigurationsKey NSWhite
-    UICenter UIOpaque NSInlinedValue UIBounds UIAutoresizingMask
-    UINibObjectsKey UINibConnectionsKey IBUINibLNEVersionKey
-    UISystemColorName UINibTraitStorageListsKey""".split(),
-    # TinyLabel.nib
-    """UINibVisibleWindowsKey UINibAccessibilityConfigurationsKey UIBounds
-    NS.bytes UINibEncoderEmptyKey UIUserInteractionDisabled NSSize UIFontName
-    UIFontDescriptor UIFontPointSizeForScaling NSInlinedValue UIFont
-    UIContentMode NSWhite UIDisableUpdateTextColorOnTraitCollectionChange
-    UIFontDescriptorOptions UIViewLargeContentStoredProperties UISystemFont
-    UINibKeyValuePairsKey UITextColor UIAutoresizeSubviews UIAlpha
-    IBUINibLNEVersionKey UIWhite
-    UIViewDoesNotTranslateAutoresizingMaskIntoConstraints
-    UIFontTextStyleForScaling UINibTopLevelObjectsKey UIShadowOffset
-    UISystemColorName NSName UICenter UINibConnectionsKey
-    UINibTraitStorageListsKey UIFontDescriptorAttributes
-    UIProxiedObjectIdentifier UIViewSemanticContentAttribute UIDeepDrawRect
-    UITextAlignment NSColorSpace UIColorComponentCount
-    UIFontMaximumPointSizeAfterScaling UIViewContentHuggingPriority
-    UIFontTraits UIAutoresizingMask UINibObjectsKey UIText NS.dblval
-    UIFontPointSize""".split(),
-    # SettingsTableViewCell.nib
-    """UIFontMaximumPointSizeAfterScaling
-    UIDisableUpdateTextColorOnTraitCollectionChange UINibVisibleWindowsKey
-    NS.bytes UIReuseIdentifier UIViewSemanticContentAttribute
-    UINibTopLevelObjectsKey UIFontPointSize UIContentView
-    UIViewPreservesSuperviewMargins UIBlue UIFont UIClassName UIGreen-Double
-    UINibObjectsKey UIImageView UINibKeyValuePairsKey
-    UIViewInsetsLayoutMarginsFromSafeArea UIBounds UIBlue-Double
-    UIFontTextStyleForScaling UIOriginalClassName UITableViewCellStyle
-    UINibConnectionsKey UIDeepDrawRect UINibTraitStorageListsKey UISubviews
-    UICenter UIAdjustsFontForContentSizeCategory UIOpaque UIClipsToBounds
-    UIRed-Double UIHighlightedColor UITextColor
-    UIViewLargeContentStoredProperties UIGreen UISystemColorName UISystemFont
-    UIShadowOffset UIAutoresizeSubviews UIAccessoryType UIIBTextStyle
-    UIContentMode NSRGB UIFontName UITextLabel NSInlinedValue
-    UIDetailTextLabel UINibEncoderEmptyKey NSWhite NSColorSpace
-    UIAlpha-Double UITextAlignment UIIndentationWidth
-    UINibAccessibilityConfigurationsKey UIProxiedObjectIdentifier
-    UIViewPreservesSpecificSuperviewMargins UIAlpha UIFontPointSizeForScaling
-    UIWhite UIFontTraits IBUINibLNEVersionKey NSSize UIColorComponentCount
-    UIContentConfigurationView UIText UIMultipleTouchEnabled
-    UISystemBackgroundView NSName UIRed""".split(),
-    # LaunchScreenPhone.storyboardc/UIViewController-2hg-qO-omg.nib (VC scene)
-    """UISource UIClassName UILabel UIDestination UINibTopLevelObjectsKey
-    UINibVisibleWindowsKey NSInlinedValue UIExternalObjectsTableForViewLoading
-    UIOriginalClassName UINibEncoderEmptyKey UINibAccessibilityConfigurationsKey
-    UINibKeyValuePairsKey UINibConnectionsKey NS.bytes IBUINibLNEVersionKey
-    UINibTraitStorageListsKey UINibObjectsKey UIProxiedObjectIdentifier
-    UINibName""".split(),
-    # LaunchScreenPhone.storyboardc/2hg-qO-omg-view-wsU-Ys-fCl.nib (view scene)
-    """UINibVisibleWindowsKey UINibAccessibilityConfigurationsKey UIBounds
-    NS.bytes UINibEncoderEmptyKey NSWhite UILayoutGuideIdentifier NSInlinedValue
-    IBUINibLNEVersionKey UIViewLargeContentStoredProperties
-    UINibKeyValuePairsKey UIOpaque UIAutoresizeSubviews UIAlpha UIWhite
-    UILayoutGuideOwningView UIDestination UILayoutGuideAllowsNegativeDimensions
-    UINibTopLevelObjectsKey UILayoutGuideOwningViewIsLocked UINibConnectionsKey
-    UISystemColorName UICenter UISource UINibTraitStorageListsKey
-    UILayoutGuideShouldBeArchived UIProxiedObjectIdentifier
-    UIViewSemanticContentAttribute UIBackgroundColor UIDeepDrawRect NSColorSpace
-    UIColorComponentCount UIAutoresizingMask UILabel UINibObjectsKey""".split(),
-    # SettingsComboTableViewCell.nib
-    """UIFontMaximumPointSizeAfterScaling UISource
-    UIDisableUpdateTextColorOnTraitCollectionChange NSFirstAttributeV2 NS.bytes
-    UIViewDoesNotTranslateAutoresizingMaskIntoConstraints
-    UIViewSemanticContentAttribute UINibTopLevelObjectsKey UIFontPointSize
-    UIContentView UIViewPreservesSuperviewMargins UINibVisibleWindowsKey UIFont
-    UIViewContentHuggingPriority UIClassName UINibObjectsKey UILabel
-    UIImageView UIViewAutolayoutConstraints UIViewInsetsLayoutMarginsFromSafeArea
-    UINibKeyValuePairsKey UIBounds UIOriginalClassName UIFontTextStyleForScaling
-    UINibTraitStorageListsKey UINibConnectionsKey UIDeepDrawRect UISubviews
-    UICenter UIAdjustsFontForContentSizeCategory UIOpaque UIClipsToBounds
-    NSFirstAttribute NSSecondAttributeV2 UITextColor
-    UIViewLargeContentStoredProperties UISystemColorName NSConstant UISystemFont
-    UIShadowOffset UIAutoresizeSubviews UIAccessoryType UIIBTextStyle
-    NSShouldBeArchived UIContentMode UIFontName NSConstantV2 UITextLabel
-    NSRelation NSInlinedValue NSFirstItem UIDetailTextLabel
-    UIUserInteractionDisabled UINibEncoderEmptyKey NSWhite NSColorSpace
-    UITextAlignment UIIndentationWidth UIAutoresizingMask
-    UINibAccessibilityConfigurationsKey UIProxiedObjectIdentifier
-    UIViewPreservesSpecificSuperviewMargins UIAlpha UIFontPointSizeForScaling
-    UIWhite NSSecondItem UIFontTraits IBUINibLNEVersionKey NSSize
-    NSSecondAttribute UIColorComponentCount UIText UIMultipleTouchEnabled
-    UIContentConfigurationView UIDestination UISystemBackgroundView
-    NSSymbolicConstant NSName""".split(),
-]
-KEY_LAYOUTS = {frozenset(k): k for k in _KEY_LAYOUT_LISTS}
 
 SYSTEM_COLORS = {  # name -> (UIWhite, NSWhite digits); two-component form
     "systemBackgroundColor": (1.0, "1"),
@@ -630,7 +531,8 @@ def build_cell(b, el, where, resources):
 
     reuse = b.string(el.get("reuseIdentifier")) if el.get("reuseIdentifier") else None
     cls = el.get("customClass")
-    module = el.get("customModule")
+    # Apple's ibtool takes the module verbatim from --module for customModuleProvider="target".
+    module = TARGET_MODULE if el.get("customModuleProvider") == "target" and TARGET_MODULE else el.get("customModule")
     if not cls:
         raise XibError(f"<tableViewCell> requires customClass in this subset ({where})")
     mangled = f"_TtC{len(module)}{module}{len(cls)}{cls}" if module else cls
@@ -780,7 +682,7 @@ def compile_xib(path):
 
 def finalize(b, root):
     """Serialize a built object graph: key table (__NSSetM simulation over the
-    first-intern order, KEY_LAYOUTS as fallback), class table, encode."""
+    first-intern order), class table, encode."""
     # Flatten values in object order; classes in first-use order.
     values = []
     classes = []
@@ -830,20 +732,7 @@ def finalize(b, root):
         for key, v in o.values:
             v.key_idx = key_idx[key]
 
-    key_bytes = None
-    try:
-        import keyorder
-        arch_keys = keyorder.key_order(keyorder.first_use_order(arch))
-        if sorted(arch_keys) == sorted(creation_keys):
-            key_bytes = list(arch_keys)
-    except ImportError:
-        pass
-    if key_bytes is None:
-        layout = KEY_LAYOUTS.get(frozenset(seen))
-        if layout is None:
-            raise XibError(f"no known key-table layout for key set "
-                           f"{sorted(seen)} (add it to KEY_LAYOUTS from golden bytes)")
-        key_bytes = [k.encode("ascii") for k in layout]
+    key_bytes = keyorder.key_order(keyorder.first_use_order(arch))
     remap = {k: i for i, k in enumerate(key_bytes)}
     assert len(remap) == len(creation_keys) and all(k in remap for k in creation_keys)
     for v in values:
@@ -1275,6 +1164,9 @@ def main(argv):
     known_flags = flags_with_value | {"--errors", "--warnings",
                                       "--notices", "--auto-activate-custom-fonts",
                                       "--compile", "--link"}
+    global TARGET_MODULE
+    if "--module" in argv[:-1]:
+        TARGET_MODULE = argv[argv.index("--module") + 1]
     action = None
     action_args = []
     positional = []

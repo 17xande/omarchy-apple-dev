@@ -44,6 +44,8 @@ public enum CatalogMerge {
                     if try !copyColorSet(child, to: target) {
                         skipped.append("\(where_): no color defined")
                     }
+                case "symbolset":
+                    try place(child, at: target)
                 case "appiconset":
                     if child.deletingPathExtension().lastPathComponent == appIcon {
                         try place(child, at: target)

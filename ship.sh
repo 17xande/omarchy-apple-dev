@@ -39,7 +39,24 @@ xtool dev build --configuration release
 app=$(find xtool -maxdepth 1 -name '*.app' -print -quit)
 [ -n "$app" ] || { echo "no .app under xtool/" >&2; exit 1; }
 
-echo "== 2. App icon catalog =="
+echo "== 2. App-target Interface Builder placement =="
+# SwiftPM compiles the app target's .storyboard/.xib resources into
+# <App>_<App>.bundle (its resource bundle). UIKit and App Store processing
+# resolve UIMainStoryboardFile*/UILaunchStoryboardName* against the APP bundle
+# itself (root or <lang>.lproj) - ITMS-90029 - so move the compiled
+# .storyboardc/.nib up to where Xcode's CopyStoryboards step puts them.
+# Bundles inside Frameworks/ or PlugIns/ keep their own IB.
+resbundle=$(find "$app" -maxdepth 1 -type d \
+    -name "$(basename "$app" .app)_*.bundle" -print -quit)
+if [ -n "$resbundle" ]; then
+  while IFS= read -r -d '' rel; do
+    rel=${rel#./}
+    mkdir -p "$app/$(dirname "$rel")"
+    mv "$resbundle/$rel" "$app/$rel"
+  done < <(cd "$resbundle" && find . \( -name '*.storyboardc' -o -name '*.nib' \) -prune -print0)
+fi
+
+echo "== 3. App icon catalog =="
 # As in Xcode's app target, actool --app-icon puts the icon into the app's own Assets.car and
 # Info.plist. Search the app target (Sources/<App>) first, then the top of the project (4 levels:
 # ./AppIcon.icon, ./Resources/Assets.xcassets/AppIcon.appiconset); deeper catalogs belong to
@@ -72,11 +89,11 @@ plistlib.dump(d, open(p,"wb"), fmt=plistlib.FMT_BINARY)' "$app/Info.plist" "$sta
   *) echo "more than one $icon.appiconset or $icon.icon: ${catalogs[*]}" >&2; exit 1 ;;
 esac
 
-echo "== 3. App Store Info.plist keys and frameworks =="
+echo "== 4. App Store Info.plist keys and frameworks =="
 "$PY" "$ASC" stamp "$app" "${BUILD_NUMBER:-$(date -u +%Y%m%d%H%M)}"
 "$PY" "$ASC" frameworks "$app"
 
-echo "== 4. Distribution identity and signature =="
+echo "== 5. Distribution identity and signature =="
 sign_dir=xtool/ship-signing
 if [ -n "${ASC_KEY_ID:-}" ]; then
   "$PY" "$ASC" identity "$app" "$sign_dir"
@@ -101,7 +118,7 @@ done
 shopt -u nullglob
 rcodesign sign "${sign_args[@]}" --entitlements-xml-file "$sign_dir/entitlements.plist" "$app"
 
-echo "== 5. Package =="
+echo "== 6. Package =="
 name=$(basename "$app" .app)
 ipa="$PWD/xtool/$name.ipa"
 mkdir "$stage/Payload"
@@ -110,10 +127,10 @@ rm -f "$ipa"
 (cd "$stage" && zip -qry "$ipa" Payload)
 echo "wrote $ipa"
 
-echo "== 6. Offline App Store validation =="
+echo "== 7. Offline App Store validation =="
 "$PY" "$ASC" validate "$ipa"
 
 if [ "$upload" = 1 ]; then
-  echo "== 7. Upload to App Store Connect =="
+  echo "== 8. Upload to App Store Connect =="
   "$PY" "$ASC" upload "$ipa"
 fi

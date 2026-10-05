@@ -14,10 +14,13 @@ xcconfig files, and writes an adapter directory (default <project root>/omarchy-
 
 Stdlib only. Things it does not support each print one "warning:" line, never
 silent: CocoaPods, ObjC sources, run-script phases, Icon Composer .icon assets,
-unmapped build settings. Interface Builder files are excluded (no ibtool on
-Linux) except bare launch storyboards (one view, a background color, at most
-one centered image view): those are replaced by the Info.plist UILaunchScreen
-dictionary, generating a colorset into the adapter's asset catalog when the
+unmapped build settings. Interface Builder files are probed with the repo's
+tools/ibtool: the ones it compiles ship as normal resources (SwiftBuild then
+runs ibtool on them), the rest are excluded with one warning. Bare launch
+storyboards (one view, a background color, at most one centered image view)
+are replaced by the Info.plist UILaunchScreen dictionary instead - unless the
+same storyboard is also the UIMainStoryboardFile, which must ship compiled -
+generating a colorset into the adapter's asset catalog when the
 storyboard used component colors. App extensions (WidgetKit widgets, share,
 notification service, ...) embedded in the selected app target are emitted as
 extra SwiftPM targets/products plus `extensions:` entries in xtool.yml; their
@@ -33,6 +36,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 import xml.etree.ElementTree as ET
 
 # ---------------------------------------------------------------- pbxproj parser
@@ -202,8 +206,8 @@ PROCESSABLE = {
     ".lproj", ".xcdatamodeld",
     ".scnassets", ".appiconset", ".imageset", ".colorset",
 }
-# Interface Builder sources need Apple's ibtool, which does not exist on Linux
-# (the same wall as actool before FINDINGS 24.2). They are copied uncompiled.
+# Interface Builder sources. The repo's tools/ibtool compiles a subset of
+# them; the generator probes each one and ships the compilable as resources.
 IB_EXTS = {".storyboard", ".storyboardc", ".xib", ".nib"}
 OBJC_EXTS = {".m", ".mm", ".h", ".hpp", ".c", ".cpp"}
 
@@ -333,6 +337,29 @@ def colorset_contents_json(components):
         }}, "idiom": "universal"}],
         "info": {"author": "xcode", "version": 1},
     }, indent=2) + "\n"
+
+
+def ibtool_compiles(path):
+    """Whether the repo's ibtool compiles one Interface Builder source.
+
+    Try-compile into a temp dir; exit 0 means SwiftBuild will be able to run
+    ibtool on it, so the file can ship as a normal resource."""
+    tool = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ibtool")
+    if os.path.splitext(path)[1].lower() not in (".storyboard", ".xib"):
+        return False
+    try:
+        with tempfile.TemporaryDirectory(prefix="xcodeproj2xtool-ibtool-") as tmp:
+            if path.lower().endswith(".xib"):
+                cmd = [sys.executable, tool, "--compile",
+                       os.path.join(tmp, "probe.nib"), path]
+            else:
+                cmd = [sys.executable, tool, path,
+                       "--compilation-directory", tmp]
+            return subprocess.run(cmd, stdout=subprocess.DEVNULL,
+                                  stderr=subprocess.DEVNULL, timeout=60,
+                                  check=False).returncode == 0
+    except (OSError, subprocess.TimeoutExpired):
+        return False
 
 
 def walk_files(root):
@@ -634,8 +661,8 @@ class Generator:
                         n_swift[0] += sum(1 for f in walk_files(p) if f.endswith(".swift"))
                         classify(p, r)
                     elif dir_has_ib(p):
-                        # expand: a single .copy dir would still hand Apple's
-                        # ibtool probes a storyboard it can never compile
+                        # expand: a single .copy dir would still hand the
+                        # ibtool probe a storyboard it can never compile
                         classify(p, r)
                     elif os.path.splitext(name)[1].lower() in PROCESSABLE:
                         resources.append((".process", r))
@@ -658,11 +685,6 @@ class Generator:
             self.warn(f"synced group {gpath!r}: {len(objc_files)} ObjC/C files "
                       f"excluded (not supported on Linux), e.g. {objc_files[0]}; "
                       "replace them with a Swift shim if target code calls them")
-        if ib_files:
-            self.warn(f"synced group {gpath!r}: {len(ib_files)} Interface Builder "
-                      "resources excluded - Linux has no ibtool to compile them "
-                      "(same wall as actool before FINDINGS 24.2); UI built from "
-                      "them is missing from the bundle")
         return n_swift[0], resources, excludes, ib_files
 
     # -- packages -----------------------------------------------------------
@@ -908,6 +930,7 @@ class Generator:
         target_dir = f"Sources/{target['name']}"
         symlinks, excludes, resources, swift_rels, objc = [], [], [], [], []
         ib_all = []
+        synced_ib_paths = set()
         infoplist_rel = None
 
         layers = self.target_merged(target)
@@ -936,7 +959,9 @@ class Generator:
             link = os.path.join(target_dir, os.path.basename(gpath.rstrip("/")))
             symlinks.append((link, gpath))
             excludes += [f"{os.path.basename(gpath.rstrip('/'))}/{e}" for e in exc]
-            ib_all += [f"{os.path.basename(gpath.rstrip('/'))}/{e}" for e in sib]
+            ib_paths = [f"{os.path.basename(gpath.rstrip('/'))}/{e}" for e in sib]
+            ib_all += ib_paths
+            synced_ib_paths.update(ib_paths)
             resources += [(k, f"{os.path.basename(gpath.rstrip('/'))}/{r}") for k, r in res]
             base = os.path.join(self.proj_dir, gpath)
             swift_rels += [os.path.join(gpath, os.path.relpath(f, base))
@@ -1076,23 +1101,6 @@ class Generator:
                 symlinks.append((os.path.join(target_dir, p), p))
             else:
                 self.mirror_file(p, target_dir, symlinks)
-        if ib_excluded:
-            # Exclude the same farm path SwiftPM's resource scan sees, so an
-            # auto-included storyboard never reaches ibtool (Mastodon's
-            # LaunchScreen/Main storyboards did exactly that through the
-            # "Supporting Files" link). Under src_anc the visible spelling is
-            # basename(src_anc)/...; elsewhere the file is only reachable at
-            # its emitted path, if at all.
-            for p in ib_excluded:
-                if src_anc and (p == src_anc or p.startswith(src_anc + "/")):
-                    rel = os.path.relpath(p, src_anc)
-                    excludes.append(os.path.basename(src_anc) if rel == "."
-                                    else os.path.join(os.path.basename(src_anc), rel))
-                else:
-                    excludes.append(p)
-            self.warn(f"{len(ib_excluded)} Interface Builder resource(s) excluded "
-                      "- Linux has no ibtool to compile them: "
-                      + ", ".join(ib_excluded))
         ib_all += ib_excluded
         # Bare background-color launch storyboards can be replaced by the
         # Info.plist UILaunchScreen dictionary instead (app target only).
@@ -1100,6 +1108,46 @@ class Generator:
                 if target is getattr(self, "target", None) else None)
         if plan:
             self._launch_plan = plan
+        # For every IB file not replaced by the launch transform, try the
+        # repo's ibtool: the compilable ones ship as normal resources so
+        # SwiftBuild runs ibtool on them; the rest stay excluded, and only
+        # those are listed in the warning.
+        replaced = {os.path.splitext(os.path.basename(n))[0]
+                    for n in plan["names"]} if plan else set()
+        ib_missing = []
+        for p in ib_all:
+            base = os.path.splitext(os.path.basename(p))[0]
+            in_synced = p in synced_ib_paths
+            under_anc = not in_synced and src_anc and (
+                p == src_anc or p.startswith(src_anc + "/"))
+            if under_anc:
+                rel = os.path.relpath(p, src_anc)
+                rp = os.path.basename(src_anc) if rel == "." \
+                    else os.path.join(os.path.basename(src_anc), rel)
+            else:
+                rp = p
+            if base in replaced:
+                # Replaced by UILaunchScreen and never emitted; still exclude
+                # the spelling SwiftPM's resource scan sees (the src_anc or
+                # synced-group link exposes the file), or an auto-included
+                # storyboard would reach ibtool anyway (Mastodon's did).
+                excludes.append(rp)
+                continue
+            if ibtool_compiles(os.path.join(self.proj_dir, p)):
+                resources.append((".process", rp))
+                # synced groups pre-exclude their IB files; an emitted one
+                # must not stay in exclude: (SwiftPM would drop it again)
+                excludes = [e for e in excludes if e != rp]
+                if not under_anc and not in_synced:
+                    self.mirror_file(p, target_dir, symlinks)
+            else:
+                excludes.append(rp)
+                ib_missing.append(p)
+        if ib_missing:
+            self.warn(f"{len(ib_missing)} Interface Builder resource(s) excluded "
+                      "- Linux ibtool cannot compile them: "
+                      + ", ".join(ib_missing))
+        ib_all = ib_missing
         missing_ui = self.excluded_storyboard_in_plist(
             ib_all, infoplist_rel,
             skip_launch=plan["keys"] if plan else ())
@@ -1220,9 +1268,8 @@ class Generator:
         names = {os.path.splitext(pl[k])[0]
                  for k in ("UIMainStoryboardFile", "NSMainStoryboardFile")
                  if pl.get(k)}
-        # Launch references the transform replaced are no longer missing; a
-        # name that is ALSO a main-storyboard reference (Mastodon's Main is
-        # both) keeps its warning.
+        # Launch references replaced by the transform are no longer missing;
+        # main-storyboard references remain checked unless emitted by ibtool.
         skip = {os.path.splitext(pl[k])[0] for k in skip_launch if pl.get(k)}
         names |= {os.path.splitext(pl[k])[0] for k in LAUNCH_SB_KEYS
                   if pl.get(k)} - skip
@@ -1256,6 +1303,14 @@ class Generator:
         refs = {k: os.path.splitext(pl[k])[0] for k in LAUNCH_SB_KEYS
                 if isinstance(pl.get(k), str) and pl.get(k)}
         if not refs:
+            return None
+        # A launch storyboard that is also the main/scene interface must ship
+        # as a compiled .storyboardc (UIKit and App Store processing resolve
+        # UIMainStoryboardFile* in the app bundle itself), so no transform.
+        other = {os.path.splitext(v)[0] for k, v in pl.items()
+                 if k not in LAUNCH_SB_KEYS and "Storyboard" in k
+                 and isinstance(v, str) and v}
+        if set(refs.values()) & other:
             return None
         excluded = {os.path.splitext(os.path.basename(p))[0]: p
                     for p in ib_excluded
@@ -3163,6 +3218,8 @@ def _self_test_launch(root):
          '"iOS/Base.lproj/LaunchScreenPhone.storyboard"' in pkg),
         ("sys: no missing-UI warning",
          "Info.plist references excluded storyboard" not in warn),
+        ("sys: no IB exclusion warning either (replaced, not missing)",
+         "Interface Builder" not in warn),
         ("sys: replacement line printed",
          "replaced with UILaunchScreen {}" in outp),
     ]
@@ -3194,7 +3251,8 @@ def _self_test_launch(root):
          "LaunchScreenBackground.colorset" in outp),
     ]
 
-    # a label in the scene -> unsupported: keys and warning stay
+    # a label in the scene -> unsupported by the transform AND by ibtool:
+    # keys and both warnings stay, while the compilable pad storyboard ships
     d = scenario("l-unsup", launch_sb_xml(
         color=SYS, extra="""                        <subviews>
                             <label opaque="NO" userInteractionEnabled="NO" contentMode="left" text="Loading" translatesAutoresizingMaskIntoConstraints="NO" id="LBL-001"/>
@@ -3209,6 +3267,11 @@ def _self_test_launch(root):
         ("unsup: missing-UI warning kept",
          "Info.plist references excluded storyboard "
          "'LaunchScreenPhone.storyboard'" in warn),
+        ("unsup: rejected file is the only one in the IB warning",
+         "1 Interface Builder resource(s) excluded" in warn
+         and "LaunchScreenPhone.storyboard" in warn),
+        ("unsup: compilable pad storyboard still emitted",
+         '.process("iOS/Base.lproj/LaunchScreenPad.storyboard")' in pkg),
     ]
 
     # one centered image view with a named image -> UIImageName
@@ -3240,19 +3303,22 @@ def _self_test_launch(root):
     ]
 
     # Mastodon shape: the same storyboard is the launch AND main interface.
-    # Launch keys are replaced; the main reference keeps its warning.
+    # It is NOT replaced by UILaunchScreen - both keys stay and the storyboard
+    # goes through ibtool (compilable -> emitted as a resource).
     d = scenario("l-main", launch_sb_xml(color=SYS), launch_sb_xml(color=SYS),
                  info={"UILaunchStoryboardName": "LaunchScreenPhone",
                        "UIMainStoryboardFile": "LaunchScreenPhone"})
     pl, pkg, warn, outp, out = run(d)
     checks += [
-        ("main: launch key dropped, main kept",
-         "UILaunchStoryboardName" not in pl
-         and pl.get("UIMainStoryboardFile") == "LaunchScreenPhone"),
-        ("main: UILaunchScreen injected", pl.get("UILaunchScreen") == {}),
-        ("main: missing-main-UI warning kept",
-         "Info.plist references excluded storyboard "
-         "'LaunchScreenPhone.storyboard'" in warn),
+        ("main: launch and main refs stay when they share a storyboard",
+         pl.get("UILaunchStoryboardName") == "LaunchScreenPhone"
+         and pl.get("UIMainStoryboardFile") == "LaunchScreenPhone"
+         and "UILaunchScreen" not in pl),
+        ("main: shared storyboard emitted as a process resource",
+         '.process("iOS/Base.lproj/LaunchScreenPhone.storyboard")' in pkg),
+        ("main: no missing-UI warning once emitted",
+         "Info.plist references excluded storyboard" not in warn
+         and "Interface Builder" not in warn),
     ]
 
     # NNW shape: the iOS folder is a synced root group; its excluded storyboards
@@ -3300,6 +3366,30 @@ def _self_test_launch(root):
          '"iOS/Base.lproj/LaunchScreenPhone.storyboard"' in pkg),
         ("synced: no missing-UI warning",
          "Info.plist references excluded storyboard" not in warn),
+        ("synced: no IB exclusion warning either (replaced, not missing)",
+         "Interface Builder" not in warn),
+    ]
+
+    # A compilable storyboard in a synced root group must use the group symlink,
+    # not a newly-created adapter directory that masks that link.
+    d = scenario("l-synced-main", launch_sb_xml(color=SYS),
+                 launch_sb_xml(color=SYS),
+                 info={"UILaunchStoryboardName": "LaunchScreenPhone",
+                       "UIMainStoryboardFile": "LaunchScreenPhone"},
+                 proj_text=synced_launch_proj())
+    pl, pkg, warn, outp, out = run(d)
+    checks += [
+        ("synced-main: launch and main refs stay",
+         pl.get("UILaunchStoryboardName") == "LaunchScreenPhone"
+         and pl.get("UIMainStoryboardFile") == "LaunchScreenPhone"
+         and "UILaunchScreen" not in pl),
+        ("synced-main: storyboard emitted as process resource",
+         '.process("iOS/Base.lproj/LaunchScreenPhone.storyboard")' in pkg),
+        ("synced-main: synced group remains linked",
+         os.path.islink(os.path.join(out, "Sources", "LaunchApp", "iOS"))),
+        ("synced-main: no exclusion or missing-UI warning",
+         "Interface Builder" not in warn
+         and "Info.plist references excluded storyboard" not in warn),
     ]
 
     # classifier units: legacy-only system color, document-local named color,
