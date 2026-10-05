@@ -976,3 +976,18 @@ has no SwiftSoup strings; the framework has them). A fresh run:
 with the TEST identity. The app and its 5 extensions need App Store Connect
 records before an upload. The launch and main storyboards are still excluded
 (no `ibtool`).
+
+## Storyboards: the format, 2026-10-05
+
+**42. Xcode 27.0 compiles iOS storyboards and xibs to binary NIBArchive nibs,
+and a stdlib reader decodes all of them.** For an iOS target `ibtool` writes
+version-1 `NIBArchive` files (not keyed-archive plists): one nib per xib, and
+one `.storyboardc` directory per storyboard with an Info.plist and one nib per
+scene. Xcode runs a storyboard in two steps: `ibtool ... X.storyboard
+--compilation-directory DIR`, then `ibtool --link APP DIR/X.storyboardc`, which
+keeps the `.lproj` parent. `tests/ibtool/compile-golden.sh` replays those exact
+commands on a Mac; its output for 5 NetNewsWire storyboards and 2 xibs is
+byte-identical to the 36 files in Xcode's own NetNewsWire.app. `tools/nibarchive.py`
+dumps a nib as a readable object graph and diffs two nibs; its self-test
+decodes all 33 golden nibs. This is the comparison harness for a Linux `ibtool`;
+nothing compiles storyboards on Linux yet.
