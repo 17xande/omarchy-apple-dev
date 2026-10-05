@@ -349,6 +349,28 @@ def self_test():
             checks.append(f"{name} byte-identical")
         else:
             failed.append(f"{name}.nib: compiled output differs from golden")
+
+    # M2: storyboard compile + link reproduce the golden trees
+    import tempfile
+    for label, src_rel, golden_rel in ibtool.SB_SELF_TEST:
+        tmp = tempfile.mkdtemp(prefix="/tmp/nibarchive-sbtest-")
+        dirpart = os.path.dirname(golden_rel)
+        module = dirpart.split("/")[0] if "/" in dirpart else ""
+        sbc = ibtool.compile_storyboard(
+            os.path.join(ibtool.SRC, src_rel),
+            os.path.join(tmp, "stage", dirpart))
+        out_root = os.path.join(tmp, "out", module)
+        ibtool.link_storyboards(out_root, [sbc])
+        mine = ibtool._tree_bytes(out_root)
+        cut = len(module) + 1 if module else 0
+        stripped = golden_rel[cut:]
+        prefix = stripped + "/"
+        want = {k[cut:]: v for k, v in ibtool._tree_bytes(root).items()
+                if k.startswith((module + "/" if module else "") + prefix)}
+        if mine == want:
+            checks.append(f"{label} byte-identical")
+        else:
+            failed.append(f"{label}: tree differs from golden")
     if failed:
         raise SystemExit("self-test FAILED: " + "; ".join(failed))
 

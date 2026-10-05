@@ -91,6 +91,24 @@ _KEY_LAYOUT_LISTS = [
     UIWhite UIFontTraits IBUINibLNEVersionKey NSSize UIColorComponentCount
     UIContentConfigurationView UIText UIMultipleTouchEnabled
     UISystemBackgroundView NSName UIRed""".split(),
+    # LaunchScreenPhone.storyboardc/UIViewController-2hg-qO-omg.nib (VC scene)
+    """UISource UIClassName UILabel UIDestination UINibTopLevelObjectsKey
+    UINibVisibleWindowsKey NSInlinedValue UIExternalObjectsTableForViewLoading
+    UIOriginalClassName UINibEncoderEmptyKey UINibAccessibilityConfigurationsKey
+    UINibKeyValuePairsKey UINibConnectionsKey NS.bytes IBUINibLNEVersionKey
+    UINibTraitStorageListsKey UINibObjectsKey UIProxiedObjectIdentifier
+    UINibName""".split(),
+    # LaunchScreenPhone.storyboardc/2hg-qO-omg-view-wsU-Ys-fCl.nib (view scene)
+    """UINibVisibleWindowsKey UINibAccessibilityConfigurationsKey UIBounds
+    NS.bytes UINibEncoderEmptyKey NSWhite UILayoutGuideIdentifier NSInlinedValue
+    IBUINibLNEVersionKey UIViewLargeContentStoredProperties
+    UINibKeyValuePairsKey UIOpaque UIAutoresizeSubviews UIAlpha UIWhite
+    UILayoutGuideOwningView UIDestination UILayoutGuideAllowsNegativeDimensions
+    UINibTopLevelObjectsKey UILayoutGuideOwningViewIsLocked UINibConnectionsKey
+    UISystemColorName UICenter UISource UINibTraitStorageListsKey
+    UILayoutGuideShouldBeArchived UIProxiedObjectIdentifier
+    UIViewSemanticContentAttribute UIBackgroundColor UIDeepDrawRect NSColorSpace
+    UIColorComponentCount UIAutoresizingMask UILabel UINibObjectsKey""".split(),
 ]
 KEY_LAYOUTS = {frozenset(k): k for k in _KEY_LAYOUT_LISTS}
 
@@ -206,6 +224,16 @@ def build_color(b, name, where, resources=None):
 
 
 def _build_color_new(b, name, where, resources):
+    if name in SYSTEM_COLORS:
+        white, digits = SYSTEM_COLORS[name]
+        c = b.new("UIColor")
+        c.add("UISystemColorName", *b.ref(b.string(name)))
+        c.add("UIColorComponentCount", *b.int8(2))
+        c.add("UIWhite", *b.float32(white))
+        c.add("UIAlpha", *b.float32(1.0))
+        c.add("NSWhite", N.DATA, digits.encode("ascii"))
+        c.add("NSColorSpace", *b.int8(4))
+        return c
     if resources and name in resources:
         r, g, bl, al = resources[name]
         # Apple rounds component doubles to 10 significant digits and renders
@@ -220,17 +248,7 @@ def _build_color_new(b, name, where, resources):
         c.add("NSRGB", N.DATA, " ".join(f"{v:.3g}" for v in (rr, gr, br, ar)).encode("ascii"))
         c.add("NSColorSpace", *b.int8(2))
         return c
-    if name not in SYSTEM_COLORS:
-        raise XibError(f"unsupported color {name!r} ({where})")
-    white, digits = SYSTEM_COLORS[name]
-    c = b.new("UIColor")
-    c.add("UISystemColorName", *b.ref(b.string(name)))
-    c.add("UIColorComponentCount", *b.int8(2))
-    c.add("UIWhite", *b.float32(white))
-    c.add("UIAlpha", *b.float32(1.0))
-    c.add("NSWhite", N.DATA, digits.encode("ascii"))
-    c.add("NSColorSpace", *b.int8(4))
-    return c
+    raise XibError(f"unsupported color {name!r} ({where})")
 
 
 def build_font(b, fd, where):
@@ -302,7 +320,9 @@ def _build_font_new(b, fd, where):
 
 
 ALLOWED_ATTRS = {
-    "view": {"contentMode", "id"},
+    "view": {"key", "contentMode", "id", "opaque", "clipsSubviews",
+             "multipleTouchEnabled", "autoresizesSubviews",
+             "translatesAutoresizingMaskIntoConstraints"},
     "label": {"contentMode", "id", "opaque", "userInteractionEnabled", "text",
               "textAlignment", "horizontalHuggingPriority",
               "verticalHuggingPriority", "translatesAutoresizingMaskIntoConstraints",
@@ -325,7 +345,8 @@ ALLOWED_ATTRS = {
                    "id"},
 }
 ALLOWED_SUBS = {
-    "view": {"frame", "autoresizingMask", "backgroundColor", "canvasLocation"},
+    "view": {"frame", "autoresizingMask", "backgroundColor", "canvasLocation",
+             "viewLayoutGuide"},
     "label": {"frame", "fontDescription", "highlightedColor", "canvasLocation"},
     "placeholder": set(),
     "tableViewCell": {"frame", "autoresizingMask", "contentView",
@@ -343,7 +364,8 @@ def _check_shape(el, where, shape=None):
     unknown = set(el.attrib) - allowed
     if unknown:
         raise XibError(f"<{el.tag}> has unsupported attribute(s) {sorted(unknown)} ({where})")
-    subs = {child.get("key") or child.tag for child in el}
+    subs = {child.tag if child.tag == "viewLayoutGuide"
+            else (child.get("key") or child.tag) for child in el}
     extra = subs - ALLOWED_SUBS[shape or el.tag]
     if extra:
         raise XibError(f"<{el.tag}> has unsupported subelement(s) {sorted(extra)} ({where})")
@@ -667,12 +689,16 @@ def compile_xib(path):
                 "UINibKeyValuePairsKey"):
         root.add(key, *b.ref(conn))
     root.add("IBUINibLNEVersionKey", *b.int8(1))
+    return finalize(b, root)
 
+
+def finalize(b, root):
+    """Serialize a built object graph: key-table remap, class table, encode."""
     # Key table: remap from creation order to Apple's hash order for this set.
     used = {k for o in b.objects for k, _ in o.values}
     layout = KEY_LAYOUTS.get(frozenset(used))
     if layout is None:
-        raise XibError(f"{path}: no known key-table layout for key set "
+        raise XibError(f"no known key-table layout for key set "
                        f"{sorted(used)} (add it to KEY_LAYOUTS from golden bytes)")
     key_bytes = [k.encode("ascii") for k in layout]
     key_idx = {k: i for i, k in enumerate(layout)}
@@ -714,9 +740,257 @@ def compile_xib(path):
 
 SELF_TEST_NIBS = ("TinyView", "TinyLabel", "SettingsTableViewCell")
 
+def _bplist_bytes(plist):
+    """Serialize {str: dict|str|int} exactly like Apple's storyboardc
+    Info.plist: bplist00, pre-order object assignment (dict keys before
+    values, containers expanded immediately), no string uniquing,
+    1-byte refs, offsets sized to fit."""
+    import collections
+    objects = []  # encoded bytes, index == object number
+
+    def assign(v):
+        i = len(objects)
+        objects.append(None)
+        if isinstance(v, dict):
+            krefs = [assign(k) for k in v]
+            vrefs = [assign(v[k]) for k in v]
+            if len(v) > 15:
+                raise XibError(f"Info.plist dict too large: {len(v)}")
+            objects[i] = bytes([0xD0 | len(v)] + krefs + vrefs)
+        elif isinstance(v, str):
+            data = v.encode("ascii")
+            if len(data) <= 14:
+                objects[i] = bytes([0x50 | len(data)]) + data
+            elif len(data) < 256:
+                objects[i] = bytes([0x5F, 0x10, len(data)]) + data
+            else:
+                raise XibError("Info.plist string too long")
+        elif isinstance(v, int) and 0 <= v < 256:
+            objects[i] = bytes([0x10, v])
+        else:
+            raise XibError(f"unsupported Info.plist value {v!r}")
+        return i
+
+    assign(plist)
+    body = b"".join(objects)
+    off_sz = 1 if 8 + len(body) + len(objects) <= 255 else 2
+    pos = 8  # offsets are absolute file positions (magic included)
+    table = b""
+    for x in objects:
+        table += pos.to_bytes(off_sz, "big")
+        pos += len(x)
+    out = b"bplist00" + body + table
+    out += b"\x00" * 5 + b"\x00" + bytes([off_sz, 1])
+    out += len(objects).to_bytes(8, "big") + (0).to_bytes(8, "big")
+    out += (8 + len(body)).to_bytes(8, "big")
+    return out
+
+
+def _layout_guide(b, el, where):
+    g = b.new("UILayoutGuide")
+    g.add("UILayoutGuideOwningView", N.NIL, None)
+    g.add("UILayoutGuideIdentifier", *b.ref(b.string(el.get("identifier", ""))))
+    g.add("UILayoutGuideOwningViewIsLocked", N.TRUE, None)
+    g.add("UILayoutGuideShouldBeArchived", N.TRUE, None)
+    g.add("UILayoutGuideAllowsNegativeDimensions", N.TRUE, None)
+    return g
+
+
+def _scene_view_nib(vc_el, view_el, view_nib_name, where, resources):
+    """The VC's view compiles into its own nib: <vcId>-view-<viewId>.nib."""
+    b = Builder()
+    root = b.new("NSObject")
+    top_array = b.new("NSArray")
+    fo = _proxy(b, "IBFilesOwner")
+    fr = _proxy(b, "IBFirstResponder")
+    view = build_view(b, view_el, where)
+    objarr = b.new("NSArray")  # shell before the guides (golden order)
+    guides = [_layout_guide(b, g, where)
+              for g in view_el.findall("viewLayoutGuide")]
+    conn_arr = b.new("NSArray")
+    conn = b.new("UIRuntimeOutletConnection")
+    conn.add("UILabel", *b.ref(b.string("view")))
+    conn.add("UISource", *b.ref(fo))
+    conn.add("UIDestination", *b.ref(view))
+
+    def fill(arr, items, inline=False):
+        arr.add("NSInlinedValue", *b.boolean(False))
+        for item in items:
+            arr.add("UINibEncoderEmptyKey", *b.ref(item))
+
+    fill(top_array, [fo, fr, view])
+    fill(objarr, [fo, fr, view] + guides)
+    fill(conn_arr, [conn])
+    empty = b.new("NSArray")
+    fill(empty, [])
+    root.add("UINibTopLevelObjectsKey", *b.ref(top_array))
+    root.add("UINibObjectsKey", *b.ref(objarr))
+    root.add("UINibConnectionsKey", *b.ref(conn_arr))
+    for key in ("UINibVisibleWindowsKey", "UINibAccessibilityConfigurationsKey",
+                "UINibTraitStorageListsKey", "UINibKeyValuePairsKey"):
+        root.add(key, *b.ref(empty))
+    root.add("IBUINibLNEVersionKey", *b.int8(1))
+    return finalize(b, root), guides
+
+
+def _proxy(b, ident):
+    p = b.new("UIProxyObject")
+    p.add("UIProxiedObjectIdentifier", *b.ref(b.string(ident)))
+    return p
+
+
+def _scene_vc_nib(vc_el, view_nib_name, where):
+    """The VC scene nib: proxies + the class swapper pointing at the view nib."""
+    vc_id = vc_el.get("id")
+    ident = vc_el.get("storyboardIdentifier")
+    vc_name = ident or f"UIViewController-{vc_id}"
+    cls = vc_el.get("customClass") or "UIViewController"
+    b = Builder()
+    root = b.new("NSObject")
+    top_array = b.new("NSArray")
+    fo = _proxy(b, "IBFilesOwner")
+    fr = _proxy(b, "IBFirstResponder")
+    sb = _proxy(b, "UIStoryboardPlaceholder")
+    sw = b.new("UIClassSwapper")
+    ext = b.new("NSDictionary")
+    ext.add("NSInlinedValue", *b.boolean(False))
+    sw.add("UIExternalObjectsTableForViewLoading", *b.ref(ext))
+    if ident:
+        sw.add("UIStoryboardIdentifier", *b.ref(b.string(ident)))
+    sw.add("UINibName", *b.ref(b.string(view_nib_name)))
+    sw.add("UIClassName", *b.ref(b.string(cls)))
+    sw.add("UIOriginalClassName", *b.ref(b.string(vc_el.get("customClass") or "UIViewController")))
+    objarr = b.new("NSArray")
+    conn_arr = b.new("NSArray")
+    c1 = b.new("UIRuntimeOutletConnection")
+    c1.add("UILabel", *b.ref(b.string("storyboard")))
+    c1.add("UISource", *b.ref(sw))
+    c1.add("UIDestination", *b.ref(sb))
+    c2 = b.new("UIRuntimeOutletConnection")
+    c2.add("UILabel", *b.ref(b.string("sceneViewController")))
+    c2.add("UISource", *b.ref(fo))
+    c2.add("UIDestination", *b.ref(sw))
+
+    def fill(arr, items):
+        arr.add("NSInlinedValue", *b.boolean(False))
+        for item in items:
+            arr.add("UINibEncoderEmptyKey", *b.ref(item))
+
+    fill(top_array, [fo, fr, sb, sw])
+    fill(objarr, [fo, fr, sb, sw])
+    fill(conn_arr, [c1, c2])
+    empty = b.new("NSArray")
+    fill(empty, [])
+    root.add("UINibTopLevelObjectsKey", *b.ref(top_array))
+    root.add("UINibObjectsKey", *b.ref(objarr))
+    root.add("UINibConnectionsKey", *b.ref(conn_arr))
+    for key in ("UINibVisibleWindowsKey", "UINibAccessibilityConfigurationsKey",
+                "UINibTraitStorageListsKey", "UINibKeyValuePairsKey"):
+        root.add(key, *b.ref(empty))
+    root.add("IBUINibLNEVersionKey", *b.int8(1))
+    return finalize(b, root), vc_name
+
+
+def compile_storyboard(path, compilation_dir):
+    """Xcode's CompileStoryboard: write <dir>/<name>.storyboardc/."""
+    tree = ET.parse(path)
+    doc = tree.getroot()
+    if doc.get("targetRuntime") != "iOS.CocoaTouch":
+        raise XibError(f"{path}: targetRuntime {doc.get('targetRuntime')!r} is not iOS.CocoaTouch")
+    name = os.path.splitext(os.path.basename(path))[0]
+    resources = {}
+    res_el = doc.find("resources")
+    if res_el is not None:
+        for sc in res_el.findall("systemColor"):
+            col = sc.find("color")
+            try:
+                resources[sc.get("name")] = (float(col.get("red")), float(col.get("green")),
+                                             float(col.get("blue")), float(col.get("alpha")))
+            except (TypeError, ValueError, AttributeError):
+                continue  # non-RGBA specs (white/gray); the named table or a
+                # later clear error handles them
+    scenes = doc.findall("scenes/scene")
+    if not scenes:
+        raise XibError(f"{path}: no scenes")
+    identifiers = {}
+    id_to_name = {}
+    entry_id = doc.get("initialViewController")
+    sbc = os.path.join(compilation_dir, f"{name}.storyboardc")
+    os.makedirs(sbc, exist_ok=True)
+    where = os.path.basename(path)
+    for si, scene in enumerate(scenes):
+        objs = scene.find("objects")
+        vc_el = objs.find("viewController") if objs is not None else None
+        if vc_el is None:
+            raise XibError(f"{where}: scene #{si} has no viewController (unsupported scene kind)")
+        view_el = vc_el.find("view[@key='view']")
+        if view_el is None or not view_el.get("id"):
+            raise XibError(f"{where}: scene #{si} viewController has no view")
+        vc_id = vc_el.get("id")
+        if not vc_id:
+            raise XibError(f"{where}: scene #{si} viewController has no id")
+        view_nib = f"{vc_id}-view-{view_el.get('id')}"
+        arch, vc_name = _scene_vc_nib(vc_el, view_nib, where)
+        with open(os.path.join(sbc, vc_name + ".nib"), "wb") as f:
+            f.write(arch)
+        varch, _ = _scene_view_nib(vc_el, view_el, view_nib, where, resources)
+        with open(os.path.join(sbc, view_nib + ".nib"), "wb") as f:
+            f.write(varch)
+        identifiers[vc_name] = vc_name
+        id_to_name[vc_id] = vc_name
+    entry = (id_to_name.get(entry_id) if entry_id else None) or next(iter(identifiers))
+    plist = {
+        "UIViewControllerIdentifiersToNibNames": dict(identifiers),
+        "UIStoryboardDesignatedEntryPointIdentifier": entry,
+        "UIStoryboardVersion": 1,
+    }
+    with open(os.path.join(sbc, "Info.plist"), "wb") as f:
+        f.write(_bplist_bytes(plist))
+    return sbc
+
+
+def link_storyboards(out_dir, sources):
+    """Xcode's LinkStoryboards: copy each .storyboardc into out_dir keeping
+    its .lproj parent (verified: the golden trees carry nothing else)."""
+    import shutil
+    made = []
+    for src in sources:
+        parent = os.path.basename(os.path.dirname(os.path.abspath(src)))
+        lproj = parent if parent.endswith(".lproj") else ""
+        dest_dir = os.path.join(out_dir, lproj) if lproj else out_dir
+        dest = os.path.join(dest_dir, os.path.basename(src))
+        os.makedirs(dest_dir, exist_ok=True)
+        shutil.copytree(src, dest, dirs_exist_ok=True)
+        made.append(dest)
+    return made
+
+
+def _tree_bytes(root):
+    out = {}
+    for dirpath, _, files in os.walk(root):
+        for f in files:
+            p = os.path.join(dirpath, f)
+            out[os.path.relpath(p, root)] = open(p, "rb").read()
+    return out
+
+
+# (label, src rel under SRC, golden rel under GOLDEN)
+SB_SELF_TEST = (
+    ("LaunchScreenPhone.storyboardc",
+     "NetNewsWire/Base.lproj/LaunchScreenPhone.storyboard",
+     "Base.lproj/LaunchScreenPhone.storyboardc"),
+    ("LaunchScreenPad.storyboardc",
+     "NetNewsWire/Base.lproj/LaunchScreenPad.storyboard",
+     "Base.lproj/LaunchScreenPad.storyboardc"),
+    ("Mastodon Main.storyboardc",
+     "Mastodon/Base.lproj/Main.storyboard",
+     "Mastodon/Base.lproj/Main.storyboardc"),
+)
+
 
 def self_test():
     import glob
+    import tempfile
     failed = []
     nibs = sorted(p for p in glob.glob(os.path.join(GOLDEN, "**", "*.nib"), recursive=True)
                   if os.path.isfile(p))
@@ -736,6 +1010,29 @@ def self_test():
                         min(len(out), len(want)))
             failed.append(f"{name}.nib: {len(out)} vs {len(want)} bytes, first diff at {diff}")
         compiled.append(name)
+    for label, src_rel, golden_rel in SB_SELF_TEST:
+        tmp = tempfile.mkdtemp(prefix="/tmp/ibtool-sbtest-")
+        dirpart = os.path.dirname(golden_rel)
+        module = dirpart.split("/")[0] if "/" in dirpart else ""
+        sbc = compile_storyboard(os.path.join(SRC, src_rel),
+                                 os.path.join(tmp, "stage", dirpart))
+        # Apple's --link nests only the .lproj parent under OUT; the module
+        # segment comes from OUT itself (as compile-golden.sh does).
+        out_root = os.path.join(tmp, "out", module)
+        link_storyboards(out_root, [sbc])
+        mine = _tree_bytes(out_root)
+        cut = len(module) + 1 if module else 0
+        stripped = golden_rel[cut:]
+        prefix = stripped + "/"
+        want = {k[cut:]: v for k, v in _tree_bytes(GOLDEN).items()
+                if k.startswith((module + "/" if module else "") + prefix)}
+        if mine == want:
+            compiled.append(label)
+        else:
+            detail = [f"{k}: {'missing' if k not in mine else 'differs' if k in want else 'extra'}"
+                      for k in sorted(set(mine) | set(want))
+                      if mine.get(k) != want.get(k)]
+            failed.append(f"{label}: {detail}")
     if failed:
         raise SystemExit("self-test FAILED: " + "; ".join(failed))
     print(f"self-test passed (round-trip {len(nibs)} golden nibs; "
@@ -757,6 +1054,7 @@ def main(argv):
                                       "--compile", "--link"}
     action = None
     action_args = []
+    positional = []
     i = 0
     while i < len(argv):
         a = argv[i]
@@ -770,8 +1068,41 @@ def main(argv):
         if a in known_flags:
             i += 1
             continue
+        if a.endswith(".storyboard"):
+            positional.append(a)
+            i += 1
+            continue
         print(f"error: ibtool: unknown argument {a!r}", file=sys.stderr)
         return 2
+
+    def partial_plist():
+        for j, a in enumerate(argv):
+            if a == "--output-partial-info-plist":
+                p = argv[j + 1]
+                os.makedirs(os.path.dirname(os.path.abspath(p)), exist_ok=True)
+                with open(p, "wb") as f:
+                    plistlib.dump({}, f)
+
+    def comp_dir():
+        for j, a in enumerate(argv):
+            if a == "--compilation-directory":
+                return argv[j + 1]
+        return None
+
+    if positional and not action:
+        # CompileStoryboard: ibtool [flags] IN.storyboard --compilation-directory DIR
+        if len(positional) != 1 or not comp_dir():
+            print("error: ibtool: storyboard compile needs one .storyboard and "
+                  "--compilation-directory", file=sys.stderr)
+            return 2
+        try:
+            sbc = compile_storyboard(positional[0], comp_dir())
+        except (XibError, ET.ParseError) as e:
+            print(f"error: ibtool: {e}", file=sys.stderr)
+            return 1
+        partial_plist()
+        print(f"/* {sbc} */", file=sys.stderr)
+        return 0
     if action == "--compile":
         if len(action_args) != 2:
             print("error: ibtool: --compile needs OUT.nib and IN.xib", file=sys.stderr)
@@ -782,23 +1113,27 @@ def main(argv):
         except (XibError, ET.ParseError) as e:
             print(f"error: ibtool: {e}", file=sys.stderr)
             return 1
-        plist_path = None
-        for j, a in enumerate(argv):
-            if a == "--output-partial-info-plist":
-                plist_path = argv[j + 1]
-        if plist_path:
-            os.makedirs(os.path.dirname(os.path.abspath(plist_path)), exist_ok=True)
-            with open(plist_path, "wb") as f:
-                plistlib.dump({}, f)
+        partial_plist()
         tmp = out + ".tmp-nibarchive"
         with open(tmp, "wb") as f:
             f.write(data)
         os.replace(tmp, out)  # no partial output on failure
         return 0
     if action == "--link":
-        print("error: ibtool: storyboard --link is not implemented yet", file=sys.stderr)
-        return 1
-    print("error: ibtool: no action given (expected --compile, --link or --version)",
+        # LinkStoryboards: ibtool [flags] --link OUT SRC.storyboardc...
+        if len(action_args) < 2:
+            print("error: ibtool: --link needs OUT and at least one .storyboardc",
+                  file=sys.stderr)
+            return 2
+        out, sources = action_args[0], action_args[1:]
+        try:
+            link_storyboards(out, sources)
+        except OSError as e:
+            print(f"error: ibtool: {e}", file=sys.stderr)
+            return 1
+        return 0
+    print("error: ibtool: no action given (expected --compile, --link, a "
+          ".storyboard input, or --version)",
           file=sys.stderr)
     return 2
 

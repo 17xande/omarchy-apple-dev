@@ -18,17 +18,22 @@ find src -name '*.storyboard' -o -name '*.xib' | sort | while read -r f; do
   rel=${f#src/}
   module=(); [ "$rel" != "${rel#*/}" ] && module=(--module "${rel%%/*}")
   lproj=$(basename "$(dirname "$f")"); case "$lproj" in *.lproj) ;; *) lproj= ;; esac
-  mkdir -p golden/$lproj stage/$lproj
+  # Per-module output roots: NetNewsWire keeps the legacy golden/<lproj> layout
+  # (committed paths); every other module nests under golden/<Module> so equal
+  # storyboard names (two Base.lproj/Main.storyboards) cannot overwrite.
+  mod=${rel%%/*}; [ "$mod" = "$rel" ] && mod=
+  root=; if [ -n "$mod" ] && [ "$mod" != NetNewsWire ]; then root=$mod; fi
+  mkdir -p "golden/$root${lproj:+/$lproj}" "stage/$root${lproj:+/$lproj}"
   case "$f" in
     *.storyboard)
       # --link keeps the input's .lproj parent, so compile into stage/<lproj> and link into golden/.
-      xcrun ibtool "${common[@]}" "${module[@]}" --output-partial-info-plist "stage/$name-SBPartialInfo.plist" \
-        --auto-activate-custom-fonts "${target[@]}" "$f" --compilation-directory "stage/$lproj" >&2
-      xcrun ibtool "${common[@]}" "${module[@]}" "${target[@]}" --link golden \
-        "stage/${lproj:+$lproj/}$name.storyboardc" >&2 ;;
+      xcrun ibtool "${common[@]}" "${module[@]}" --output-partial-info-plist "stage/$root${lproj:+/$lproj}/$name-SBPartialInfo.plist" \
+        --auto-activate-custom-fonts "${target[@]}" "$f" --compilation-directory "stage/$root${lproj:+/$lproj}" >&2
+      xcrun ibtool "${common[@]}" "${module[@]}" "${target[@]}" --link "golden/$root" \
+        "stage/$root${lproj:+/$lproj/}$name.storyboardc" >&2 ;;
     *.xib)
-      xcrun ibtool "${common[@]}" "${module[@]}" --output-partial-info-plist "stage/$name-PartialInfo.plist" \
-        --auto-activate-custom-fonts "${target[@]}" --compile "golden/${lproj:+$lproj/}$name.nib" "$f" >&2 ;;
+      xcrun ibtool "${common[@]}" "${module[@]}" --output-partial-info-plist "stage/$root${lproj:+/$lproj}/$name-PartialInfo.plist" \
+        --auto-activate-custom-fonts "${target[@]}" --compile "golden/$root${lproj:+/$lproj/}$name.nib" "$f" >&2 ;;
   esac
 done
 xcrun ibtool --version --output-format xml1 >&2
