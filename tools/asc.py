@@ -558,14 +558,12 @@ def validate(ipa):
               f"built against the device SDK: {info.get('DTSDKName')}")
         check(str(info.get("DTXcode", "")).isdigit(), f"DTXcode {info.get('DTXcode')} / {info.get('DTXcodeBuild')}")
         check("UILaunchScreen" in info or "UILaunchStoryboardName" in info, "launch screen declared")
-        # App Store processing checks these two keys (90029); NetNewsWire's UISceneStoryboardFile pointing
-        # at a missing storyboard was VALID, so scene manifests are not checked.
-        storyboards = {v for k, v in info.items()
-                       if k.split("~")[0] in ("UILaunchStoryboardName", "UIMainStoryboardFile")}
-        for name in sorted(storyboards):
+        # App Store processing checks UIMainStoryboardFile (90029, Mastodon). NetNewsWire build ad8849b0 was
+        # VALID with UILaunchStoryboardName and its scene manifest naming storyboards that were missing.
+        for name in sorted({v for k, v in info.items() if k.split("~")[0] == "UIMainStoryboardFile"}):
             found = [p for p in app.glob(f"**/{name}*.storyboardc")
                      if p.name in (f"{name}.storyboardc", f"{name}~iphone.storyboardc", f"{name}~ipad.storyboardc")]
-            check(bool(found), f"Info.plist storyboard '{name}' is compiled in the bundle (ITMS-90029)")
+            check(bool(found), f"UIMainStoryboardFile '{name}' is compiled in the bundle (ITMS-90029)")
         families = info.get("UIDeviceFamily", [])
         ipad = 2 in families
         if ipad and not info.get("UIRequiresFullScreen"):

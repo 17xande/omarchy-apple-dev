@@ -1015,9 +1015,10 @@ extensions; its own App Store Connect record is not created yet) was refused:
 `error 90029: Storyboard file 'Main~ipad.storyboardc' was not found` (and
 `~iphone`). Mastodon's Info.plist names `Main` as both `UIMainStoryboardFile`
 and `UILaunchStoryboardName`, and the generator excludes storyboards. The
-offline validator now fails on this (`Info.plist storyboard 'Main' is
-compiled in the bundle (ITMS-90029)`). It checks only those two keys:
-NetNewsWire's scene manifest also names a missing `Main` storyboard, and that
-build is VALID. Mastodon's `Main.storyboard` is one bare view controller, the
+offline validator now fails on this (`UIMainStoryboardFile 'Main' is
+compiled in the bundle (ITMS-90029)`). It checks only `UIMainStoryboardFile`:
+NetNewsWire build ad8849b0 was VALID although its `UILaunchStoryboardName` and
+its scene manifest named storyboards that were not in the bundle. Mastodon's
+`Main.storyboard` is one bare view controller, the
 same shape as NetNewsWire's launch storyboards, so the Linux `ibtool` storyboard
 path (M2) is the fix.
