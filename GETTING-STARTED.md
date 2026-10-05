@@ -93,8 +93,9 @@ uploads the `.ipa` and prints Apple's processing result. When the result is
 `COMPLETE`, the build appears in TestFlight after Apple's processing. `ship.sh`
 never submits a build for review.
 
-This path is proven: a demo app built, signed and uploaded this way on Linux
-is `VALID` in App Store Connect (FINDINGS.md item 38).
+This path is proven: a demo app and NetNewsWire, with its widget and share
+extensions, were built, signed and uploaded this way on Linux, and both are
+`VALID` in App Store Connect (FINDINGS.md items 38 and 40).
 
 ## If something fails
 

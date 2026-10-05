@@ -921,3 +921,37 @@ it at conversion time with Xcode's arguments, symlinks the output into the
 target's sources, and keeps the `.intentdefinition` as a resource. With it,
 Mastodon has no missing intent types; the build stops only at its pinned Nuke
 10.11.2, which Xcode 27 cannot compile either (item 36).
+
+## A real app in TestFlight, 2026-10-05
+
+**40. NetNewsWire, built, signed and uploaded entirely on Linux, is VALID in
+App Store Connect.** Build 7.1.4 (202610050846) of NetNewsWire with its widget
+and share extensions and 15 SwiftPM `.dynamic` products: `buildUpload
+ad8849b0: COMPLETE`, then `VALID`, `APP_STORE_ELIGIBLE`. Nothing was submitted
+for review. Three App Store processing walls fell on the way:
+
+1. **Icons (ITMS-90022, 90023).** The single-size icon was compiled for iPhone
+   only. The Linux `actool` now keys it per `--target-device` and compiles the
+   dark and tinted variants (gray `GA8`/`GA16` renditions), as `actool` 27.0
+   does; the catalog's other assets are kept. AssetKit 87cd7d6.
+2. **Loose dylibs (ITMS-90426, "The SwiftSupport folder is missing").** App
+   Store processing rejects `Frameworks/lib<Name>.dylib`. `asc.py frameworks`
+   moves each into `<Name>.framework` with an FMWK Info.plist and rewrites the
+   install names in every Mach-O of the app, in the header padding.
+3. **Processing that never ends.** With the `Assets.car` of NetNewsWire's
+   catalog, uploads passed Apple's upload checks and then stayed `PROCESSING`
+   for hours with no error. An Xcode-built copy of NetNewsWire, signed and
+   uploaded by this pipeline, was VALID; with our executable, Info.plist and
+   frameworks swapped in it stayed VALID, and with our `Assets.car` it stuck.
+   Car subsets narrowed it to colorsets and tinted icons. Apple's `assetutil`
+   reads those cars without complaint. The cause was BITMAPKEYS: each
+   descriptor must be `(tokens + 4) * 4` bytes for the car's KEYFORMAT token
+   count, with the icon's real group count and all-1 color slots. AssetKit
+   1f23d61 and 16c561f write them as `actool` 27.0 does at 8, 9, 10, 13 and 14
+   tokens.
+
+The Linux `actool` also compiles PDF imagesets now (a vector rendition and
+1x/2x/3x bitmaps through poppler's `pdftocairo`; 76 of 76 NetNewsWire PDF
+renditions match Apple's `assetutil` output). Symbol sets are still skipped.
+The regression set passes: demo 37/37, iPad demo 38/38, IceCubesApp 98/98,
+NetNewsWire 83/83. Receipt: `receipts/2026-10-05-netnewswire-testflight.md`.

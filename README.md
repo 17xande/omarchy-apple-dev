@@ -156,16 +156,17 @@ From an xtool project directory:
 ```
 
 `ship.sh` builds a release `.app`, compiles the app's `AppIcon` set with the
-Linux `actool --app-icon` (Xcode's single-size 1024 icon is expanded to the
-App Store sizes; `APP_ICON=<name>` picks another set), stamps the
-build-environment keys App Store processing reads
-(`DTXcode`, `DTSDKName`, …, and a UTC `CFBundleVersion`), signs it with
-`rcodesign`, packages `xtool/<App>.ipa`, and validates the `.ipa` offline:
-bundle layout, Info.plist keys and version formats, Mach-O arch and minimum
-OS, icons in `Assets.car`, profile type and app id, entitlements, team id,
-and every sealed hash. Any `FAIL` stops it. Without an App Store Connect key
-it signs with a local TEST identity, so the output proves the pipeline and
-Apple will reject that signature.
+Linux `actool --app-icon` (Xcode's single-size 1024 icon, with its dark and
+tinted variants, is expanded to the App Store sizes; `APP_ICON=<name>` picks
+another set), stamps the build-environment keys App Store processing reads
+(`DTXcode`, `DTSDKName`, …, and a UTC `CFBundleVersion`), wraps each SwiftPM
+`.dynamic` product as a `.framework` (App Store processing rejects a loose
+`.dylib`), signs it with `rcodesign`, packages `xtool/<App>.ipa`, and
+validates the `.ipa` offline: bundle layout, Info.plist keys and version
+formats, Mach-O arch and minimum OS, icons in `Assets.car`, profile type and
+app id, entitlements, team id, and every sealed hash. Any `FAIL` stops it.
+Without an App Store Connect key it signs with a local TEST identity, so the
+output proves the pipeline and Apple will reject that signature.
 
 To upload, once:
 
@@ -186,9 +187,10 @@ With the key set, `ship.sh` registers the bundle id, creates an Apple
 Distribution certificate (the private key stays in
 `~/.config/omarchy-apple-dev/distribution/`) and an App Store profile, then
 uploads through the App Store Connect build-upload API and prints Apple's
-processing result. A build made this way, entirely on Linux, is `VALID` and
-App Store eligible in App Store Connect (FINDINGS.md item 38). `ship.sh` never
-submits a build for review.
+processing result. Builds made this way, entirely on Linux, are `VALID` and
+App Store eligible in App Store Connect: the demo app (FINDINGS.md item 38)
+and NetNewsWire with its extensions and 15 frameworks (item 40). `ship.sh`
+never submits a build for review.
 
 ## Real projects
 
@@ -201,10 +203,12 @@ a login shell allows: run `ulimit -n 65536` before `xtool dev build`.
 
 Known limits: storyboards and xibs cannot be compiled (no `ibtool`), Icon
 Composer icons render flat, and alternate app icons, symbol sets and HEIC
-images are left out with a warning (FINDINGS.md items 24, 27, 29).
+images are left out with a warning (FINDINGS.md items 24, 27, 29). PDF
+imagesets need poppler's `pdftocairo`, which the installer adds.
 `compat/icecubes/` and `compat/nnw/` reproduce IceCubesApp and NetNewsWire,
 which build with their app extensions and pass `ship.sh`'s offline checks;
-`compat/mastodon/` stops at the walls in FINDINGS.md item 36.
+NetNewsWire is also `VALID` in App Store Connect. `compat/mastodon/` stops at
+the walls in FINDINGS.md item 36.
 
 For your own Xcode project, `tools/xcodeproj2xtool.py App.xcodeproj` writes an
 xtool adapter (`omarchy-xtool/`) next to it and prints a warning for each thing
