@@ -1070,3 +1070,16 @@ NetNewsWire record) `buildUpload d71302cc: COMPLETE`, build 202610051832
 `VALID`. Code: AssetKit f5502f0 (`IconComposerCompiler`), and `actool` hands
 the `--app-icon` `.icon` to it. Regression: demo 37/37, iPad demo 38/38,
 IceCubesApp 99/99, NetNewsWire 84/84.
+
+## IceCubesApp with its extensions in TestFlight, 2026-10-05
+
+**45. IceCubesApp with all four extensions, its App Group and its layered
+icon is VALID from Linux under its own App Store Connect record.** The five
+bundle IDs were registered with the API key; the App Group and the app record
+(6819399771) came from the developer and App Store Connect web sessions, as
+for Mastodon. `compat/icecubes/setup.sh` now takes `BUNDLE_ID`, which the
+generator uses to rebase the extension IDs. `ship.sh` signed all five bundles
+with App Store profiles that carry the group; 99/99 offline checks passed;
+`buildUpload 157008db: COMPLETE`, build 202610051936 `VALID`. Still left out:
+alternate and extension icon sets, the HEIC avatar, and App Intents metadata.
+Receipt: `receipts/2026-10-05-icecubes-extensions-testflight.md`.
