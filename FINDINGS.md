@@ -1022,3 +1022,32 @@ its scene manifest named storyboards that were not in the bundle. Mastodon's
 `Main.storyboard` is one bare view controller, the
 same shape as NetNewsWire's launch storyboards, so the Linux `ibtool` storyboard
 path (M2) is the fix.
+
+## Mastodon in TestFlight, 2026-10-05
+
+**43. Mastodon for iOS, with all five app extensions, its App Group, 28 custom
+SF Symbols and its storyboards, built, signed and uploaded on Linux, is VALID
+in App Store Connect.** Build 2026.08 (202610051741), `buildUpload 52016c3b:
+COMPLETE`, then `VALID`, `APP_STORE_ELIGIBLE`. Three uploads failed on the way,
+each now caught or fixed:
+
+1. `90029: Storyboard file 'Main~ipad.storyboardc' was not found`. The
+   generator now try-compiles every storyboard and xib with `tools/ibtool` and
+   emits the ones it compiles; Mastodon's `Main.storyboard` is one of them.
+2. `90357` (the share extension's `MainInterface.storyboardc` missing) and
+   `90362` (`Action.js` not in the action extension). `tools/ibtool` compiles
+   navigation-controller scenes, byte-identical to Apple for this storyboard,
+   and `ship.sh` moves compiled storyboards, nibs and the JavaScript
+   preprocessing file out of each target's SwiftPM resource bundle to the root
+   of the app or extension, where Xcode puts them. The validator checks both.
+3. Processing that never finished, again. The app's resource bundle held an
+   empty `Assets.car`: the adapter symlinks `Preview Assets.xcassets`, and
+   Foundation on Linux lists a symlinked directory's children as files, so
+   `actool` found no assets. `actool` now resolves symlinked inputs. App Store
+   processing also stalls on an empty car, not only on a malformed one.
+
+The large MastodonAsset catalog needed three AssetKit fixes (baf0f98):
+multi-page BOM trees (Apple's `assetutil` refused a 778-entry single leaf),
+`provides-namespace` folder names, and symbol templates whose guides are
+`<path>` elements. Regression: demo 37/37, iPad demo 38/38, IceCubesApp 99/99,
+NetNewsWire 84/84. Receipt: `receipts/2026-10-05-mastodon-testflight.md`.

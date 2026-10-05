@@ -49,7 +49,9 @@ if options["--version"] != nil {
 
 guard let outputDir = option("--compile").map({ URL(fileURLWithPath: $0) }) else { fail("--compile is required") }
 guard !catalogs.isEmpty else { fail("no .xcassets input") }
-let inputs = catalogs.map { URL(fileURLWithPath: $0).standardizedFileURL }
+// Resolve symlinks: generated adapters link catalogs into the package, and Foundation on Linux lists a
+// symlinked directory's children as non-directories, which silently emptied Mastodon's Preview Assets car.
+let inputs = catalogs.map { URL(fileURLWithPath: $0).resolvingSymlinksInPath() }
 try FileManager.default.createDirectory(at: outputDir, withIntermediateDirectories: true)
 
 func report(_ outputs: [URL]) {
