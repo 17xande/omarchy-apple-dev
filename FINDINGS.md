@@ -1273,3 +1273,20 @@ Apple's IPSW (libswiftCore UUID `D65D98D2`, the same as on the phone) and an
 empty cache, `frame variable greeting` prints `"Hello from Omarchy Linux"`.
 `expr` still fails because LLDB cannot load the app's Swift modules. Receipt
 `receipts/2026-10-06-device-lldb.md`.
+
+## A notarized macOS app from Linux, 2026-10-06
+
+**57. Linux builds, signs and notarizes a macOS app that Gatekeeper accepts.**
+The darwin Swift SDK already holds MacOSX27.0.sdk. SwiftBuild compiles for
+`arm64-apple-macosx14.0` when it gets the settings xtool gives it for iOS
+(`--toolset <bundle>/toolset-swb.json`, `XCODE_EXTRA_PLATFORM_FOLDERS`, the
+bundle's `toolset/bin` on PATH); without them it stops with "unable to find
+platform for 'macosx'". The API key cannot create a Developer ID certificate
+(HTTP 403, "This operation can only be performed by the Account Holder"), so
+the certificate came from the developer portal with a CSR made on Linux; the
+key never left Linux. `rcodesign sign --for-notarization` adds the hardened
+runtime and a timestamp, and `rcodesign notary-submit --staple` uploads with the
+App Store Connect API key and staples the ticket. On a Mac, `spctl` says
+"accepted, source=Notarized Developer ID". The Mach-O still says `sdk 14.0`
+(the deployment target), as iOS builds do before `asc.py stamp`. Receipt
+`receipts/2026-10-06-macos-notarized.md`.

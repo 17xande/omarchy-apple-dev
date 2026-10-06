@@ -11,14 +11,11 @@ notary API, and run it on a Mac (macstudio, or a lab Mac booted into macOS).
 Then do the same for a real open-source Mac app, for example NetNewsWire for
 Mac.
 
-First step done 2026-10-06: a SwiftUI probe builds for `arm64-apple-macosx14.0` with
-SwiftBuild when it gets xtool's settings (`--toolset <bundle>/toolset-swb.json`,
-`XCODE_EXTRA_PLATFORM_FOLDERS=<bundle>/Developer/Platforms`, `<bundle>/toolset/bin`
-first on PATH); without them it stops with "unable to find platform for 'macosx'".
-The binary says `sdk 14.0` (the minimum), the same link issue as iOS (ITMS-90725), but
-`asc.py stamp` fixes only iOS load commands. Wrapped in a `.app` and signed ad hoc
-with rcodesign, it opened on macstudio with its `MacHello` window. Open: sdk stamp for
-macOS, Developer ID signing, notarization, NetNewsWire for Mac.
+Done 2026-10-06 (FINDINGS.md 57): a SwiftUI probe built on Linux, signed with the new
+Developer ID Application certificate (G349BR5A3A), notarized and stapled from Linux;
+Gatekeeper on macstudio accepts it as "Notarized Developer ID". Open: a repo script
+for the build, bundle, sign and notarize steps; the macOS sdk stamp; NetNewsWire for
+Mac.
 
 ## 2026-10-07: device-run.sh --lldb breakpoint proof
 
