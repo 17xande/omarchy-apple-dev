@@ -60,6 +60,14 @@ The generator writes the xtool adapter next to the project. It prints one
 (Linux has no Interface Builder compiler). Read those lines before you
 continue.
 
+To edit the code, open the folder of the `.xcodeproj` (or `omarchy-xtool`) in
+any editor with SourceKit-LSP, for example VS Code with the Swift extension or
+Neovim. The generator writes `.bsp/xtool.json` next to the project, and
+`xtool dev build` writes one in `omarchy-xtool`. The editor then gets
+diagnostics, completion, hover and go to definition across the app, its
+frameworks, the iOS SDK and package dependencies. The first open indexes the
+whole project; cross-file results appear when that ends.
+
 ## 3. Run it on your iPhone
 
 1. Run `xtool auth` once and sign in with your Apple ID.

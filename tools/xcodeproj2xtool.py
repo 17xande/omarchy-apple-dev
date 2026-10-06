@@ -1689,6 +1689,20 @@ class Generator:
                     f"{name}={icn}" for name, icn in sorted(self.extension_icons.items()))) + "\n")
         for w in self.warnings:
             print(w, file=sys.stderr)
+        # A .bsp at the project root lets an editor open the Xcode project itself.
+        adapter_rel = os.path.relpath(self.out_dir, self.proj_dir)
+        proj_bsp = os.path.join(self.proj_dir, ".bsp", "xtool.json")
+        if adapter_rel.startswith(".."):
+            print(f"adapter is outside {self.proj_dir}; no .bsp written there", file=sys.stderr)
+        elif not os.path.exists(proj_bsp):
+            os.makedirs(os.path.dirname(proj_bsp), exist_ok=True)
+            with open(proj_bsp, "w") as f:
+                json.dump({
+                    "name": "xtool", "version": "1.0", "bspVersion": "2.2.0",
+                    "languages": ["c", "cpp", "objective-c", "objective-cpp", "swift"],
+                    "argv": ["/usr/bin/env", "xtool", "dev", "build-server", "--package-path", adapter_rel],
+                }, f, indent=4)
+                f.write("\n")
         print(f"wrote {self.out_dir} (Package.swift, xtool.yml, xtool.env, "
               f"{symlink_count} symlinks under Sources/, "
               f"{len(extensions)} extensions"

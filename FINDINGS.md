@@ -1229,3 +1229,22 @@ collide. The pin stays on AssetKit 9f509fe, whose walk order happens to put
 the larger atlas first; a byte-stable car needs Apple's one-atlas-per-scale
 layout, and four cars with merged atlases built so far still did not finish
 processing.
+
+## Editor support with SourceKit-LSP, 2026-10-06
+
+**55. SourceKit-LSP works on Linux for a generated adapter, but only through
+real source paths.** The adapter reaches project files through symlinks
+(`Sources/<Target>/iOS -> ../../../iOS`), and SwiftPM 6.4's build server
+reports the symlink paths. An editor opens the real file, so definitions,
+completion and diagnostics found nothing. SwiftPM also refuses
+`textDocument/sourceKitOptions` for a real path with "Found multiple indexing
+informations for the same source file". xtool `dev build-server` now sits
+between the editor and SwiftPM (joshuaswarren/xtool 0563868). It rewrites
+source lists to real paths and puts SwiftPM's own spelling back into each
+request by byte substitution, so the rest of the request is unchanged. On
+this toolchain, Foundation's stdin read and Subprocess's output stream both
+lost bytes, so the proxy uses POSIX pipe I/O.
+`--package-path` lets the `.bsp/xtool.json` that the generator now writes at
+the project root point at `omarchy-xtool`. With these, 8 of 8 editor checks
+pass for NetNewsWire and IceCubes from either folder (receipt
+`receipts/2026-10-06-sourcekit-lsp.md`).
