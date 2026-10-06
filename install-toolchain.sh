@@ -327,6 +327,10 @@ if [ "${1:-}" = "--user-only" ]; then
   done
   pkg-config --exists libimobiledevice-1.0 openssl ||
     echo "WARNING: libimobiledevice or openssl headers are missing (xtool build); ask an admin for them"
+  # lldb links one libpython3.x (3.12 for Swift 6.4); device-run.sh --lldb needs it.
+  lldb_missing=$(ldd "$(dirname "$(readlink -f "$(command -v swift)")")/../lib/liblldb.so"* 2>/dev/null |
+    awk '/not found/ {print $1}' | sort -u)
+  if [ -n "$lldb_missing" ]; then echo "WARNING: lldb needs $lldb_missing; ask an admin for it"; fi
 else
 echo "== 1. usbmuxd (device multiplexer; udev starts it on plug), zip, xtool build deps =="
 # zip packages the .ipa in ship.sh. base-devel, git, libimobiledevice and openssl
