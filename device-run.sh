@@ -81,7 +81,7 @@ print(next(k for k in json.load(sys.stdin) if k == b or k.endswith("." + b)))' "
   ddi=${DDI_DIR:-$HOME/.cache/omarchy-apple-dev/iOS_DDI}
   if [ -z "${DDI_DIR:-}" ]; then
     while read -r sha f; do
-      if ! echo "$sha  $ddi/$f" | sha256sum -c --quiet 2>/dev/null; then
+      if ! echo "$sha  $ddi/$f" | sha256sum -c --status 2>/dev/null; then
         mkdir -p "$(dirname "$ddi/$f")"
         curl -fsSL "$DDI_URL/$f" -o "$ddi/$f"
         echo "$sha  $ddi/$f" | sha256sum -c --quiet
@@ -126,9 +126,16 @@ print(d["ProductVersion"] + " (" + d["BuildVersion"] + ")")' "$info")"
       done
   fi
   # pymobiledevice3 sends its own "platform select remote-ios"; add the sysroot to it.
+  # LLDB_PYTHONHOME: a CPython of the version lldb links (3.12 for Swift 6.4), when the system
+  # has none. It goes to lldb only; pymobiledevice3 and python3 here use their own Python.
   wrap=$(mktemp)
-  printf '#!/bin/bash\nexec lldb "$@" < <(sed -u "s|^platform select remote-ios\\$|platform select remote-ios --sysroot \\"%s\\"|")\n' \
-    "$sym" >"$wrap"
+  {
+    echo '#!/bin/bash'
+    if [ -n "${LLDB_PYTHONHOME:-}" ]; then
+      printf 'export PYTHONHOME=%q LD_LIBRARY_PATH=%q\n' "$LLDB_PYTHONHOME" "$LLDB_PYTHONHOME/lib"
+    fi
+    printf 'exec lldb "$@" < <(sed -u "s|^platform select remote-ios\\$|platform select remote-ios --sysroot \\"%s\\"|")\n' "$sym"
+  } >"$wrap"
   chmod +x "$wrap"
   sudo env PATH="$PATH" "$PMD3" developer debugserver lldb "$bid" --rsd "$host" "$port" --lldb-command "$wrap"
 }
@@ -149,11 +156,14 @@ usb)
   $XT devices "${UDID_ARGS[@]}"
 
   echo "== 4. Build, sign, install, launch =="
-  # xtool dev run does all four. Signing uses your Apple ID (free tier works);
-  # the first deploy creates a free provisioning profile for your device.
-  $XT dev run "${UDID_ARGS[@]}"
-
-  if [ "$LLDB" = 1 ]; then
+  # Signing uses your Apple ID (free tier works); the first deploy creates a free
+  # provisioning profile for your device.
+  if [ "$LLDB" = 0 ]; then
+    $XT dev run "${UDID_ARGS[@]}"
+  else
+    # LLDB launches the app itself, stopped, so breakpoints in startup code hit.
+    $XT dev build
+    $XT install "${UDID_ARGS[@]}" "$(ls -d xtool/*.app | head -n1)"
     echo "== 5. LLDB =="
     lldb_session
   fi

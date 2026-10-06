@@ -1,6 +1,22 @@
 # Backlog
 
-Work for when nothing else is open. Remove an entry when it ships or is dropped.
+Open work, highest priority first. Remove an entry when it ships or is dropped.
+
+## HIGH PRIORITY 2026-10-07: macOS apps from Omarchy Linux
+
+Joshua wants this on 2026-10-07. Build a real macOS SwiftUI/AppKit app on
+Omarchy Linux with the macOS SDK from the same Xcode download. Sign it
+(Developer ID or ad hoc), notarize it from Linux through the App Store Connect
+notary API, and run it on a Mac (macstudio, or a lab Mac booted into macOS).
+Then do the same for a real open-source Mac app, for example NetNewsWire for
+Mac.
+
+## 2026-10-07: device-run.sh --lldb breakpoint proof
+
+Run `device-run.sh --lldb` once more on jw16 (10-minute phone window; the
+shared cache for iOS 27.0.1 24A446 is already copied). Show the breakpoint hit
+and `frame variable greeting launches`, then update FINDINGS.md 56 and
+GETTING-STARTED.md step 3.
 
 ## iOS Simulator on Omarchy Linux
 
