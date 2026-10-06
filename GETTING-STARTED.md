@@ -73,7 +73,7 @@ whole project; cross-file results appear when that ends.
 1. Run `xtool auth` once and sign in with your Apple ID.
 2. Plug in the iPhone and tap **Trust**.
 3. Run `~/.local/share/omarchy-apple-dev/device-run.sh` from the project
-   directory. It installs the app, starts it and attaches LLDB.
+   directory. It installs and starts the app. For LLDB, follow FINDINGS.md 56.
 
 ## 4. Upload to TestFlight
 

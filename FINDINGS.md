@@ -1248,3 +1248,23 @@ lost bytes, so the proxy uses POSIX pipe I/O.
 the project root point at `omarchy-xtool`. With these, 8 of 8 editor checks
 pass for NetNewsWire and IceCubes from either folder (receipt
 `receipts/2026-10-06-sourcekit-lsp.md`).
+
+## LLDB on a device from Linux, 2026-10-06
+
+**56. The swift.org LLDB debugs an iOS 27 app on an iPhone from Linux, but a
+`String` prints raw until LLDB's Swift metadata cache is warm.** The path:
+`xtool install`, Xcode 27's personalized DDI mounted with pymobiledevice3, a
+`lockdown start-tunnel` RSD tunnel, and `pymobiledevice3 developer
+debugserver lldb`. The aarch64 swift.org `lldb` needs `libpython3.12.so.1.0`,
+which Arch does not ship; a standalone CPython 3.12 on `LD_LIBRARY_PATH` and
+`PYTHONHOME` works. The breakpoint hits and `frame variable` reads an `Int`.
+In a session with an empty metadata cache, LLDB pairs `String` with the field
+descriptor of `_StringBreadcrumbs` (fields `utf16Length`, `crumbs`) and prints
+a number. A later session that loads the cache file written by the first one
+prints `"Hello from Omarchy Linux"`. LLDB reads `libswiftCore` from process
+memory because it has no on-disk copy of the device's shared cache. On the
+cold path, `populateFieldTypeInfoCacheWithReflectionAtIndex` keeps the last
+descriptor for each name, while the cache path checks the descriptor address,
+so a second descriptor that reads back as `SS` would explain the swap; that
+is not yet proven. `expr` fails in every session because LLDB cannot load the
+app's Swift modules. Receipt `receipts/2026-10-06-device-lldb.md`.
