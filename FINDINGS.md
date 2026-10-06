@@ -1239,7 +1239,7 @@ reports the symlink paths. An editor opens the real file, so definitions,
 completion and diagnostics found nothing. SwiftPM also refuses
 `textDocument/sourceKitOptions` for a real path with "Found multiple indexing
 informations for the same source file". xtool `dev build-server` now sits
-between the editor and SwiftPM (joshuaswarren/xtool 0563868). It rewrites
+between the editor and SwiftPM (xtool-org/xtool#302). It rewrites
 source lists to real paths and puts SwiftPM's own spelling back into each
 request by byte substitution, so the rest of the request is unchanged. On
 this toolchain, Foundation's stdin read and Subprocess's output stream both

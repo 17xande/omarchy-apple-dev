@@ -47,13 +47,13 @@ fetch_commit() { # repo sha dir
   fi
 }
 
-# xtool 1.20.1 plus fixes not released yet (xtool-org/xtool#290-#293, #295): branch-pinned
+# xtool 1.20.1 plus fixes not released yet (xtool-org/xtool#290-#293, #295, #302): branch-pinned
 # dependencies, `type: .dynamic` package products, extension dylibs kept in the host app
-# (FINDINGS.md 24.1, 27.3, 30), and real source paths for SourceKit-LSP (FINDINGS.md 55, no PR yet).
+# (FINDINGS.md 24.1, 27.3, 30), and real source paths for SourceKit-LSP (FINDINGS.md 55).
 # Built from source with its Swift runtime libraries next to it
 # ($ORIGIN only), so a toolchain swap or upgrade cannot break it.
 XTOOL_REPO=https://github.com/joshuaswarren/xtool
-XTOOL_SHA=05638681930cefd724e412950b9f47924f023c15
+XTOOL_SHA=f0a1f90efdbb0dc023e276ff529da92618da7a87
 install_xtool() {
   local src="$HOME/.cache/omarchy-apple-dev/xtool-$XTOOL_SHA"
   local dest="$HOME/.local/lib/omarchy-apple-dev/xtool-$XTOOL_SHA"
