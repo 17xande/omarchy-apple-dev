@@ -321,7 +321,7 @@ fi
 if [ "${1:-}" = "--user-only" ]; then
   echo "== 1-2. User-only install: using $(command -v swift || echo 'no swift on PATH')"
   swift --version | head -n1
-  for tool in zip python3 git cc pkg-config pdftocairo; do
+  for tool in zip python3 git cc pkg-config pdftocairo heif-convert; do
     command -v "$tool" >/dev/null || echo "WARNING: $tool is missing; ask an admin for it"
   done
   pkg-config --exists libimobiledevice-1.0 openssl ||
@@ -330,8 +330,8 @@ else
 echo "== 1. usbmuxd (device multiplexer; udev starts it on plug), zip, xtool build deps =="
 # zip packages the .ipa in ship.sh. base-devel, git, libimobiledevice and openssl
 # build xtool from source (step 3). poppler provides pdfinfo/pdftocairo for the
-# actool PDF imageset path (AssetKit's PdftoCairoRasterizer).
-sudo pacman -S --needed --noconfirm usbmuxd zip base-devel git libimobiledevice openssl poppler
+# actool PDF imageset path (AssetKit's PdftoCairoRasterizer), libheif heif-convert for HEIC images.
+sudo pacman -S --needed --noconfirm usbmuxd zip base-devel git libimobiledevice openssl poppler libheif
 # usbmuxd.service is static on Arch: it is triggered by udev, do not enable it.
 
 echo "== 2. Swift toolchain (AUR binary package: swift, clang, lldb) =="

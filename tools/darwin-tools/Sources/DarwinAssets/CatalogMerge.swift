@@ -65,6 +65,9 @@ public enum CatalogMerge {
                     } else {
                         skipped.append("\(where_): alternate .icon icons are not supported by AssetKit")
                     }
+                case "solidimagestack":
+                    // visionOS-only: actool 27.0 drops it silently for iphoneos.
+                    continue
                 case "" where isDir:
                     try fm.createDirectory(at: target, withIntermediateDirectories: true)
                     let folderContents = child.appendingPathComponent("Contents.json")
@@ -89,7 +92,8 @@ public enum CatalogMerge {
                   let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                   let images = json["images"] as? [[String: Any]] else { return nil }
             return images.compactMap { ($0["filename"] as? String).map { URL(fileURLWithPath: $0).pathExtension.lowercased() } }
-                .first { !["png", "jpg", "jpeg", "svg", "pdf"].contains($0) }
+                // HEIC/HEIF decode through libheif's heif-convert.
+                .first { !["png", "jpg", "jpeg", "svg", "pdf", "heic", "heif"].contains($0) }
         }
 
         /// Copies a colorset without its color-less entries (Xcode's empty AccentColor placeholder).

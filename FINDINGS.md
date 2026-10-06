@@ -1138,3 +1138,17 @@ field's 10-bit quantization (captured from RenderBox). AssetKit 3177a3e also
 fixes vector-layer renditions that crashed Apple's `assetutil`. IceCubesApp:
 `buildUpload 9cb09967: COMPLETE`, build 202610060039 `VALID`.
 Receipt: `receipts/2026-10-06-liquid-glass-testflight.md`.
+
+## HEIC images and solid image stacks, 2026-10-06
+
+**49. The Linux `actool` compiles HEIC imagesets like actool 27.0 and drops
+`.solidimagestack` for iOS, as Apple does.** For a HEIC image Apple writes two
+renditions: the decoded bitmap (RGB555, LZFSE) and the original HEIF data kept
+as-is. AssetKit 4fc6c5b decodes with libheif's `heif-convert` (the installer
+adds `libheif`) and writes both; Apple's `assetutil` fields and `partial.plist`
+are equal on a probe catalog. A `.solidimagestack` is a visionOS icon; for
+`--platform iphoneos` Apple writes nothing and prints no warning, and so does
+ours now. `actool` also omits `Assets.car` when no rendition remains, as Apple
+does. IceCubesApp now ships its `avatar` image and builds without either
+warning: `buildUpload 56d7cfe2: COMPLETE`, build 202610060246 `VALID`.
+Regression: demo 37/37, iPad demo 38/38, IceCubes 101/101, NetNewsWire 85/85.

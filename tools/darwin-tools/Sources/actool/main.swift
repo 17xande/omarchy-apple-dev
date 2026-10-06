@@ -108,9 +108,13 @@ var iconComposer = prepared.iconComposer
 iconComposer?.idioms = options["--target-device"] ?? ["iphone", "ipad"]
 let result = try await XCAssetCompiler(deploymentTarget: option("--minimum-deployment-target") ?? "17.0")
     .compile(catalog: source, iconComposer: iconComposer)
-let car = outputDir.appendingPathComponent("Assets.car")
-try result.carData.write(to: car)
-var outputs = [car]
+var outputs: [URL] = []
+if result.renditionCount > 0 {
+    // actool 27.0 writes no Assets.car when no rendition survives; an empty car stalls App Store processing.
+    let car = outputDir.appendingPathComponent("Assets.car")
+    try result.carData.write(to: car)
+    outputs.append(car)
+}
 
 var partial: [String: Any] = [:]
 if let icon = singleSizeBundle ?? result.appIconBundle, option("--app-icon") == icon.primaryIconName {
