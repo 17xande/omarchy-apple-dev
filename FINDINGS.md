@@ -1212,3 +1212,20 @@ plural checks apply to the source language only, so drifted translations
 compile; named printf arguments (`%(count)lld`) are numbered by first use.
 Uploads with it: IceCubesApp 202610060806, NetNewsWire 202610060742 and
 Mastodon 202610060753, all `VALID`.
+
+## A packed-atlas key collision stalls processing, 2026-10-06
+
+**54. Two packed-image atlases under one rendition key make App Store
+processing hang.** AssetKit writes one `ZZZZPackedAsset` atlas per symbol set,
+and two of IceCubes' atlases share the key (element 9, part 181, identifier 0).
+Processing takes the first rendition with that key. AssetKit 98ff033 sorted
+the catalog walk for byte-stable output, which put the smaller atlas first;
+the other set's cached sprites then fall outside it, and upload f3a1784f
+stayed in PROCESSING. Swapping only the order of that pair in the same car
+processed in 2 minutes (dbad43f2, `VALID`); rewriting rendition names alone
+did not help (ac2393f3). Apple writes one atlas per scale
+(`ZZZZPackedAsset-1.0.1-gamut0`, `-2.0.1`, `-3.0.1`), so its keys never
+collide. The pin stays on AssetKit 9f509fe, whose walk order happens to put
+the larger atlas first; a byte-stable car needs Apple's one-atlas-per-scale
+layout, and four cars with merged atlases built so far still did not finish
+processing.
