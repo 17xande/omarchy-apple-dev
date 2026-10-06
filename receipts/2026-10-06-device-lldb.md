@@ -47,7 +47,23 @@ directory):
 ```
 
 `utf16Length` and `crumbs` are the stored properties of the standard library's
-`_StringBreadcrumbs`, not of `String`. With the cache present, `frame variable -R greeting` shows
-`String`'s real layout (`_guts._object._countAndFlagsBits`, `_guts._object._object`).
-`expr greeting` fails in every session: LLDB cannot load the Swift modules for the app
-("could not load Swift Standard Library").
+`_StringBreadcrumbs`, not of `String`. In `libswiftCore`'s `__swift5_fieldmd`, the descriptor of
+`String` (name `SS`, field `_guts`) is at 0x18223ca5c and the one of `_StringBreadcrumbs` follows it
+at 0x18223ca78 (dump of the dylib extracted from the 24A446 shared cache).
+
+Session at 19:16Z with an empty cache and the iOS 27.0.1 (24A446) Swift dylibs from Apple's IPSW
+(`ipsw download ipsw --device iPhone16,2 --version 27.0.1 --dyld`, then `ipsw dyld extract --slide` of the
+80 dylibs under `/usr/lib/swift/` and `libobjc`), passed as a sysroot:
+
+```
+(lldb) platform select remote-ios --sysroot "/home/joshuawarren/ios-devsupport/27.0.1 (24A446)"
+   Sysroot: /home/joshuawarren/ios-devsupport/27.0.1 (24A446)
+(String) greeting = "Hello from Omarchy Linux"
+(Int) launches = 42
+(lldb) image list libswiftCore.dylib
+[  0] D65D98D2-5161-3FA0-9B03-7B7085A01DAC 0x000000018360e000 /home/joshuawarren/ios-devsupport/27.0.1 (24A446)/Symbols/usr/lib/swift/libswiftCore.dylib
+```
+
+The libobjc "being read from process memory" warning of the earlier sessions is gone. `expr greeting`
+fails in every session: LLDB cannot load the Swift modules for the app ("could not load Swift
+Standard Library").

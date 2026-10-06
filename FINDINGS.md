@@ -1251,20 +1251,25 @@ pass for NetNewsWire and IceCubes from either folder (receipt
 
 ## LLDB on a device from Linux, 2026-10-06
 
-**56. The swift.org LLDB debugs an iOS 27 app on an iPhone from Linux, but a
-`String` prints raw until LLDB's Swift metadata cache is warm.** The path:
-`xtool install`, Xcode 27's personalized DDI mounted with pymobiledevice3, a
-`lockdown start-tunnel` RSD tunnel, and `pymobiledevice3 developer
-debugserver lldb`. The aarch64 swift.org `lldb` needs `libpython3.12.so.1.0`,
-which Arch does not ship; a standalone CPython 3.12 on `LD_LIBRARY_PATH` and
-`PYTHONHOME` works. The breakpoint hits and `frame variable` reads an `Int`.
-In a session with an empty metadata cache, LLDB pairs `String` with the field
-descriptor of `_StringBreadcrumbs` (fields `utf16Length`, `crumbs`) and prints
-a number. A later session that loads the cache file written by the first one
-prints `"Hello from Omarchy Linux"`. LLDB reads `libswiftCore` from process
-memory because it has no on-disk copy of the device's shared cache. On the
-cold path, `populateFieldTypeInfoCacheWithReflectionAtIndex` keeps the last
-descriptor for each name, while the cache path checks the descriptor address,
-so a second descriptor that reads back as `SS` would explain the swap; that
-is not yet proven. `expr` fails in every session because LLDB cannot load the
-app's Swift modules. Receipt `receipts/2026-10-06-device-lldb.md`.
+**56. The swift.org LLDB debugs an iOS 27 app on an iPhone from Linux. A
+`String` prints correctly only when LLDB has the device's Swift runtime on
+disk.** The path: `xtool install`, Xcode 27's personalized DDI mounted with
+pymobiledevice3, a `lockdown start-tunnel` RSD tunnel, and `pymobiledevice3
+developer debugserver lldb`. The aarch64 swift.org `lldb` needs
+`libpython3.12.so.1.0`, which Arch does not ship; a standalone CPython 3.12 on
+`LD_LIBRARY_PATH` and `PYTHONHOME` works. The breakpoint hits and `frame
+variable` reads an `Int`. Without on-disk libraries, LLDB reads `libswiftCore`
+from process memory, and with an empty Swift metadata cache it pairs `String`
+with the field descriptor that follows it in `__swift5_fieldmd`, the one of
+`_StringBreadcrumbs` (fields `utf16Length`, `crumbs`), and prints a number. A
+warm cache hides this. Linux LLDB never searches `~/Library/Developer/Xcode/iOS
+DeviceSupport`: that lookup is inside the check for an Xcode developer
+directory. `platform select remote-ios --sysroot "<dir>"` works, where
+`<dir>/Symbols/usr/lib/swift/` holds the dylibs extracted (with `ipsw dyld
+extract --slide`) from the shared cache of the same iOS build. pymobiledevice3
+runs its own `platform select remote-ios`, which drops the sysroot, so the
+lldb wrapper adds it to that command. With iOS 27.0.1 (24A446) libraries from
+Apple's IPSW (libswiftCore UUID `D65D98D2`, the same as on the phone) and an
+empty cache, `frame variable greeting` prints `"Hello from Omarchy Linux"`.
+`expr` still fails because LLDB cannot load the app's Swift modules. Receipt
+`receipts/2026-10-06-device-lldb.md`.
