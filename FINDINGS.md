@@ -1100,3 +1100,24 @@ not reproduced. The validator requires the metadata in every bundle that
 declares App Intents types. IceCubesApp (app and 4 extensions):
 `buildUpload 633e191b: COMPLETE`, build 202610052033 `VALID`.
 Receipt: `receipts/2026-10-05-app-intents-metadata.md`.
+
+## Storyboards: NetNewsWire complete, 2026-10-06
+
+**47. The Linux `ibtool` compiles all of NetNewsWire's Interface Builder files
+byte-identical to Xcode 27.0, and NetNewsWire with them is VALID.** Main (11
+nibs), Settings (10), Inspector (7) and `SettingsComboTableViewCell.xib` equal
+the storyboardc trees of NetNewsWire built by Xcode 27.0, and the self-test
+now covers them. New encoders: table and collection view controllers with static
+and prototype cells, split view controllers, generic scene views, stack views,
+text fields, switches, sliders, buttons, bar button items, named and system
+colors, and runtime attributes. Rules learned from oracle probes, not from the
+app: Apple's constraint order (guides first, then items by frame-origin
+distance, then fixed attribute tables); the identifier map in `Info.plist`
+follows `__NSSetM` order, and its entry-point string is the same object as the
+key only when the initial controller has an explicit `storyboardIdentifier`;
+strings are `NSLocalizableString` only when the output sits in a `.lproj`.
+Under SwiftPM, ibtool now maps the resource-bundle module
+(`<package>_<target>`) to the target's Swift module; before, custom classes in
+storyboards would not resolve at run time. NetNewsWire with no IB file
+excluded: `buildUpload 256e6e7e: COMPLETE`, build 202610060017 `VALID`.
+Receipt: `receipts/2026-10-06-nnw-storyboards-testflight.md`.
