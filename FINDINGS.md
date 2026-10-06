@@ -1121,3 +1121,20 @@ Under SwiftPM, ibtool now maps the resource-bundle module
 storyboards would not resolve at run time. NetNewsWire with no IB file
 excluded: `buildUpload 256e6e7e: COMPLETE`, build 202610060017 `VALID`.
 Receipt: `receipts/2026-10-06-nnw-storyboards-testflight.md`.
+
+## Liquid Glass pre-render, 2026-10-06
+
+**48. The Linux `actool` renders Icon Composer icons the way Apple's
+IconRendering does, and IceCubesApp with it is VALID.** The baked light, dark
+and tinted images follow display lists recorded from IconRendering on a Mac:
+P3 background gradient, plus-darker group shadows, the translucency mask, glow,
+glass highlights, and the chiclet rim and border. The mean difference from
+actool 27.0 on IceCubes fell from 8.5/10.3/12.6 to 1.05/1.48/1.17 per 255
+(light/dark/tinted), and is 1.3 to 2.9 on three held-out icons; no per-icon
+tables are used. The rest sits at shape edges inside IconRendering's one
+compositing render. Measured and ruled out: the resampling filter, an
+anti-aliased distance transform, supersampled coverage, and the distance
+field's 10-bit quantization (captured from RenderBox). AssetKit 3177a3e also
+fixes vector-layer renditions that crashed Apple's `assetutil`. IceCubesApp:
+`buildUpload 9cb09967: COMPLETE`, build 202610060039 `VALID`.
+Receipt: `receipts/2026-10-06-liquid-glass-testflight.md`.
