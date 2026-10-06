@@ -48,7 +48,7 @@ def camel(words):
 
 def identifier(key):
     text = SPEC.sub(" ", key).replace("'", "").replace("’", "")
-    name = camel(re.findall(r"[A-Za-z0-9]+", text)) or "string"
+    name = camel(re.findall(r"[^\W_]+", text, re.UNICODE)) or "string"
     return "_" + name if name[0].isdigit() else name
 
 
@@ -57,19 +57,34 @@ def swift_literal(s):
 
 
 def arguments(key, locs, source):
-    """[(label or None, variable, swift type, specifier)] for the key's format specifiers. Substitution
-    names label their arguments, from the source language or else the first language that has them."""
-    labels = {}
+    """[(label or None, variable, swift type, specifier)] in argument-number order. A substitution
+    claims its argNum position, labels it with the camelCased name and types it by its own
+    formatSpecifier; remaining positions come from the key's and the source value's specifiers."""
     order = [source] + sorted(lang for lang in locs if lang != source)
-    subs = next((locs[lang]["substitutions"] for lang in order if "substitutions" in locs.get(lang, {})), {})
-    for pos, (name, sub) in enumerate(subs.items(), start=1):
-        labels[sub.get("argNum", pos)] = camel(re.findall(r"[A-Za-z0-9]+", name))
-    args = []
+    src_unit = (locs.get(source) or {}).get("stringUnit") or {}
+    value = src_unit.get("value") if isinstance(src_unit.get("value"), str) else None
+    submap = next((locs[lang]["substitutions"] for lang in order
+                   if isinstance(locs.get(lang), dict) and "substitutions" in locs.get(lang, {})), {})
+    claimed = {}
+    for pos, (name, sub) in enumerate(submap.items(), start=1):
+        n = sub.get("argNum", pos)
+        words = re.findall(r"[^\W_]+", name, re.UNICODE)
+        label = camel(words) if words else None
+        fmt = sub.get("formatSpecifier", "d")
+        m = re.fullmatch(r"(hh|h|ll|l|q|z|t|j|L)?([@dDiuUxXoOfeEgGcCsSpaA])", fmt)
+        length, conv = (m.groups() if m else (None, "d"))
+        claimed[n] = (label, label or f"arg{n}", swift_type(length, conv), "%" + fmt)
+    args = {}
     for n, m in enumerate(SPEC.finditer(key.replace("%%", "")), start=1):
-        label = labels.get(n)
         spec = "%" + m.group(2) + (m.group(3) or "") + m.group(4)
-        args.append((label, label or f"arg{n}", swift_type(m.group(3), m.group(4)), spec))
-    return args
+        args[n] = (None, f"arg{n}", swift_type(m.group(3), m.group(4)), spec)
+    if value is not None:
+        for n, m in enumerate(SPEC.finditer(value.replace("%%", "")), start=1):
+            if n not in args:
+                spec = "%" + m.group(2) + (m.group(3) or "") + m.group(4)
+                args[n] = (None, f"arg{n}", swift_type(m.group(3), m.group(4)), spec)
+    args.update(claimed)
+    return [args[n] for n in sorted(args)]
 
 
 def symbol(key, entry, stem, source):
@@ -80,7 +95,8 @@ def symbol(key, entry, stem, source):
     doc.append(f"     Localized string for key “{key}” in table “{stem}.xcstrings”.")
     head = ["    /**", *doc, "     */"]
     name, lit = identifier(key), swift_literal(key)
-    args = arguments(key, entry.get("localizations") or {}, source)
+    locs = entry.get("localizations") or {}
+    args = arguments(key, locs, source)
     if not args:
         return "\n".join([
             *head,
@@ -104,9 +120,19 @@ def swift_symbols(catalog, name, stem):
     source = catalog["sourceLanguage"]
     strings = catalog.get("strings", {})
     manual = [(k, strings[k]) for k in sorted(strings) if strings[k].get("extractionState") == "manual"]
-    text = HEADER.format(stem=stem, name=name)
-    if manual:
-        body = "\n\n".join(symbol(k, e, stem, source) for k, e in manual)
-        text += ("\n@available(macOS 13, iOS 16, tvOS 16, watchOS 9, *)\n"
-                 f"nonisolated extension LocalizedStringResource {{\n{body}\n}}")
-    return text
+    if not manual:
+        return ""
+    body = "\n\n".join(symbol(k, e, stem, source) for k, e in manual)
+    if stem == "Localizable":
+        # The default table's symbols sit flat in the extension; every other table is namespaced.
+        return (HEADER.format(stem=stem, name=name)
+                + "\n@available(macOS 13, iOS 16, tvOS 16, watchOS 9, *)\n"
+                + f"nonisolated extension LocalizedStringResource {{\n{body}\n}}")
+    words = re.findall(r"[^\W_]+", stem, re.UNICODE)
+    enum_name = "".join(w[:1].upper() + w[1:] for w in words) or "Strings"
+    indented = "\n".join("    " + ln if ln else ln for ln in body.split("\n"))
+    return (HEADER.format(stem=stem, name=name)
+            + "\n@available(macOS 13, iOS 16, tvOS 16, watchOS 9, *)\n"
+            + "nonisolated extension LocalizedStringResource {\n"
+            + f"    /// Namespace for strings in file “{name}”.\n"
+            + f"    enum {enum_name} {{\n{indented}\n    }}\n}}")

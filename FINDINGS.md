@@ -1197,3 +1197,18 @@ bundle's whole contents to the app root made IceCubes stall in PROCESSING
 (uploads f40a7e7a, 62aa547f); only storyboards, nibs and the extension
 script move. NetNewsWire build 202610060550 and IceCubesApp build
 202610060643 `VALID`; Mastodon offline 118/118.
+
+## String Catalogs like Xcode, 2026-10-06
+
+**53. `tools/xcstringstool` compiles String Catalogs to the same files as
+Xcode 27.0.** Against Xcode-built apps: NetNewsWire 5 of 5 outputs
+byte-identical; IceCubesApp 46 files in 19 languages identical (38 bytes, 8
+after decoding, because Apple writes binary-plist dictionaries in random
+order) and its generated Swift symbols byte-identical; Mastodon 2,769 files
+byte-identical. Twenty probe catalogs compiled by Apple's `xcstringstool`
+match ours in file selection, content, diagnostics and exit codes. Rules
+from the probes: a source-language string in state `new` emits nothing; the
+plural checks apply to the source language only, so drifted translations
+compile; named printf arguments (`%(count)lld`) are numbered by first use.
+Uploads with it: IceCubesApp 202610060806, NetNewsWire 202610060742 and
+Mastodon 202610060753, all `VALID`.
