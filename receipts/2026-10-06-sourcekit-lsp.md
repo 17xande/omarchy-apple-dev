@@ -34,7 +34,7 @@ used. It opens real project files and waits for indexing to end.
 ```
 
 The same 8 checks also pass with the editor opened in `omarchy-xtool` for both
-apps. Before the fix, 2 of 8 passed (diag-clean and def-same-file); the
-The same 8 checks also pass with the editor opened in `omarchy-xtool` for both
-apps (debug build of the same xtool source). Before the fix, 2 of 8 passed (diag-clean and def-same-file); the
-the same source file".
+apps (debug build of the same xtool source). Before the fix, 2 of 8 passed
+(diag-clean and def-same-file); the others returned nothing, and SwiftPM
+answered real-path `textDocument/sourceKitOptions` with "Found multiple
+indexing informations for the same source file".
