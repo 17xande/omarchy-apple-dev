@@ -114,6 +114,13 @@ def stamp(app_dir, build_number):
         with info_path.open("rb") as f:
             bundle_info = plistlib.load(f)
         bundle_info.update(keys)
+        # Xcode adds these to every bundle it processes; xtool only writes them
+        # for the app. BuildMachineOSBuild is the build host's macOS build
+        # (Xcode reads it from the running OS); set BUILD_MACHINE_OS_BUILD to
+        # the oracle value when reproducing an Xcode build.
+        bundle_info.setdefault("CFBundleSupportedPlatforms", ["iPhoneOS"])
+        if "BUILD_MACHINE_OS_BUILD" in os.environ:
+            bundle_info.setdefault("BuildMachineOSBuild", os.environ["BUILD_MACHINE_OS_BUILD"])
         if info is None:
             info = bundle_info
         else:
@@ -121,6 +128,9 @@ def stamp(app_dir, build_number):
             caps = bundle_info.get("UIRequiredDeviceCapabilities", [])
             if isinstance(caps, list) and "arm64" not in caps:
                 bundle_info["UIRequiredDeviceCapabilities"] = [*caps, "arm64"]
+            # Extensions inherit the app's device family when the target does
+            # not set TARGETED_DEVICE_FAMILY (the generator writes it there).
+            bundle_info.setdefault("UIDeviceFamily", info.get("UIDeviceFamily", [1, 2]))
         with info_path.open("wb") as f:
             plistlib.dump(bundle_info, f, fmt=plistlib.FMT_BINARY)
     # The Linux link writes the deployment target into LC_BUILD_VERSION's sdk field; App Store
@@ -416,7 +426,8 @@ def install_all_bundles(app_dir, out_dir, prov_for, key_path, cert_path):
         payload = profile_payload(prov)
         granted = payload["Entitlements"]
         entitlements = {k: granted[k] for k in (
-            "application-identifier", "com.apple.developer.team-identifier", "beta-reports-active")
+            "application-identifier", "com.apple.developer.team-identifier", "beta-reports-active",
+            "keychain-access-groups")
             if k in granted}
         entitlements["get-task-allow"] = False
         granted_groups = set(granted.get("com.apple.security.application-groups", []))
@@ -601,6 +612,7 @@ def validate(ipa):
                      if p.name in (f"{name}.storyboardc", f"{name}~iphone.storyboardc", f"{name}~ipad.storyboardc")]
             check(bool(found), f"UIMainStoryboardFile '{name}' is compiled in the bundle (ITMS-90029)")
         families = info.get("UIDeviceFamily", [])
+        check(bool(families) and set(families) <= {1, 2}, f"UIDeviceFamily {families} has only iPhone/iPad (ITMS-90100)")
         ipad = 2 in families
         if ipad and not info.get("UIRequiresFullScreen"):
             check(IPAD_ORIENTATIONS <= set(info.get("UISupportedInterfaceOrientations~ipad", [])),

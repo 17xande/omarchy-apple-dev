@@ -1179,3 +1179,21 @@ as Xcode 27.0.** Probes of `@Observable`, `@Model`, `@Query`, `#Predicate`,
 sides with `-dump-macro-expansions`; all match except a 2-space indent inside
 `#Preview`, which does not change the compiled code.
 Receipt: `receipts/2026-10-06-macro-parity.md`.
+
+## App extension metadata like Xcode, 2026-10-06
+
+**52. App extensions get the Info.plist keys Xcode 27.0 writes, and launch
+storyboards ship compiled.** Compared with Xcode-built NetNewsWire, IceCubesApp
+and Mastodon, and with a probe app that has a Live Activity widget: each
+`.appex` now gets `UIDeviceFamily`, `CFBundleSupportedPlatforms` and the
+widget accent and background color names; boolean `INFOPLIST_KEY_*` settings
+are booleans; keychain access groups granted by the profile reach the signing
+entitlements. The probe's widget extension Info.plist has the same key set as
+Xcode's. Launch storyboards now compile with `tools/ibtool` instead of being
+replaced by `UILaunchScreen`. Two traps on the way: `TARGETED_DEVICE_FAMILY`
+`1,2,7` must become `[1, 2]` (the visionOS 7 failed upload 969d0cfd with
+ITMS-90100; the validator now checks it), and moving a SwiftPM resource
+bundle's whole contents to the app root made IceCubes stall in PROCESSING
+(uploads f40a7e7a, 62aa547f); only storyboards, nibs and the extension
+script move. NetNewsWire build 202610060550 and IceCubesApp build
+202610060643 `VALID`; Mastodon offline 118/118.

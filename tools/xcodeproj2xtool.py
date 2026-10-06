@@ -17,11 +17,7 @@ silent: CocoaPods, ObjC sources, run-script phases, Icon Composer .icon assets,
 unmapped build settings. Interface Builder files are probed with the repo's
 tools/ibtool: the ones it compiles ship as normal resources (SwiftBuild then
 runs ibtool on them), the rest are excluded with one warning. Bare launch
-storyboards (one view, a background color, at most one centered image view)
-are replaced by the Info.plist UILaunchScreen dictionary instead - unless the
-same storyboard is also the UIMainStoryboardFile, which must ship compiled -
-generating a colorset into the adapter's asset catalog when the
-storyboard used component colors. App extensions (WidgetKit widgets, share,
+App extensions (WidgetKit widgets, share,
 notification service, ...) embedded in the selected app target are emitted as
 extra SwiftPM targets/products plus `extensions:` entries in xtool.yml; their
 Info.plist build-setting placeholders are resolved into written copies. Branch requirements
@@ -212,132 +208,22 @@ PROCESSABLE = {
 IB_EXTS = {".storyboard", ".storyboardc", ".xib", ".nib"}
 OBJC_EXTS = {".m", ".mm", ".h", ".hpp", ".c", ".cpp"}
 
-# Launch storyboards the Info.plist can point at. The per-device variants are
-# plain key modifiers; Apple's UILaunchScreen has no per-device form of its own
-# (UILaunchScreens is for per-URL-scheme launch screens only), so device
-# variants must all reduce to the same dictionary to be replaceable.
-# https://developer.apple.com/documentation/bundleresources/information-property-list/uilaunchscreen
+# Launch storyboards the Info.plist can point at; a compiled launch
+# storyboard ships as a resource like any other Interface Builder file.
 LAUNCH_SB_KEYS = ("UILaunchStoryboardName",
                   "UILaunchStoryboardName~ipad",
                   "UILaunchStoryboardName~iphone")
 
-
-def classify_launch_storyboard(path):
-    """Scene-shape check for the UILaunchScreen plist transform.
-
-    Returns (color, image) when the storyboard is one bare view controller
-    whose view has a background color and at most one image view centered by
-    constraints; None for anything else (caller keeps the file excluded with
-    today's warning). color is None for systemBackground or no explicit color
-    (Apple: with UIColorName unset the system uses the system background
-    color), ("name", X) for an asset-catalog color, or ("components", attrs)
-    for an sRGB/gray component color that needs a generated colorset. image is
-    None or the image's asset-catalog name."""
-    try:
-        root = ET.parse(path).getroot()
-    except (ET.ParseError, OSError):
-        return None
-    if root.tag != "document":
-        return None
-    if root.get("targetRuntime", "iOS.CocoaTouch") != "iOS.CocoaTouch":
-        return None
-    vcs = list(root.iter("viewController"))
-    if len(vcs) != 1:
-        return None
-    view = vcs[0].find("view")
-    if view is None:
-        return None
-    local_named = {c.get("name"): c for c in root.iter("namedColor")
-                   if c.get("name")}
-    bg = view.find('color[@key="backgroundColor"]')
-    color = None
-    if bg is not None:
-        a = bg.attrib
-        sysname = a.get("systemColor") or a.get("xcode11CocoaTouchSystemColor") \
-            or a.get("cocoaTouchSystemColor")
-        if sysname:
-            if sysname != "systemBackgroundColor":
-                return None
-        elif "name" in a and a["name"] in local_named:
-            # document-local named color: a component color, not a catalog one
-            named_el = local_named[a["name"]]
-            color_child = named_el.find("color")
-            local = (color_child if color_child is not None
-                     else named_el).attrib
-            if "white" not in local and \
-                    not {"red", "green", "blue"} <= local.keys():
-                return None
-            color = ("components", local)
-        elif "name" in a:
-            color = ("name", a["name"])
-        elif "red" in a and "green" in a and "blue" in a:
-            color = ("components", a)
-        elif "white" in a:
-            color = ("components", a)
-        else:
-            return None
-    subs = view.findall("subviews/*")
-    if not subs:
-        return (color, None)
-    if len(subs) > 1 or subs[0].tag != "imageView" \
-            or not subs[0].get("image") \
-            or any(ch.tag != "rect" for ch in subs[0]):
-        return None
-    # "Centered" = centerX and centerY constraints pinning the image view to
-    # the root view or its safe-area guide (how UILaunchScreen places its
-    # image anyway). Edge/pin constraints or a free-frame image view stay
-    # unsupported.
-    img_id, view_id = subs[0].get("id"), view.get("id")
-    anchors = {view_id} | {g.get("id") for g in view.findall("viewLayoutGuide")}
-    cent = {"centerX": False, "centerY": False}
-    for c in root.iter("constraint"):
-        if img_id not in (c.get("firstItem"), c.get("secondItem")):
-            continue
-        fa, sa = c.get("firstAttribute"), c.get("secondAttribute")
-        if {fa, sa} - {"centerX", "centerY", "width", "height"}:
-            return None
-        if c.get("firstItem") == img_id:
-            side, anchor = fa, c.get("secondItem")
-        else:
-            side, anchor = sa, c.get("firstItem")
-        if side in cent and anchor in anchors:
-            cent[side] = True
-    if not all(cent.values()):
-        return None
-    return (color, subs[0].get("image"))
-
-
-def launch_screen_value(cls):
-    """(UILaunchScreen dictionary, generated-colorset components or None)."""
-    color, image = cls
-    out, cs = {}, None
-    if color:
-        kind, val = color
-        if kind == "name":
-            out["UIColorName"] = val
-        else:
-            out["UIColorName"] = "LaunchScreenBackground"
-            cs = val
-    if image:
-        out["UIImageName"] = image
-    return out, cs
-
-
-def colorset_contents_json(components):
-    """Contents.json for one universal color from storyboard color attributes
-    (sRGB triple or white=gray); component strings pass through verbatim."""
-    w = components.get("white")
-    space = "display-p3" \
-        if components.get("customColorSpace") == "displayP3" else "srgb"
-    return json.dumps({
-        "colors": [{"color": {"color-space": space, "components": {
-            "alpha": components.get("alpha", "1"),
-            "red": components.get("red", w),
-            "green": components.get("green", w),
-            "blue": components.get("blue", w),
-        }}, "idiom": "universal"}],
-        "info": {"author": "xcode", "version": 1},
-    }, indent=2) + "\n"
+# INFOPLIST_KEY_* settings Xcode types as Boolean: their YES/NO value becomes a
+# plist boolean in the generated Info.plist (oracle probe, Xcode 27.0).
+BOOL_GENERATED_KEYS = {
+    "LSRequiresIPhoneOS",
+    "UIRequiresFullScreen",
+    "NSSupportsLiveActivities",
+    "NSSupportsLiveActivitiesFrequentUpdates",
+    "UIFileSharingEnabled",
+    "LSSupportsOpeningDocumentsInPlace",
+}
 
 
 def ibtool_compiles(path):
@@ -425,7 +311,6 @@ class Generator:
         self.target_name = target_name
         self.forced_bundle_id = bundle_id
         self.project = self.objs[self.data["rootObject"]]
-        self._launch_plan = None
 
     def warn(self, msg):
         line = f"warning: {msg}"
@@ -997,7 +882,7 @@ class Generator:
                 for rel in ex.get("membershipExceptions", []):
                     p = os.path.join(gpath, rel)
                     if rel.endswith((".xcconfig", ".entitlements")) or \
-                            not os.path.isfile(os.path.join(self.proj_dir, p)):
+                            not os.path.exists(os.path.join(self.proj_dir, p)):
                         continue
                     link = os.path.join(target_dir, top, rel)
                     os.makedirs(os.path.dirname(os.path.join(self.out_dir, link)),
@@ -1107,18 +992,6 @@ class Generator:
             else:
                 self.mirror_file(p, target_dir, symlinks)
         ib_all += ib_excluded
-        # Bare background-color launch storyboards can be replaced by the
-        # Info.plist UILaunchScreen dictionary instead (app target only).
-        plan = (self.launch_screen_plan(ib_all, infoplist_rel)
-                if target is getattr(self, "target", None) else None)
-        if plan:
-            self._launch_plan = plan
-        # For every IB file not replaced by the launch transform, try the
-        # repo's ibtool: the compilable ones ship as normal resources so
-        # SwiftBuild runs ibtool on them; the rest stay excluded, and only
-        # those are listed in the warning.
-        replaced = {os.path.splitext(os.path.basename(n))[0]
-                    for n in plan["names"]} if plan else set()
         ib_missing = []
         for p in ib_all:
             base = os.path.splitext(os.path.basename(p))[0]
@@ -1131,13 +1004,6 @@ class Generator:
                     else os.path.join(os.path.basename(src_anc), rel)
             else:
                 rp = p
-            if base in replaced:
-                # Replaced by UILaunchScreen and never emitted; still exclude
-                # the spelling SwiftPM's resource scan sees (the src_anc or
-                # synced-group link exposes the file), or an auto-included
-                # storyboard would reach ibtool anyway (Mastodon's did).
-                excludes.append(rp)
-                continue
             if ibtool_compiles(os.path.join(self.proj_dir, p)):
                 resources.append((".process", rp))
                 # synced groups pre-exclude their IB files; an emitted one
@@ -1153,9 +1019,7 @@ class Generator:
                       "- Linux ibtool cannot compile them: "
                       + ", ".join(ib_missing))
         ib_all = ib_missing
-        missing_ui = self.excluded_storyboard_in_plist(
-            ib_all, infoplist_rel,
-            skip_launch=plan["keys"] if plan else ())
+        missing_ui = self.excluded_storyboard_in_plist(ib_all, infoplist_rel)
         if missing_ui:
             self.warn(f"Info.plist references excluded storyboard {missing_ui!r}; "
                       "the launch/main UI will be missing from the bundle")
@@ -1255,11 +1119,8 @@ class Generator:
                   f"({names})")
         return emitted
 
-    def excluded_storyboard_in_plist(self, ib_excluded, infoplist_rel,
-                                     skip_launch=()):
-        """Name an excluded storyboard the Info.plist references, if any.
-        skip_launch: UILaunchStoryboardName* keys already replaced by the
-        UILaunchScreen transform; those references are no longer missing."""
+    def excluded_storyboard_in_plist(self, ib_excluded, infoplist_rel):
+        """Name an excluded storyboard the Info.plist references, if any."""
         if not infoplist_rel:
             return None
         path = os.path.join(self.proj_dir, infoplist_rel)
@@ -1273,124 +1134,12 @@ class Generator:
         names = {os.path.splitext(pl[k])[0]
                  for k in ("UIMainStoryboardFile", "NSMainStoryboardFile")
                  if pl.get(k)}
-        # Launch references replaced by the transform are no longer missing;
-        # main-storyboard references remain checked unless emitted by ibtool.
-        skip = {os.path.splitext(pl[k])[0] for k in skip_launch if pl.get(k)}
         names |= {os.path.splitext(pl[k])[0] for k in LAUNCH_SB_KEYS
-                  if pl.get(k)} - skip
+                  if pl.get(k)}
         for p in ib_excluded:
             if os.path.splitext(os.path.basename(p))[0] in names:
                 return os.path.basename(p)
         return None
-
-    def launch_screen_plan(self, ib_excluded, infoplist_rel):
-        """Plan replacing UILaunchStoryboardName* with Apple's storyboard-free
-        UILaunchScreen dictionary (iOS 14+), or None to keep today's exclusion
-        warning. Requires every referenced launch storyboard to be excluded
-        here and to reduce to the same dictionary: systemBackgroundColor or no
-        color (empty dict), a named catalog color (UIColorName), an sRGB/gray
-        component color (UIColorName via a generated colorset), and at most
-        one centered image view (UIImageName). Apple's UILaunchScreen has no
-        per-device variants - UILaunchScreens is for per-URL-scheme launch
-        screens only - so differing ~ipad/~iphone scenes are not representable.
-        https://developer.apple.com/documentation/bundleresources/information-property-list/uilaunchscreen
-        """
-        if not infoplist_rel:
-            return None
-        path = os.path.join(self.proj_dir, infoplist_rel)
-        if not os.path.isfile(path):
-            return None
-        try:
-            with open(path, "rb") as f:
-                pl = plistlib.load(f)
-        except Exception:
-            return None
-        refs = {k: os.path.splitext(pl[k])[0] for k in LAUNCH_SB_KEYS
-                if isinstance(pl.get(k), str) and pl.get(k)}
-        if not refs:
-            return None
-        # A launch storyboard that is also the main/scene interface must ship
-        # as a compiled .storyboardc (UIKit and App Store processing resolve
-        # UIMainStoryboardFile* in the app bundle itself), so no transform.
-        other = {os.path.splitext(v)[0] for k, v in pl.items()
-                 if k not in LAUNCH_SB_KEYS and "Storyboard" in k
-                 and isinstance(v, str) and v}
-        if set(refs.values()) & other:
-            return None
-        excluded = {os.path.splitext(os.path.basename(p))[0]: p
-                    for p in ib_excluded
-                    if p.lower().endswith(".storyboard")}
-        value, colorset, names, keys = None, None, [], []
-        for key in LAUNCH_SB_KEYS:
-            sname = refs.get(key)
-            if sname is None:
-                continue
-            if sname not in excluded:
-                return None  # the storyboard still ships; nothing to replace
-            cls = classify_launch_storyboard(
-                os.path.join(self.proj_dir, excluded[sname]))
-            if cls is None:
-                return None
-            v, cs = launch_screen_value(cls)
-            if value is not None and v != value:
-                return None  # device variants differ; not representable
-            value, colorset = v, cs or colorset
-            names.append(pl[key])
-            keys.append(key)
-        return {"keys": keys, "names": names, "plist": value,
-                "colorset": colorset}
-
-    def adapter_catalog_dir(self, target_name, cat_rp):
-        """Adapter-local real directory for the target's asset catalog. The
-        catalog is normally reached through a symlink into the user's source
-        tree, so before writing the generated colorset the topmost symlinked
-        ancestor is swapped for a private copy."""
-        ad = os.path.join(self.out_dir, "Sources", target_name, cat_rp)
-        cur = os.path.normpath(self.out_dir)
-        swap = None
-        for part in os.path.normpath(ad).split(os.sep)[
-                len(os.path.normpath(self.out_dir).split(os.sep)):]:
-            cur = os.path.join(cur, part)
-            if os.path.islink(cur):
-                swap = cur
-        if swap is None:
-            return ad
-        real = os.path.realpath(swap)
-        os.remove(swap)  # unlinks the symlink; the user's tree is untouched
-        shutil.copytree(real, swap)
-        return ad
-
-    def apply_launch_plan(self, target_name, resources, app_info):
-        """Drop the UILaunchStoryboardName* keys and write the equivalent
-        UILaunchScreen dictionary, generating a colorset into an adapter-local
-        copy of the asset catalog for component colors."""
-        plan = self._launch_plan
-        for k in plan["keys"]:
-            app_info.pop(k, None)
-        app_info["UILaunchScreen"] = plan["plist"]
-        line = (f"{target_name}: UILaunchStoryboardName "
-                f"({', '.join(plan['names'])}) replaced with UILaunchScreen "
-                f"{json.dumps(plan['plist'])}")
-        if not plan["colorset"]:
-            print(line)
-            return
-        cat = next((rp for _k, rp in resources if rp.endswith(".xcassets")),
-                   None)
-        if cat:
-            base = self.adapter_catalog_dir(target_name, cat)
-        else:
-            # No asset catalog in the target; generate a minimal one.
-            cat = "LaunchScreenAssets.xcassets"
-            resources.append((".process", cat))
-            base = os.path.join(self.out_dir, "Sources", target_name, cat)
-            os.makedirs(base, exist_ok=True)
-            with open(os.path.join(base, "Contents.json"), "w") as f:
-                f.write('{"info" : {"author" : "xcode", "version" : 1}}\n')
-        cdir = os.path.join(base, "LaunchScreenBackground.colorset")
-        os.makedirs(cdir, exist_ok=True)
-        with open(os.path.join(cdir, "Contents.json"), "w") as f:
-            f.write(colorset_contents_json(plan["colorset"]))
-        print(line + f"; generated {cat}/LaunchScreenBackground.colorset")
 
     def non_member_excludes(self, anc, members, keep=()):
         """Paths under ancestor `anc` that are neither on a member's path nor kept
@@ -1678,7 +1427,12 @@ class Generator:
                     elif key == "UILaunchScreen_Generation" and v == "YES":
                         generated["UILaunchScreen"] = {}
                     else:
-                        generated[key] = v
+                        # Xcode writes its Boolean-typed generated keys as plist
+                        # booleans (probe: NSSupportsLiveActivities => true).
+                        if key in BOOL_GENERATED_KEYS and v in ("YES", "NO"):
+                            generated[key] = v == "YES"
+                        else:
+                            generated[key] = v
             merged = dict(generated)
             merged.update(plist)
             plist = merged
@@ -1690,6 +1444,28 @@ class Generator:
                 self.warn("no Info.plist file and GENERATE_INFOPLIST_FILE != YES; "
                           "xtool.yml gets no infoPath")
                 return None, []
+
+        # Xcode writes UIDeviceFamily from TARGETED_DEVICE_FAMILY into every
+        # target's processed Info.plist (app and extensions alike), keeping only
+        # the iphoneos families: IceCubes' "1,2,7" becomes [1, 2] (7 = visionOS,
+        # which App Store rejects in an iOS bundle: ITMS-90100).
+        tdf_setting = self.setting(layers, "TARGETED_DEVICE_FAMILY")
+        tdf = self.expand(tdf_setting, layers) if tdf_setting else ""
+        if tdf and "UIDeviceFamily" not in plist:
+            try:
+                plist["UIDeviceFamily"] = [f for f in (int(s) for s in tdf.split(",") if s.strip()) if f in (1, 2)]
+            except ValueError:
+                self.warn(f"{target_name}: unresolvable TARGETED_DEVICE_FAMILY {tdf!r}")
+        # WidgetKit extensions: Xcode's actool run writes the accent and
+        # widget-background color names from the target's catalog settings
+        # into the extension's Info.plist (probe: IceCubesAppWidgetsExtension).
+        if extension:
+            accent = self.setting(layers, "ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME")
+            if accent:
+                plist.setdefault("NSAccentColorName", accent)
+            bg = self.setting(layers, "ASSETCATALOG_COMPILER_WIDGET_BACKGROUND_COLOR_NAME")
+            if bg:
+                plist.setdefault("NSWidgetBackgroundColorName", bg)
 
         flat = {}
         for l in layers:
@@ -1806,8 +1582,6 @@ class Generator:
         materialize(name, symlinks)
         symlink_count += len(symlinks)
         app_info, _ = self.target_infoplan(layers, name, dev_region, extension=False)
-        if self._launch_plan:
-            self.apply_launch_plan(name, resources, app_info)
         app_info_path = write_plist(name, app_info, extension=False)
         ent = self.setting(layers, "CODE_SIGN_ENTITLEMENTS")
         if ent:
@@ -2344,7 +2118,6 @@ def self_test():
         _self_test(root)
         _self_test_collision(root)
         _self_test_intent(root)
-        _self_test_launch(root)
     except BaseException:
         # weakref.finalize would delete a TemporaryDirectory at exit even when
         # referenced, so keep the dir by simply not removing it
@@ -3014,496 +2787,6 @@ def _self_test_intent(root):
 # iOS/ (so src_anc = "iOS" and the asset catalog is reachable only through the
 # anc symlink, the NNW shape), two launch storyboards in iOS/Base.lproj, the
 # Info.plist at the project root.
-LAUNCH_PROJ = r"""// !$*UTF8*$!
-{
-	archiveVersion = 1;
-	objectVersion = 56;
-	objects = {
-
-/* Begin PBXBuildFile section */
-		500000000000000000000001 /* App.swift in Sources */ = {isa = PBXBuildFile; fileRef = 500000000000000000000101 /* App.swift */; };
-		500000000000000000000002 /* LaunchScreenPhone.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 500000000000000000000102 /* LaunchScreenPhone.storyboard */; };
-		500000000000000000000003 /* LaunchScreenPad.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 500000000000000000000103 /* LaunchScreenPad.storyboard */; };
-		500000000000000000000004 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 500000000000000000000104 /* Assets.xcassets */; };
-/* End PBXBuildFile section */
-
-/* Begin PBXFileReference section */
-		500000000000000000000101 /* App.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = App.swift; sourceTree = "<group>"; };
-		500000000000000000000102 /* LaunchScreenPhone.storyboard */ = {isa = PBXFileReference; lastKnownFileType = file.storyboard; path = LaunchScreenPhone.storyboard; sourceTree = "<group>"; };
-		500000000000000000000103 /* LaunchScreenPad.storyboard */ = {isa = PBXFileReference; lastKnownFileType = file.storyboard; path = LaunchScreenPad.storyboard; sourceTree = "<group>"; };
-		500000000000000000000104 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
-		500000000000000000000105 /* LaunchInfo.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = LaunchInfo.plist; sourceTree = "<group>"; };
-/* End PBXFileReference section */
-
-/* Begin PBXGroup section */
-		500000000000000000000201 /* main */ = {
-			isa = PBXGroup;
-			children = (
-				500000000000000000000202 /* iOS */,
-				500000000000000000000105 /* LaunchInfo.plist */,
-			);
-			sourceTree = "<group>";
-		};
-		500000000000000000000202 /* iOS */ = {
-			isa = PBXGroup;
-			children = (
-				500000000000000000000101 /* App.swift */,
-				500000000000000000000203 /* Base.lproj */,
-				500000000000000000000204 /* Resources */,
-			);
-			path = iOS;
-			sourceTree = "<group>";
-		};
-		500000000000000000000203 /* Base.lproj */ = {
-			isa = PBXGroup;
-			children = (
-				500000000000000000000102 /* LaunchScreenPhone.storyboard */,
-				500000000000000000000103 /* LaunchScreenPad.storyboard */,
-			);
-			path = Base.lproj;
-			sourceTree = "<group>";
-		};
-		500000000000000000000204 /* Resources */ = {
-			isa = PBXGroup;
-			children = (
-				500000000000000000000104 /* Assets.xcassets */,
-			);
-			path = Resources;
-			sourceTree = "<group>";
-		};
-/* End PBXGroup section */
-
-/* Begin PBXNativeTarget section */
-		500000000000000000000301 /* LaunchApp */ = {
-			isa = PBXNativeTarget;
-			buildConfigurationList = 500000000000000000000401;
-			buildPhases = (
-				500000000000000000000305 /* Sources */,
-				500000000000000000000306 /* Resources */,
-			);
-			dependencies = (
-			);
-			name = LaunchApp;
-			productName = LaunchApp;
-			productType = "com.apple.product-type.application";
-		};
-/* End PBXNativeTarget section */
-
-/* Begin PBXProject section */
-		500000000000000000000302 /* Project object */ = {
-			isa = PBXProject;
-			attributes = {
-			};
-			buildConfigurationList = 500000000000000000000402;
-			developmentRegion = en;
-			mainGroup = 500000000000000000000201;
-			targets = (
-				500000000000000000000301 /* LaunchApp */,
-			);
-		};
-/* End PBXProject section */
-
-/* Begin PBXResourcesBuildPhase section */
-		500000000000000000000306 /* Resources */ = {
-			isa = PBXResourcesBuildPhase;
-			files = (
-				500000000000000000000002 /* LaunchScreenPhone.storyboard in Resources */,
-				500000000000000000000003 /* LaunchScreenPad.storyboard in Resources */,
-				500000000000000000000004 /* Assets.xcassets in Resources */,
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
-/* End PBXResourcesBuildPhase section */
-
-/* Begin PBXSourcesBuildPhase section */
-		500000000000000000000305 /* Sources */ = {
-			isa = PBXSourcesBuildPhase;
-			files = (
-				500000000000000000000001 /* App.swift in Sources */,
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
-/* End PBXSourcesBuildPhase section */
-
-/* Begin XCBuildConfiguration section */
-		500000000000000000000403 /* Release */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				CODE_SIGNING_ALLOWED = NO;
-				INFOPLIST_FILE = LaunchInfo.plist;
-				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
-				PRODUCT_BUNDLE_IDENTIFIER = net.example.launch;
-				PRODUCT_NAME = "$(TARGET_NAME)";
-				SWIFT_VERSION = 5.0;
-				TARGETED_DEVICE_FAMILY = "1,2";
-			};
-			name = Release;
-		};
-		500000000000000000000404 /* Release */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-			};
-			name = Release;
-		};
-/* End XCBuildConfiguration section */
-
-/* Begin XCConfigurationList section */
-		500000000000000000000401 = {
-			isa = XCConfigurationList;
-			buildConfigurations = (
-				500000000000000000000403 /* Release */,
-			);
-			defaultConfigurationIsVisible = 0;
-			defaultConfigurationName = Release;
-		};
-		500000000000000000000402 = {
-			isa = XCConfigurationList;
-			buildConfigurations = (
-				500000000000000000000404 /* Release */,
-			);
-			defaultConfigurationIsVisible = 0;
-			defaultConfigurationName = Release;
-		};
-/* End XCConfigurationList section */
-	};
-	rootObject = 500000000000000000000302;
-}
-"""
-
-
-def launch_sb_xml(color="", extra="", resources=
-                  '        <color systemColor="systemBackgroundColor"/>\n'):
-    """A bare launch storyboard (the measured NetNewsWire LaunchScreenPhone
-    shape): one view controller, one view, a background color, nothing else
-    unless `extra` adds it."""
-    return f"""<?xml version="1.0" encoding="UTF-8"?>
-<document type="com.apple.InterfaceBuilder3.CocoaTouch.Storyboard.XIB" version="3.0" toolsVersion="24093.9" targetRuntime="iOS.CocoaTouch" propertyAccessControl="none" useAutolayout="YES" launchScreen="YES" useTraitCollections="YES" useSafeAreas="YES" colorMatched="YES" initialViewController="2hg-qO-omg">
-    <device id="retina6_1" orientation="portrait" appearance="light"/>
-    <dependencies>
-        <plugIn identifier="com.apple.InterfaceBuilder.IBCocoaTouchPlugin" version="24093.9"/>
-        <capability name="Safe area layout guides" minToolsVersion="9.0"/>
-        <capability name="System colors in document resources" minToolsVersion="11.0"/>
-    </dependencies>
-    <scenes>
-        <!--View Controller-->
-        <scene sceneID="btN-TK-Zyz">
-            <objects>
-                <viewController id="2hg-qO-omg" sceneMemberID="viewController">
-                    <view key="view" contentMode="scaleToFill" id="wsU-Ys-fCl">
-                        <rect key="frame" x="0.0" y="0.0" width="414" height="896"/>
-                        <autoresizingMask key="autoresizingMask" widthSizable="YES" heightSizable="YES"/>
-{color}{extra}
-                        <viewLayoutGuide key="safeArea" id="DpR-ol-ipa"/>
-                    </view>
-                    <placeholder placeholderIdentifier="IBFirstResponder" id="KWL-WN-CvS" userLabel="First Responder" sceneMemberID="firstResponder"/>
-                </viewController>
-                <placeholder placeholderIdentifier="IBFirstResponder" id="KWL-WN-CvS" userLabel="First Responder" sceneMemberID="firstResponder"/>
-            </objects>
-            <point key="canvasLocation" x="139" y="99"/>
-        </scene>
-    </scenes>
-    <resources>
-{resources}    </resources>
-</document>
-"""
-
-
-def _self_test_launch(root):
-    """Launch storyboard -> UILaunchScreen (design-note option d): bare
-    system-background storyboards (NNW/Mastodon shape) drop the
-    UILaunchStoryboardName* keys for an empty UILaunchScreen; an sRGB
-    component color generates LaunchScreenBackground.colorset in an
-    adapter-local copy of the catalog (never in the user's tree); a centered
-    named image view maps to UIImageName; anything else keeps today's
-    exclusion warning."""
-    shared_proj = os.path.join(root, "LaunchApp.xcodeproj")
-    os.makedirs(shared_proj)
-    with open(os.path.join(shared_proj, "project.pbxproj"), "w") as f:
-        f.write(LAUNCH_PROJ)
-
-    def scenario(name, phone, pad, info=None, proj_text=None):
-        d = os.path.join(root, name)
-        os.makedirs(os.path.join(d, "iOS", "Base.lproj"))
-        os.makedirs(os.path.join(d, "iOS", "Resources", "Assets.xcassets"))
-        with open(os.path.join(d, "iOS", "App.swift"), "w") as f:
-            f.write("let l = 1\n")
-        for fn, xml in (("LaunchScreenPhone.storyboard", phone),
-                        ("LaunchScreenPad.storyboard", pad)):
-            with open(os.path.join(d, "iOS", "Base.lproj", fn), "w") as f:
-                f.write(xml)
-        with open(os.path.join(d, "iOS", "Resources", "Assets.xcassets",
-                               "Contents.json"), "w") as f:
-            f.write('{"info" : {"author" : "xcode", "version" : 1}}\n')
-        with open(os.path.join(d, "LaunchInfo.plist"), "wb") as f:
-            plistlib.dump(info or {
-                "CFBundleDisplayName": "Launch",
-                "UILaunchStoryboardName": "LaunchScreenPhone",
-                "UILaunchStoryboardName~ipad": "LaunchScreenPad",
-            }, f)
-        proj = os.path.join(d, "LaunchApp.xcodeproj")
-        os.makedirs(proj)
-        if proj_text is None:
-            os.symlink(os.path.join(shared_proj, "project.pbxproj"),
-                       os.path.join(proj, "project.pbxproj"))
-        else:
-            with open(os.path.join(proj, "project.pbxproj"), "w") as f:
-                f.write(proj_text)
-        return d
-
-    def run(d):
-        out = os.path.join(d, "gen")
-        import io as _io
-        import contextlib
-        err, outp = _io.StringIO(), _io.StringIO()
-        with contextlib.redirect_stderr(err), contextlib.redirect_stdout(outp):
-            Generator(os.path.join(d, "LaunchApp.xcodeproj"),
-                      out_dir=out).run()
-        with open(os.path.join(out, "Info.plist"), "rb") as f:
-            pl = plistlib.load(f)
-        with open(os.path.join(out, "Package.swift")) as f:
-            pkg = f.read()
-        return pl, pkg, err.getvalue(), outp.getvalue(), out
-
-    SYS = '                        <color key="backgroundColor" systemColor="systemBackgroundColor"/>\n'
-    LEGACY = '                        <color key="backgroundColor" xcode11CocoaTouchSystemColor="systemBackgroundColor" cocoaTouchSystemColor="whiteColor"/>\n'
-    COMP = '                        <color key="backgroundColor" red="0.96862745100000003" green="0.30196078099999999" blue="0.25882354399999997" alpha="1" colorSpace="custom" customColorSpace="sRGB"/>\n'
-    checks = []
-
-    # systemBackground (new + legacy attribute spellings) -> empty dict
-    d = scenario("l-sys", launch_sb_xml(color=SYS), launch_sb_xml(color=LEGACY))
-    pl, pkg, warn, outp, out = run(d)
-    checks += [
-        ("sys: launch keys dropped",
-         "UILaunchStoryboardName" not in pl
-         and "UILaunchStoryboardName~ipad" not in pl),
-        ("sys: empty UILaunchScreen", pl.get("UILaunchScreen") == {}),
-        ("sys: display name kept", pl.get("CFBundleDisplayName") == "Launch"),
-        ("sys: storyboards still excluded",
-         '"iOS/Base.lproj/LaunchScreenPhone.storyboard"' in pkg),
-        ("sys: no missing-UI warning",
-         "Info.plist references excluded storyboard" not in warn),
-        ("sys: no IB exclusion warning either (replaced, not missing)",
-         "Interface Builder" not in warn),
-        ("sys: replacement line printed",
-         "replaced with UILaunchScreen {}" in outp),
-    ]
-
-    # component color -> generated colorset in an adapter-local catalog copy
-    d = scenario("l-comp", launch_sb_xml(color=COMP), launch_sb_xml(color=COMP))
-    pl, pkg, warn, outp, out = run(d)
-    cs = os.path.join(out, "Sources", "LaunchApp", "iOS", "Resources",
-                      "Assets.xcassets", "LaunchScreenBackground.colorset",
-                      "Contents.json")
-    checks += [
-        ("comp: UIColorName references generated colorset",
-         pl.get("UILaunchScreen") == {"UIColorName": "LaunchScreenBackground"}),
-        ("comp: colorset written in adapter",
-         os.path.isfile(cs) and '"color-space": "srgb"' in open(cs).read()
-         and '"red": "0.96862745100000003"' in open(cs).read()),
-        ("comp: anc symlink swapped for a real copy",
-         not os.path.islink(os.path.join(out, "Sources", "LaunchApp", "iOS"))
-         and os.path.isfile(os.path.join(out, "Sources", "LaunchApp",
-                                         "iOS", "App.swift"))),
-        ("comp: user's catalog untouched",
-         not os.path.exists(os.path.join(
-             d, "iOS", "Resources", "Assets.xcassets",
-             "LaunchScreenBackground.colorset"))),
-        ("comp: catalog still a .process resource",
-         '.process("iOS/Resources/Assets.xcassets")' in pkg),
-        ("comp: colorset line printed",
-         "generated iOS/Resources/Assets.xcassets/"
-         "LaunchScreenBackground.colorset" in outp),
-    ]
-
-    # a label in the scene -> unsupported by the transform AND by ibtool:
-    # keys and both warnings stay, while the compilable pad storyboard ships
-    d = scenario("l-unsup", launch_sb_xml(
-        color=SYS, extra="""                        <subviews>
-                            <label opaque="NO" userInteractionEnabled="NO" contentMode="left" text="Loading" translatesAutoresizingMaskIntoConstraints="NO" id="LBL-001"/>
-                        </subviews>
-"""), launch_sb_xml(color=SYS))
-    pl, pkg, warn, outp, out = run(d)
-    checks += [
-        ("unsup: launch keys kept",
-         pl.get("UILaunchStoryboardName") == "LaunchScreenPhone"
-         and pl.get("UILaunchStoryboardName~ipad") == "LaunchScreenPad"),
-        ("unsup: no UILaunchScreen injected", "UILaunchScreen" not in pl),
-        ("unsup: missing-UI warning kept",
-         "Info.plist references excluded storyboard "
-         "'LaunchScreenPhone.storyboard'" in warn),
-        ("unsup: rejected file is the only one in the IB warning",
-         "1 Interface Builder resource(s) excluded" in warn
-         and "LaunchScreenPhone.storyboard" in warn),
-        ("unsup: compilable pad storyboard still emitted",
-         '.process("iOS/Base.lproj/LaunchScreenPad.storyboard")' in pkg),
-    ]
-
-    # one centered image view with a named image -> UIImageName
-    d = scenario("l-img", launch_sb_xml(
-        color=SYS, resources='        <color systemColor="systemBackgroundColor"/>\n'
-        '        <image name="LaunchLogo" width="512" height="512"/>\n',
-        extra="""                        <subviews>
-                            <imageView clipsSubviews="YES" userInteractionEnabled="NO" contentMode="scaleAspectFit" image="LaunchLogo" translatesAutoresizingMaskIntoConstraints="NO" id="IMG-001">
-                                <rect key="frame" x="107" y="348" width="200" height="200"/>
-                            </imageView>
-                        </subviews>
-                        <constraints>
-                            <constraint firstItem="IMG-001" firstAttribute="centerX" secondItem="wsU-Ys-fCl" secondAttribute="centerX" id="cen-x"/>
-                            <constraint firstItem="IMG-001" firstAttribute="centerY" secondItem="wsU-Ys-fCl" secondAttribute="centerY" id="cen-y"/>
-                        </constraints>
-"""), launch_sb_xml(color=SYS),
-        info={"CFBundleDisplayName": "Launch",
-              "UILaunchStoryboardName": "LaunchScreenPhone"})
-    pl, pkg, warn, outp, out = run(d)
-    checks += [
-        ("img: UIImageName emitted",
-         pl.get("UILaunchScreen") == {"UIImageName": "LaunchLogo"}),
-        ("img: no colorset generated",
-         not os.path.exists(os.path.join(
-             out, "Sources", "LaunchApp", "iOS", "Resources",
-             "Assets.xcassets", "LaunchScreenBackground.colorset"))),
-        ("img: catalog still symlinked (untouched)",
-         os.path.islink(os.path.join(out, "Sources", "LaunchApp", "iOS"))),
-    ]
-
-    # Mastodon shape: the same storyboard is the launch AND main interface.
-    # It is NOT replaced by UILaunchScreen - both keys stay and the storyboard
-    # goes through ibtool (compilable -> emitted as a resource).
-    d = scenario("l-main", launch_sb_xml(color=SYS), launch_sb_xml(color=SYS),
-                 info={"UILaunchStoryboardName": "LaunchScreenPhone",
-                       "UIMainStoryboardFile": "LaunchScreenPhone"})
-    pl, pkg, warn, outp, out = run(d)
-    checks += [
-        ("main: launch and main refs stay when they share a storyboard",
-         pl.get("UILaunchStoryboardName") == "LaunchScreenPhone"
-         and pl.get("UIMainStoryboardFile") == "LaunchScreenPhone"
-         and "UILaunchScreen" not in pl),
-        ("main: shared storyboard emitted as a process resource",
-         '.process("iOS/Base.lproj/LaunchScreenPhone.storyboard")' in pkg),
-        ("main: no missing-UI warning once emitted",
-         "Info.plist references excluded storyboard" not in warn
-         and "Interface Builder" not in warn),
-    ]
-
-    # NNW shape: the iOS folder is a synced root group; its excluded storyboards
-    # must reach the launch plan through the synced path.
-    def synced_launch_proj():
-        p = LAUNCH_PROJ
-        p = re.sub(r"/\* Begin PBXBuildFile section \*/.*?"
-                   r"/\* End PBXBuildFile section \*/\n\n", "", p, flags=re.S)
-        for ph in ("305 /* Sources */", "306 /* Resources */"):
-            p = re.sub(rf"(500000000000000000000{ph} = \{{\n"
-                       rf"\t\t\tisa = PBX(?:Sources|Resources)BuildPhase;\n"
-                       rf"\t\t\tfiles = \(\n).*?(\n\t\t\);)", r"\1\2", p, flags=re.S)
-        p = p.replace("""		500000000000000000000202 /* iOS */ = {
-			isa = PBXGroup;
-			children = (
-				500000000000000000000101 /* App.swift */,
-				500000000000000000000203 /* Base.lproj */,
-				500000000000000000000204 /* Resources */,
-			);
-			path = iOS;
-			sourceTree = "<group>";
-		};
-""", """		500000000000000000000202 /* iOS */ = {isa = PBXFileSystemSynchronizedRootGroup; exceptions = (); explicitFileTypes = {}; explicitFolders = (); path = iOS; sourceTree = "<group>"; };
-""")
-        p = p.replace("""			dependencies = (
-			);
-			name = LaunchApp;""", """			dependencies = (
-			);
-			fileSystemSynchronizedGroups = (
-				500000000000000000000202 /* iOS */,
-			);
-			name = LaunchApp;""")
-        return p
-
-    d = scenario("l-synced", launch_sb_xml(color=SYS),
-                 launch_sb_xml(color=LEGACY),
-                 proj_text=synced_launch_proj())
-    pl, pkg, warn, outp, out = run(d)
-    checks += [
-        ("synced: launch keys dropped",
-         "UILaunchStoryboardName" not in pl
-         and "UILaunchStoryboardName~ipad" not in pl),
-        ("synced: empty UILaunchScreen", pl.get("UILaunchScreen") == {}),
-        ("synced: storyboards excluded from the manifest",
-         '"iOS/Base.lproj/LaunchScreenPhone.storyboard"' in pkg),
-        ("synced: no missing-UI warning",
-         "Info.plist references excluded storyboard" not in warn),
-        ("synced: no IB exclusion warning either (replaced, not missing)",
-         "Interface Builder" not in warn),
-    ]
-
-    # A compilable storyboard in a synced root group must use the group symlink,
-    # not a newly-created adapter directory that masks that link.
-    d = scenario("l-synced-main", launch_sb_xml(color=SYS),
-                 launch_sb_xml(color=SYS),
-                 info={"UILaunchStoryboardName": "LaunchScreenPhone",
-                       "UIMainStoryboardFile": "LaunchScreenPhone"},
-                 proj_text=synced_launch_proj())
-    pl, pkg, warn, outp, out = run(d)
-    checks += [
-        ("synced-main: launch and main refs stay",
-         pl.get("UILaunchStoryboardName") == "LaunchScreenPhone"
-         and pl.get("UIMainStoryboardFile") == "LaunchScreenPhone"
-         and "UILaunchScreen" not in pl),
-        ("synced-main: storyboard emitted as process resource",
-         '.process("iOS/Base.lproj/LaunchScreenPhone.storyboard")' in pkg),
-        ("synced-main: synced group remains linked",
-         os.path.islink(os.path.join(out, "Sources", "LaunchApp", "iOS"))),
-        ("synced-main: no exclusion or missing-UI warning",
-         "Interface Builder" not in warn
-         and "Info.plist references excluded storyboard" not in warn),
-    ]
-
-    # classifier units: legacy-only system color, document-local named color,
-    # non-background system color, Mac storyboard.
-    units = os.path.join(root, "l-units")
-    os.makedirs(units)
-    def unit(name, xml):
-        p = os.path.join(units, name)
-        with open(p, "w") as f:
-            f.write(xml)
-        return classify_launch_storyboard(p)
-    checks += [
-        ("unit: cocoaTouchSystemColor white fallback counts as system bg",
-         unit("legacy.xml", launch_sb_xml(
-             color='                        <color key="backgroundColor" cocoaTouchSystemColor="systemBackgroundColor"/>\n'))
-         == (None, None)),
-        ("unit: document-local named color becomes components",
-         unit("named.xml", launch_sb_xml(
-             color='                        <color key="backgroundColor" name="docColor"/>\n',
-             resources='        <namedColor name="docColor">\n'
-                       '            <color red="1" green="0.5" blue="0.0" alpha="1" colorSpace="custom" customColorSpace="sRGB"/>\n'
-                       '        </namedColor>\n'))
-         == (("components", {"red": "1", "green": "0.5", "blue": "0.0",
-                             "alpha": "1", "colorSpace": "custom",
-                             "customColorSpace": "sRGB"}), None)),
-        ("unit: non-background system color unsupported",
-         unit("label.xml", launch_sb_xml(
-             color='                        <color key="backgroundColor" systemColor="labelColor"/>\n'))
-         is None),
-        ("unit: Mac storyboard unsupported",
-         unit("mac.xml", launch_sb_xml().replace(
-             'targetRuntime="iOS.CocoaTouch"', 'targetRuntime="MacOSX.Cocoa"'))
-         is None),
-        ("unit: uncentered image view unsupported",
-         unit("edge.xml", launch_sb_xml(
-             color=SYS, extra="""                        <subviews>
-                            <imageView image="LaunchLogo" translatesAutoresizingMaskIntoConstraints="NO" id="IMG-001"/>
-                        </subviews>
-                        <constraints>
-                            <constraint firstItem="IMG-001" firstAttribute="top" secondItem="wsU-Ys-fCl" secondAttribute="top" id="pin-top"/>
-                        </constraints>
-""")) is None),
-    ]
-
-    failed = [n for n, ok in checks if not ok]
-    if failed:
-        raise SystemExit("launch self-test FAILED: " + "; ".join(failed))
-    print(f"launch self-test passed ({len(checks)} checks)")
-
-
 def main():
     ap = argparse.ArgumentParser(
         description="Generate an xtool adapter package from an Xcode project.")

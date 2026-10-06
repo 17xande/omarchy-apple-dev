@@ -50,6 +50,7 @@ public enum CatalogMerge {
 
         func copy(_ dir: URL, into dest: URL, catalog: URL) throws {
             for child in try fm.contentsOfDirectory(at: dir, includingPropertiesForKeys: [.isDirectoryKey])
+                .sorted(by: { $0.lastPathComponent < $1.lastPathComponent })
             where child.lastPathComponent != "Contents.json" {
                 let target = dest.appendingPathComponent(child.lastPathComponent)
                 let where_ = "\(catalog.path)/\(child.path.dropFirst(catalog.path.count + 1))"

@@ -50,7 +50,9 @@ echo "== 2. Interface Builder and extension file placement =="
 # SwiftPM puts each target's resources in its resource bundle (<Package>_<Target>.bundle), but UIKit
 # and App Store processing look for these at the root of the app or extension, where Xcode puts them:
 # compiled storyboards and nibs (UIMainStoryboardFile, NSExtensionMainStoryboard: ITMS-90029/90357)
-# and an action extension's NSExtensionJavaScriptPreprocessingFile (ITMS-90362).
+# and an action extension's NSExtensionJavaScriptPreprocessingFile (ITMS-90362). The rest stays in
+# the bundle: code built by SwiftPM reads it through Bundle.module, and its Assets.car would collide
+# with the app icon car at the root.
 for target in "$app" "$app"/PlugIns/*.appex; do
   [ -d "$target" ] || continue
   name=$(basename "${target%.*}")
