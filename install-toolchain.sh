@@ -366,6 +366,23 @@ if ! "$HOME/.local/bin/rcodesign" --version 2>/dev/null | grep -q "$RCODESIGN_VE
   rm -rf "$rcs_tmp"
 fi
 "$HOME/.local/bin/rcodesign" --version
+# ipsw extracts the Swift runtime dylibs from an iPhone's shared cache for LLDB (device-run.sh
+# --lldb, FINDINGS.md 56); pinned + checksummed.
+IPSW_VERSION=3.1.731
+case "$(uname -m)" in
+  aarch64) ipsw_arch=arm64 ipsw_sha=a8d373966d79d24537aa17ec8b9a61bbc73964e6200383f7708c53400ad9f42a ;;
+  x86_64) ipsw_arch=x86_64 ipsw_sha=98e5b127641be3511242a5ba9c5872ef34010e5171318b616e5aa80a607749ff ;;
+esac
+if ! "$HOME/.local/bin/ipsw" version 2>/dev/null | grep -q "$IPSW_VERSION"; then
+  ipsw_tmp=$(mktemp -d)
+  curl -fsSL "https://github.com/blacktop/ipsw/releases/download/v$IPSW_VERSION/ipsw_${IPSW_VERSION}_linux_$ipsw_arch.tar.gz" \
+    -o "$ipsw_tmp/ipsw.tar.gz"
+  echo "$ipsw_sha  $ipsw_tmp/ipsw.tar.gz" | sha256sum -c --quiet
+  tar -xzf "$ipsw_tmp/ipsw.tar.gz" -C "$ipsw_tmp" ipsw
+  install -m755 "$ipsw_tmp/ipsw" "$HOME/.local/bin/ipsw"
+  rm -rf "$ipsw_tmp"
+fi
+"$HOME/.local/bin/ipsw" version | head -n1
 
 echo "== 4. pymobiledevice3 in a venv =="
 python3 -m venv "$VENV"

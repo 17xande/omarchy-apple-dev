@@ -4,7 +4,8 @@
 # First run ever: do `xtool auth` once beforehand (interactive Apple ID sign-in).
 #
 # Modes:
-#   ./device-run.sh                        USB (default; the proven path)
+#   ./device-run.sh [--lldb]               USB (default; the proven path). --lldb then
+#       starts LLDB on the app (sudo for the tunnel; FINDINGS.md 56).
 #   ./device-run.sh --network [--udid U]   WiFi, phone on the SAME network.
 #       TESTED EXHAUSTIVELY 2026-09-16 on iOS 26.6.2: BLOCKED for hosts the
 #       phone has no RemotePairing tunnel with. iOS gives every host its own
@@ -42,23 +43,95 @@ export PATH
 XT="$HOME/.local/bin/xtool"
 PMD3="$HOME/pymobile3-venv/bin/pymobiledevice3"
 
-MODE=usb; UDID=; RSD_HOST=; RSD_PORT=; PKG=
+MODE=usb; UDID=; RSD_HOST=; RSD_PORT=; PKG=; LLDB=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --network) MODE=network ;;
+    --lldb) LLDB=1 ;;
     -u|--udid) UDID="${2:?--udid needs a value}"; shift ;;
     --rsd) MODE=rsd
       RSD_HOST="${2:?usage: --rsd HOST PORT PACKAGE}"
       RSD_PORT="${3:?usage: --rsd HOST PORT PACKAGE}"
       PKG="${4:?usage: --rsd HOST PORT PACKAGE}"
       shift 3 ;;
-    *) echo "Unknown argument: $1 (modes: [--network] [--rsd HOST PORT PKG])" >&2; exit 2 ;;
+    *) echo "Unknown argument: $1 (modes: [--lldb] [--network] [--rsd HOST PORT PKG])" >&2; exit 2 ;;
   esac
   shift
 done
 
 UDID_ARGS=()
 if [ -n "$UDID" ]; then UDID_ARGS=(--udid "$UDID"); fi
+
+# Xcode 27.0's personalized Developer Disk Image, pinned by checksum. DDI_DIR overrides it, e.g. a
+# copy of a Mac's /Library/Developer/DeveloperDiskImages/iOS_DDI.
+DDI_URL=https://raw.githubusercontent.com/DeveloperDiskImages/DeveloperDiskImages/136b031cf581985c0663847915fd404d6fec2d5f/PersonalizedImages/iOS_DDI
+DDI_FILES="05beb4f7a054ea1d53f49b04aaf0a210814e4cfa7d2ba9790b03b01c48ea8a6e Restore/BuildManifest.plist
+c7cbaf4f8a94d4b4c1fe9aad21b7c74a1848cfd0139c3030a4082b8b0f6af9b3 Restore/022-20190-411.dmg
+04dd84b0affafedf86c7ada177a5c2289a1ad197caf7cfded9ccf1dc0a310eb0 Restore/Firmware/022-20190-411.dmg.trustcache"
+
+# Mount the DDI, open an RSD tunnel, give LLDB the phone's Swift runtime on disk, attach to the app.
+lldb_session() {
+  local bid ddi info sym log host port wrap
+  bid=$(grep -E '^bundleID:' xtool.yml | awk '{print $2}')
+  # xtool may prefix the bundle id (XTL-<team>.<id>); find the installed one.
+  bid=$("$PMD3" apps list "${UDID_ARGS[@]}" 2>/dev/null | python3 -c '
+import json, sys
+b = sys.argv[1]
+print(next(k for k in json.load(sys.stdin) if k == b or k.endswith("." + b)))' "$bid")
+  ddi=${DDI_DIR:-$HOME/.cache/omarchy-apple-dev/iOS_DDI}
+  if [ -z "${DDI_DIR:-}" ]; then
+    while read -r sha f; do
+      if ! echo "$sha  $ddi/$f" | sha256sum -c --quiet 2>/dev/null; then
+        mkdir -p "$(dirname "$ddi/$f")"
+        curl -fsSL "$DDI_URL/$f" -o "$ddi/$f"
+        echo "$sha  $ddi/$f" | sha256sum -c --quiet
+      fi
+    done <<<"$DDI_FILES"
+  fi
+  info=$("$PMD3" lockdown info "${UDID_ARGS[@]}")
+  if ! sudo "$PMD3" mounter list "${UDID_ARGS[@]}" 2>/dev/null | grep -qi personalized; then
+    # The image and trust cache of a build identity for this phone's chip.
+    read -r dmg tc < <(python3 -c '
+import json, plistlib, sys
+d = json.loads(sys.argv[2])
+m = plistlib.load(open(sys.argv[1], "rb"))
+for b in m["BuildIdentities"]:
+    if "PersonalizedDMG" in b["Manifest"] and int(b["ApChipID"], 16) == d["ChipID"]:
+        print(b["Manifest"]["PersonalizedDMG"]["Info"]["Path"], b["Manifest"]["LoadableTrustCache"]["Info"]["Path"])
+        break' "$ddi/Restore/BuildManifest.plist" "$info")
+    sudo "$PMD3" mounter mount-personalized "${UDID_ARGS[@]}" "$ddi/Restore/$dmg" "$ddi/Restore/$tc" \
+      "$ddi/Restore/BuildManifest.plist"
+  fi
+  log=$(mktemp)
+  sudo "$PMD3" lockdown start-tunnel "${UDID_ARGS[@]}" >"$log" 2>&1 &
+  trap 'sudo pkill -f "lockdown start-tunne[l]"' EXIT
+  for _ in $(seq 30); do grep -q "RSD Port" "$log" && break; sleep 1; done
+  host=$(grep -o "RSD Address: [^ ]*" "$log" | awk '{print $3}')
+  port=$(grep -o "RSD Port: [0-9]*" "$log" | awk '{print $3}')
+  [ -n "$port" ] || { cat "$log"; exit 1; }
+  # Linux LLDB reads the Swift runtime from process memory unless it has the dylibs of the
+  # phone's exact iOS build on disk, and then misreads String (FINDINGS.md 56).
+  sym="$HOME/.cache/omarchy-apple-dev/DeviceSupport/$(python3 -c '
+import json, sys
+d = json.loads(sys.argv[1])
+print(d["ProductVersion"] + " (" + d["BuildVersion"] + ")")' "$info")"
+  if [ ! -f "$sym/Symbols/usr/lib/swift/libswiftCore.dylib" ]; then
+    echo "Copying the shared cache from the iPhone (once per iOS build, a few GB)"
+    "$PMD3" developer fetch-symbols download "$sym/dsc" --rsd "$host" "$port"
+    dsc=$(find "$sym/dsc" -name dyld_shared_cache_arm64e | head -n1)
+    "$HOME/.local/bin/ipsw" dyld info "$dsc" --dylibs 2>/dev/null | grep -o '/[^ ]*$' |
+      grep -E '^/usr/lib/(swift/|libobjc)' | while read -r p; do
+        mkdir -p "$sym/Symbols$(dirname "$p")"
+        "$HOME/.local/bin/ipsw" dyld extract "$dsc" "$(basename "$p")" --slide -o "$sym/Symbols$(dirname "$p")" >/dev/null
+      done
+  fi
+  # pymobiledevice3 sends its own "platform select remote-ios"; add the sysroot to it.
+  wrap=$(mktemp)
+  printf '#!/bin/bash\nexec lldb "$@" < <(sed -u "s|^platform select remote-ios\\$|platform select remote-ios --sysroot \\"%s\\"|")\n' \
+    "$sym" >"$wrap"
+  chmod +x "$wrap"
+  sudo env PATH="$PATH" "$PMD3" developer debugserver lldb "$bid" --rsd "$host" "$port" --lldb-command "$wrap"
+}
 
 case "$MODE" in
 usb)
@@ -80,18 +153,10 @@ usb)
   # the first deploy creates a free provisioning profile for your device.
   $XT dev run "${UDID_ARGS[@]}"
 
-  echo "== 5. LLDB attach =="
-  # The Swift toolchain lldb has the remote-ios platform. Attach workflow,
-  # from an interactive lldb session (adjust as needed):
-  #   lldb
-  #   (lldb) platform select remote-ios
-  #   (lldb) platform connect <connect:// URL printed by xtool>
-  #   (lldb) process attach --name HelloOmarchy
-  #   (lldb) b ContentView.swift:12
-  #   (lldb) c
-  # pymobiledevice3 can also reach the developer services; on iOS 17+ the
-  # proven flow is in FINDINGS.md items 10-13 (mounter, sudo start-tunnel,
-  # debugserver lldb <bundle-id> --rsd <addr> <port>).
+  if [ "$LLDB" = 1 ]; then
+    echo "== 5. LLDB =="
+    lldb_session
+  fi
   ;;
 network)
   echo "== WiFi deploy (phone on the same network) -- UNVERIFIED =="
