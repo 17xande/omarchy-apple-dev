@@ -1152,3 +1152,30 @@ ours now. `actool` also omits `Assets.car` when no rendition remains, as Apple
 does. IceCubesApp now ships its `avatar` image and builds without either
 warning: `buildUpload 56d7cfe2: COMPLETE`, build 202610060246 `VALID`.
 Regression: demo 37/37, iPad demo 38/38, IceCubes 101/101, NetNewsWire 85/85.
+
+## Alternate app icons, 2026-10-06
+
+**50. Alternate app icons and extension icons ship from Linux, and IceCubesApp
+with all 35 alternates is VALID.** `actool` takes Xcode 27's
+`--alternate-app-icon`, `--include-all-app-icons` and
+`--standalone-icon-behavior`; the generator reads the matching build settings
+into `xtool.env`, and `ship.sh` compiles each extension's own icon set into its
+`.appex`. Against actool 27.0 on IceCubes' full catalog, every rendition type
+has the same count, 333 of 355 renditions match on 8 `assetutil` fields, and
+`partial.plist` is equal. An earlier car with the alternates stayed in
+PROCESSING forever; swapping only the car and uploading variants showed the
+old 16-bit path was at fault. Apple writes 16-bit renditions only for a
+Display P3 source with a pixel more than 3/255 outside sRGB, stored as
+extended-sRGB half floats, and ours now does the same. AssetKit 9f509fe also
+matches Apple's BITMAPKEYS layout and keeps colored tinted icons in color.
+IceCubesApp: `buildUpload d9f36a6e: COMPLETE`, build 202610060406 `VALID`.
+Regression: demo 37/37, iPad demo 38/38, IceCubes 101/101, NetNewsWire 85/85.
+
+## Swift macros: same expansions as Xcode, 2026-10-06
+
+**51. Every Apple macro the three apps use expands on Linux to the same code
+as Xcode 27.0.** Probes of `@Observable`, `@Model`, `@Query`, `#Predicate`,
+`@Entry`, `#Preview` and `@Test` were compiled with the same flags on both
+sides with `-dump-macro-expansions`; all match except a 2-space indent inside
+`#Preview`, which does not change the compiled code.
+Receipt: `receipts/2026-10-06-macro-parity.md`.

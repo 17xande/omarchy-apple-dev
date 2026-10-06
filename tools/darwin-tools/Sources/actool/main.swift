@@ -60,6 +60,19 @@ func report(_ outputs: [URL]) {
     print("")
 }
 
+/// True when a colorset of that name survived the merge — the merge drops
+/// color-less placeholder entries, so this is "the named color compiled".
+func hasColorSet(named name: String, in catalog: URL) -> Bool {
+    let fm = FileManager.default
+    guard let enumerator = fm.enumerator(at: catalog, includingPropertiesForKeys: [.isDirectoryKey]) else {
+        return false
+    }
+    for case let url as URL in enumerator where url.pathExtension == "colorset" {
+        if url.deletingPathExtension().lastPathComponent == name { return true }
+    }
+    return false
+}
+
 // MARK: - Asset symbols
 
 let symbolFlags = ["--generate-swift-asset-symbols", "--generate-objc-asset-symbols", "--generate-asset-symbol-index"]
@@ -86,10 +99,18 @@ if symbolFlags.contains(where: { options[$0] != nil }) {
 // MARK: - Compile
 
 // SwiftBuild passes every catalog of a target in one call; AssetKit compiles one catalog and
-// only some asset types. Everything left out is reported as a warning.
-let prepared = try CatalogMerge.prepare(inputs, appIcon: option("--app-icon"))
+// only some asset types. Everything left out is reported as a warning. Deselected app icon
+// sets drop silently, like Apple's actool (IceCubes oracle: 30 unselected appiconsets, empty
+// stdout).
+let appIcon = option("--app-icon")
+let alternateAppIcons = Set(options["--alternate-app-icon"] ?? [])
+let includeAllAppIcons = options["--include-all-app-icons"] != nil
+let standaloneLoose = option("--standalone-icon-behavior") != "none"
+let prepared = try CatalogMerge.prepare(
+    inputs, appIcon: appIcon, alternateAppIcons: alternateAppIcons,
+    includeAllAppIcons: includeAllAppIcons)
 let (source, singleSizeBundle) = try SingleSizeIcon.expandIfNeeded(
-    catalog: prepared.catalog, appIcon: option("--app-icon") ?? "AppIcon",
+    catalog: prepared.catalog, appIcon: appIcon,
     idioms: options["--target-device"] ?? ["iphone", "ipad"])
 defer {
     for url in Set([prepared.catalog, source]) {
@@ -104,10 +125,20 @@ if !prepared.skipped.isEmpty {
     }
     print("")
 }
+let idioms = options["--target-device"] ?? ["iphone", "ipad"]
 var iconComposer = prepared.iconComposer
-iconComposer?.idioms = options["--target-device"] ?? ["iphone", "ipad"]
+iconComposer?.idioms = idioms
+// Alternates get the target devices themselves: with an appiconset primary (or
+// no primary .icon) there is no .icon input to inherit them from, and empty
+// idioms silently drop the pre-rendered Icon Image and MultiSized renditions.
+let alternateIconComposers = prepared.alternateIconComposers.map { input -> IconComposerCompiler.Input in
+    var input = input
+    input.idioms = idioms
+    return input
+}
 let result = try await XCAssetCompiler(deploymentTarget: option("--minimum-deployment-target") ?? "17.0")
-    .compile(catalog: source, iconComposer: iconComposer)
+    .compile(catalog: source, appIconName: appIcon, iconComposer: iconComposer,
+             alternateIconComposers: alternateIconComposers)
 var outputs: [URL] = []
 if result.renditionCount > 0 {
     // actool 27.0 writes no Assets.car when no rendition survives; an empty car stalls App Store processing.
@@ -117,16 +148,41 @@ if result.renditionCount > 0 {
 }
 
 var partial: [String: Any] = [:]
-if let icon = singleSizeBundle ?? result.appIconBundle, option("--app-icon") == icon.primaryIconName {
-    partial.merge(icon.infoPlistAdditions) { $1 }
-    for file in icon.looseFiles {
-        let url = outputDir.appendingPathComponent(file.name)
-        try file.data.write(to: url)
-        outputs.append(url)
+if let icon = singleSizeBundle ?? result.appIconBundle, appIcon == icon.primaryIconName {
+    var additions = icon.infoPlistAdditions
+    // CFBundleAlternateIcons: Apple lists every compiled alternate icon with
+    // just its CFBundleIconName (IceCubes oracle partial.plist), inside both
+    // CFBundleIcons and CFBundleIcons~ipad.
+    if !icon.alternateIconNames.isEmpty {
+        let alternates = Dictionary(uniqueKeysWithValues: icon.alternateIconNames.map {
+            ($0, ["CFBundleIconName": $0] as [String: any Sendable])
+        })
+        for key in ["CFBundleIcons", "CFBundleIcons~ipad"] {
+            if var dict = additions[key] as? [String: any Sendable] {
+                dict["CFBundleAlternateIcons"] = alternates
+                additions[key] = dict
+            }
+        }
+    }
+    partial.merge(additions) { $1 }
+    if standaloneLoose {
+        for file in icon.looseFiles {
+            let url = outputDir.appendingPathComponent(file.name)
+            try file.data.write(to: url)
+            outputs.append(url)
+        }
     }
 }
-if let accent = option("--accent-color") {
-    partial["NSAccentColorName"] = accent
+// The accent and widget-background names are only recorded when a color of
+// that name actually compiled into the car (an empty placeholder colorset
+// compiles to nothing and no key is written — IceCubes app oracle: empty
+// AccentColor.colorset + --accent-color -> no NSAccentColorName; widget
+// oracle: defined colors -> both keys).
+for (flag, key) in [("--accent-color", "NSAccentColorName"),
+                    ("--widget-background-color", "NSWidgetBackgroundColorName")] {
+    if let name = option(flag), hasColorSet(named: name, in: source) {
+        partial[key] = name
+    }
 }
 if let path = option("--output-partial-info-plist") {
     let url = URL(fileURLWithPath: path)

@@ -14,14 +14,29 @@ public enum CatalogMerge {
         /// The merged catalog, inside its own temporary directory.
         public let catalog: URL
         /// Entries left out, as "<catalog>/<relative path>: <reason>".
+        /// Only genuinely unsupported content; deselected app icon sets are
+        /// dropped silently, like Apple's actool.
         public let skipped: [String]
         /// The --app-icon Icon Composer source, compiled layered by
         /// XCAssetCompiler instead of through the appiconset path.
         public let iconComposer: IconComposerCompiler.Input?
+        /// Alternate .icon sources (--alternate-app-icon matches, or every
+        /// .icon with --include-all-app-icons), compiled layered as
+        /// alternate icons.
+        public let alternateIconComposers: [IconComposerCompiler.Input]
     }
 
-    /// - Parameter appIcon: the one .appiconset to keep (actool's --app-icon); others are skipped.
-    public static func prepare(_ catalogs: [URL], appIcon: String?) throws -> Prepared {
+    /// - Parameters:
+    ///   - appIcon: the primary .appiconset / .icon name (actool's --app-icon).
+    ///   - alternateAppIcons: --alternate-app-icon names.
+    ///   - includeAllAppIcons: --include-all-app-icons; every app icon asset
+    ///     is kept. Apple 27.0 compiles deselected icon sets with no warning
+    ///     (IceCubes oracle: catalog with 30 unselected appiconsets, empty
+    ///     stdout), so only unsupported content lands in `skipped`.
+    public static func prepare(
+        _ catalogs: [URL], appIcon: String?,
+        alternateAppIcons: Set<String> = [], includeAllAppIcons: Bool = false
+    ) throws -> Prepared {
         let fm = FileManager.default
         let merged = fm.temporaryDirectory
             .appendingPathComponent("actool-\(UUID().uuidString)")
@@ -31,6 +46,7 @@ public enum CatalogMerge {
             .write(to: merged.appendingPathComponent("Contents.json"))
         var skipped: [String] = []
         var iconComposer: IconComposerCompiler.Input? = nil
+        var alternateIconComposers: [IconComposerCompiler.Input] = []
 
         func copy(_ dir: URL, into dest: URL, catalog: URL) throws {
             for child in try fm.contentsOfDirectory(at: dir, includingPropertiesForKeys: [.isDirectoryKey])
@@ -52,18 +68,22 @@ public enum CatalogMerge {
                 case "symbolset":
                     try place(child, at: target)
                 case "appiconset":
-                    if child.deletingPathExtension().lastPathComponent == appIcon {
+                    let name = child.deletingPathExtension().lastPathComponent
+                    if name == appIcon || includeAllAppIcons || alternateAppIcons.contains(name) {
                         try place(child, at: target)
-                    } else {
-                        skipped.append("\(where_): not the --app-icon set")
                     }
+                    // Deselected icon sets drop silently, like Apple's.
                 case "icon":
-                    // Icon Composer source. The one matching --app-icon is
-                    // compiled layered; others (alternate icons) are skipped.
-                    if child.deletingPathExtension().lastPathComponent == appIcon {
-                        iconComposer = recordIconComposerIcon(child, appIcon: appIcon, where_: where_, skipped: &skipped)
-                    } else {
-                        skipped.append("\(where_): alternate .icon icons are not supported by AssetKit")
+                    // Icon Composer source: the one matching --app-icon is
+                    // compiled layered as the primary; named alternates and,
+                    // with --include-all-app-icons, every .icon compile as
+                    // alternate icons. Others drop silently.
+                    let name = child.deletingPathExtension().lastPathComponent
+                    if name == appIcon {
+                        iconComposer = recordIconComposerIcon(child, appIcon: appIcon)
+                    } else if includeAllAppIcons || alternateAppIcons.contains(name) {
+                        alternateIconComposers.append(
+                            IconComposerCompiler.Input(name: name, directory: child, idioms: []))
                     }
                 case "solidimagestack":
                     // visionOS-only: actool 27.0 drops it silently for iphoneos.
@@ -115,31 +135,28 @@ public enum CatalogMerge {
             if catalog.pathExtension == "icon" {
                 // An Icon Composer .icon passed as its own catalog input
                 // (SwiftBuild passes folder.iconcomposer.icon paths through).
-                iconComposer = recordIconComposerIcon(
-                    catalog, appIcon: appIcon, where_: catalog.path, skipped: &skipped)
+                let name = catalog.deletingPathExtension().lastPathComponent
+                if name == appIcon {
+                    iconComposer = recordIconComposerIcon(catalog, appIcon: appIcon)
+                } else if includeAllAppIcons || alternateAppIcons.contains(name) {
+                    alternateIconComposers.append(
+                        IconComposerCompiler.Input(name: name, directory: catalog, idioms: []))
+                }
                 continue
             }
             try copy(catalog, into: merged, catalog: catalog)
         }
-        return Prepared(catalog: merged, skipped: skipped, iconComposer: iconComposer)
+        return Prepared(catalog: merged, skipped: skipped, iconComposer: iconComposer,
+                        alternateIconComposers: alternateIconComposers)
     }
 
     /// Records an Icon Composer `.icon` as the layered app-icon input when
-    /// it is the `--app-icon`; other .icon files (alternate icons) are
-    /// skipped with a warning. Idioms are filled in by the caller from
-    /// actool's --target-device flags.
+    /// `--app-icon` is set; the caller has already matched the name.
+    /// Idioms are filled in by the caller from actool's --target-device flags.
     static func recordIconComposerIcon(
-        _ icon: URL, appIcon: String?, where_: String, skipped: inout [String]
+        _ icon: URL, appIcon: String?
     ) -> IconComposerCompiler.Input? {
-        let name = icon.deletingPathExtension().lastPathComponent
-        guard let appIcon = appIcon else {
-            skipped.append("\(where_): no --app-icon to attach it to")
-            return nil
-        }
-        guard name == appIcon else {
-            skipped.append("\(where_): alternate .icon icons are not supported by AssetKit")
-            return nil
-        }
+        guard let appIcon else { return nil }
         return IconComposerCompiler.Input(name: appIcon, directory: icon, idioms: [])
     }
 }

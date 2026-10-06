@@ -33,6 +33,7 @@ import json
 import os
 import plistlib
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -412,6 +413,14 @@ class Generator:
         self.data = parse_pbxproj(os.path.join(proj_path, "project.pbxproj"))
         self.objs = self.data["objects"]
         self.warnings = []
+        # Icon Composer .icon assets seen in the target's resources; handed to
+        # ship.sh through the adapter-root symlink + xtool.env, not compiled by
+        # the in-build actool pass.
+        self.icon_assets = 0
+        # Alternate app icon names (ASSETCATALOG_COMPILER_ALTERNATE_APPICON_NAMES).
+        self.alternate_icon_names = []
+        # Embedded extension name -> its ASSETCATALOG_COMPILER_APPICON_NAME.
+        self.extension_icons = {}
         self.out_dir = out_dir or os.path.join(self.proj_dir, "omarchy-xtool")
         self.target_name = target_name
         self.forced_bundle_id = bundle_id
@@ -679,8 +688,7 @@ class Generator:
 
         classify(root, "")
         if icon_dirs[0]:
-            self.warn(f"synced group {gpath!r}: {icon_dirs[0]} Icon Composer .icon "
-                      "assets excluded (Linux actool cannot compile them)")
+            self.icon_assets += icon_dirs[0]
         if objc_files:
             self.warn(f"synced group {gpath!r}: {len(objc_files)} ObjC/C files "
                       f"excluded (not supported on Linux), e.g. {objc_files[0]}; "
@@ -1065,13 +1073,10 @@ class Generator:
                 ib_excluded.append(p)
                 continue
             if p.endswith(".icon"):
-                # The app target's primary .icon is symlinked into the
-                # adapter root by run() and consumed by ship.sh; alternates
-                # stay as copies of a skipped resource.
-                if app_icon_name and os.path.basename(p) == app_icon_name:
-                    continue
-                self.warn(f"Icon Composer asset {p!r} excluded (Linux actool cannot "
-                          "compile it)")
+                # .icon assets are compiled by ship.sh from the adapter-root
+                # symlinks (primary + alternates); the in-build actool pass
+                # drops them silently, like Apple's actool drops deselected
+                # icon sets.
                 continue
             if src_anc and (p == src_anc or p.startswith(src_anc + "/")):
                 pj = os.path.join(self.proj_dir, p)
@@ -1842,6 +1847,9 @@ class Generator:
                 self.warn(f"{ename}: CODE_SIGN_ENTITLEMENTS {ent!r} not wired "
                           "(xtool dev signs without entitlements; ship.sh signs "
                           "with its own)")
+            eicon = self.setting(elayers, "ASSETCATALOG_COMPILER_APPICON_NAME")
+            if eicon:
+                self.extension_icons[ename] = eicon
             extensions.append({
                 "name": ename,
                 "products": eprods,
@@ -1884,13 +1892,34 @@ class Generator:
         # synced group. Symlink it into the adapter root so ship.sh (and the
         # Linux actool) can render it; the project's own file is left alone.
         app_icon_linked = self.symlink_app_icon(target, layers)
+        # Alternate icons: ship.sh compiles them with the Xcode 27 flags
+        # (--alternate-app-icon / --include-all-app-icons) straight from the
+        # project tree; symlink alternate .icon directories into the adapter
+        # root beside the primary so the actool inputs resolve.
+        alternates_linked = self.symlink_alternate_icons(target, layers, exclude=self.primary_app_icon_name(layers))
         print(f"APP_ICON={icon}   # pass to ship.sh")
+        env_path = os.path.join(self.out_dir, "xtool.env")
+        with open(env_path, "w") as f:
+            # Sourced by ship.sh: quote every value (extension product names may contain spaces).
+            f.write(f"APP_ICON={shlex.quote(icon)}\n")
+            if self.alternate_icon_names:
+                f.write("ALTERNATE_APP_ICONS=" + shlex.quote(" ".join(self.alternate_icon_names)) + "\n")
+            if (self.setting(layers, "ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS") or "").upper() == "YES":
+                f.write("INCLUDE_ALL_APP_ICONS=YES\n")
+            standalone = self.setting(layers, "ASSETCATALOG_COMPILER_STANDALONE_ICON_BEHAVIOR")
+            if standalone and standalone != "default":
+                f.write(f"STANDALONE_ICON_BEHAVIOR={shlex.quote(standalone)}\n")
+            if self.extension_icons:
+                # One "<product>=<icon>" per line.
+                f.write("EXTENSION_APP_ICONS=" + shlex.quote("\n".join(
+                    f"{name}={icn}" for name, icn in sorted(self.extension_icons.items()))) + "\n")
         for w in self.warnings:
             print(w, file=sys.stderr)
-        print(f"wrote {self.out_dir} (Package.swift, xtool.yml, "
+        print(f"wrote {self.out_dir} (Package.swift, xtool.yml, xtool.env, "
               f"{symlink_count} symlinks under Sources/, "
               f"{len(extensions)} extensions"
-              f"{', app icon' if app_icon_linked else ''})")
+              f"{', app icon' if app_icon_linked else ''}"
+              f"{f', {alternates_linked} alternate icon dirs' if alternates_linked else ''})")
 
     def primary_app_icon_name(self, layers):
         """Xcode convention: ASSETCATALOG_COMPILER_APPICON_NAME is the icon
@@ -1930,6 +1959,41 @@ class Generator:
         if not os.path.lexists(link):
             os.symlink(os.path.relpath(src, self.out_dir), link)
         return True
+
+    def symlink_alternate_icons(self, target, layers, exclude):
+        """Symlinks every alternate Icon Composer .icon asset (classic
+        Resources phase or synced groups) into the adapter root, and records
+        the ALTERNATE_APPICON_NAMES setting. ship.sh passes them to actool
+        with --alternate-app-icon; the in-build actool pass keeps them
+        excluded from the SwiftPM resources."""
+        self.alternate_icon_names = [
+            n for n in (self.setting(layers, "ASSETCATALOG_COMPILER_ALTERNATE_APPICON_NAMES") or "").split()
+            if n
+        ]
+        primary = f"{exclude}.icon"
+        seen = []
+        candidates = []
+        for _ref_id, p in self.phase_files(target, "PBXResourcesBuildPhase"):
+            candidates.append(p)
+        for gid in target.get("fileSystemSynchronizedGroups", []):
+            base = self.synced_group_path(gid)
+            if base and os.path.isdir(os.path.join(self.proj_dir, base)):
+                for root, _dirs, files in os.walk(os.path.join(self.proj_dir, base)):
+                    for fn in files:
+                        if fn == "icon.json":
+                            candidates.append(os.path.relpath(root, self.proj_dir))
+        for p in sorted(set(candidates)):
+            if os.path.basename(p) == primary or os.path.basename(p) in seen:
+                continue
+            src = os.path.join(self.proj_dir, p)
+            if not os.path.isdir(src):
+                continue
+            seen.append(os.path.basename(p))
+            link = os.path.join(self.out_dir, os.path.basename(p))
+            if not os.path.lexists(link):
+                os.symlink(os.path.relpath(src, self.out_dir), link)
+        self.icon_assets += len(seen)
+        return len(seen)
 
     def target_block(self, tname, deps, excludes, resources, swift):
         prod_lines = "\n".join(
