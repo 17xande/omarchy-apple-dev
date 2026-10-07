@@ -1397,3 +1397,42 @@ finds no symbol and macOS 26 turns the lookup into an `os_crash` abort
 ("NSImage requested a variant from a symbol that wasn't found in the asset
 catalog"). Until actool writes real symbol assets, the four custom symbols
 cannot be rendered; every other catalog image is present (225 entries).
+
+## Developer ID provisioning for that Mac app, 2026-10-07
+
+**61. MAC_APP_DIRECT profiles from the API carry team-wildcard app groups, push,
+and kvstore — but empty iCloud containers — and the notarized, provisioned
+NetNewsWire Mac app runs to its main window with both extensions registered.**
+tools/provision-mac.py derives everything from the adapter: it registers each
+xtool.yml bundle id (MAC_OS; the registration name must be alphanumeric plus
+spaces — dots are refused), reads the capabilities each entitlements file
+claims, enables them, creates a MAC_APP_DIRECT profile per bundle id bound to
+the Developer ID certificate, writes build/provision/ in the names ship-mac.sh
+embeds, and reports which claimed com.apple.* keys the profile does not back.
+Capability API facts: the capabilityType enum is PUSH_NOTIFICATIONS (plain
+"PUSH" is refused with the full enum list) and grants aps-environment
+production even for Developer ID direct distribution; ICLOUD needs
+capabilitySettings `[{"key": "ICLOUD_VERSION", "options": [{"key":
+"XCODE_6"}]}]` because the bare create fails with "cannot have the CloudkitVersion
+'null'"; APP_GROUPS takes no group list and the profile grants only
+"9LX44YXXVX.*"-shaped names, so NetNewsWire's `group.com.ranchero.NetNewsWire-Evergreen`
+cannot be backed (no source reads the group — dropped); iCloud containers
+cannot be attached at all (the profile's icloud-container-identifiers is
+empty), so the icloud keys ship dropped; the kvstore identifier
+`9LX44YXXVX.com.ranchero.NetNewsWire` matches the team wildcard and ships.
+The app id itself cannot be `com.ranchero.NetNewsWire-Evergreen` — explicit
+App IDs are globally unique and Ranchero owns it (409 "not available") — so
+the adapter ships under the team's ids
+(com.joshuaswarren.omarchyappledev.netnewswire + .SubscribeToFeed /
+.Mac.ShareExtension). Two ordering traps: ship-mac.sh expands ENTITLEMENTS to
+build/<product>.entitlements, so a provisioning run that reads that path after
+a ship sees the trimmed set and "backs everything" vacuously; and an app that
+claims a key its embedded profile lacks is refused by launchd at spawn
+(RBSRequestErrorDomain Code=5, POSIX 163) — regenerate build/provision/ from
+the claims file, then ship. Final state on macstudio (M1 Max, macOS 26.6.2):
+spctl "accepted, source=Notarized Developer ID", the app runs to its
+three-pane main window (Smart Feeds with unread counts, ten real feeds with
+favicons — the sandboxed network path works), Sparkle's first-run sheet shows
+the actool-built app icon, pluginkit lists both appexes, and the Dock shows
+the running app's icon. Receipt
+`receipts/2026-10-07-nnw-mac-provision.md`.
