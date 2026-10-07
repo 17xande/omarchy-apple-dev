@@ -131,7 +131,7 @@ for p in sorted(glob.glob(os.path.join(sys.argv[1], "Modules/*/Package.swift")))
         src_dir = os.path.join(os.path.dirname(p), "Sources", name)
         uses = any("Bundle.module" in open(os.path.join(b, f), encoding="utf-8", errors="replace").read()
                    for b, _d, fs in os.walk(src_dir) for f in fs if f.endswith(".swift"))
-        if uses and not re.search(r"resources:\s*\[\s*[^\]]", new_body):
+        if uses and re.search(r"resources:\s*\[\s*\]", new_body):
             shim = os.path.join(src_dir, "LinuxBundleModule.swift")
             with open(shim, "w") as f:
                 f.write(
