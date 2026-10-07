@@ -110,5 +110,27 @@ for name in ("WebViewWindow", "IndeterminateProgressWindow"):
 open(p, "w").write(s)
 PY
 
+# 3b. The Xcode project links some local products statically twice and
+# suppresses the diagnostic with DISABLE_DIAMOND_PROBLEM_DIAGNOSTIC = YES
+# (NetNewsWire_project.xcconfig). SwiftPM exposes no override channel, so
+# give every local package's primary library product the repo's own
+# `type: .dynamic` convention (Account, RSCore already declare it).
+python3 - "$dir" <<'PY'
+import glob, os, re, sys
+fixed = 0
+for p in sorted(glob.glob(os.path.join(sys.argv[1], "Modules/*/Package.swift"))):
+    s = open(p, encoding="utf-8").read()
+    # Primary product only: the first .library( gets type: .dynamic when it
+    # does not declare a type yet.
+    new = re.sub(
+        r"(\.library\(\s*\n\s*name:\s*\"[^\"]+\",\s*\n)(?!\s*type:)",
+        r"\1\t\t\ttype: .dynamic,\n",
+        s, count=1)
+    if new != s:
+        open(p, "w").write(new)
+        fixed += 1
+print(f"local packages made dynamic: {fixed}")
+PY
+
 python3 "$here/../../tools/xcodeproj2xtool.py" "$dir/NetNewsWire.xcodeproj" \
     --target NetNewsWire ${BUNDLE_ID:+--bundle-id "$BUNDLE_ID"}
