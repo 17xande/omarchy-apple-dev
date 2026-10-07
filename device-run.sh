@@ -43,11 +43,12 @@ export PATH
 XT="$HOME/.local/bin/xtool"
 PMD3="$HOME/pymobile3-venv/bin/pymobiledevice3"
 
-MODE=usb; UDID=; RSD_HOST=; RSD_PORT=; PKG=; LLDB=0
+MODE=usb; UDID=; RSD_HOST=; RSD_PORT=; PKG=; LLDB=0; ATTACH=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --network) MODE=network ;;
     --lldb) LLDB=1 ;;
+    --attach) LLDB=1; ATTACH=1 ;;
     -u|--udid) UDID="${2:?--udid needs a value}"; shift ;;
     --rsd) MODE=rsd
       RSD_HOST="${2:?usage: --rsd HOST PORT PACKAGE}"
@@ -161,7 +162,12 @@ usb)
   echo "== 4. Build, sign, install, launch =="
   # Signing uses your Apple ID (free tier works); the first deploy creates a free
   # provisioning profile for your device.
-  if [ "$LLDB" = 0 ]; then
+  if [ "$ATTACH" = 1 ]; then
+    # --attach: the app is already installed (for example a debug build copied from another host);
+    # only the LLDB session runs. The bundle id comes from xtool.yml.
+    echo "== 5. LLDB =="
+    lldb_session
+  elif [ "$LLDB" = 0 ]; then
     $XT dev run "${UDID_ARGS[@]}"
   else
     # LLDB launches the app itself, stopped, so breakpoints in startup code hit.
