@@ -353,7 +353,7 @@ CATALOG_COLORS = {
     "placeholderTextColor": (b"0.6477062404\x00", b"0.6 1"),
     "selectedTextColor": (b"0\x00", b"0 1"),
     "textBackgroundColor": (b"1\x00", b"1 1"),
-    "selectedTextBackgroundColor": (b"0.6666666667\x00", b"0.6666666667 1"),
+    "selectedTextBackgroundColor": (b"0.602715373\x00", b"0.6666666667 1"),
     "keyboardFocusIndicatorColor": (b"0.213Second\x00", b"0.213 1"),
     "controlAccentColor": (b"0.09019608\x00", b"0.352941 0.666667 0.913725 1"),
     "controlTextColor": (b"0\x00", b"0 1"),
@@ -378,8 +378,23 @@ CATALOG_COLORS = {
 }
 
 
+def int_fit(v):
+    """Apple picks the smallest signed width; negatives go INT64
+    (probe About: 0/13/16 -> INT8, 256/2049 -> INT16, -1 -> INT64)."""
+    if v < 0:
+        return (N.INT64, v)
+    if v < 128:
+        return (N.INT8, v)
+    if v < 32768:
+        return (N.INT16, v)
+    if v < 0x80000000:
+        return (N.INT32, v)
+    return (N.INT64, v)
+
+
 def _fmt_g(v):
-    return f"{float(v):g}"
+    f = float(v)
+    return str(int(f)) if f == int(f) and abs(f) < 1e15 else f"{f:g}"
 
 
 def _fmt10(v):
@@ -443,7 +458,6 @@ class MacBuilder(I.Builder):
         self.white_colors = {}
         self.custom_colors = {}
         self.cursors = {}
-        self.underline = None
         self.blue = None
         self.image_decls = {}   # <image name=...> elements from <resources>
         self.colorspace = None  # shared Generic Gray space
@@ -451,7 +465,17 @@ class MacBuilder(I.Builder):
         self.late = []          # unresolved _Late refs
         self.cons_order = {}    # view xib id -> constraint ids in Apple order
         self.localize = False   # .lproj xibs wrap user strings
+        self.nums = {}          # NSNumber intern pool by numeric value
 
+    def number(self, typ, v):
+        """Apple pools NSNumbers across the whole archive by value (probe About:
+        the oid for 11 reuses the style descriptor's NS.dblval 11.0 object)."""
+        o = self.nums.get(float(v))
+        if o is None:
+            o = self.new("NSNumber")
+            o.add("NS.intval" if typ == N.INT8 else "NS.dblval", typ, v)
+            self.nums[float(v)] = o
+        return o
 
     def ref(self, obj):
         if isinstance(obj, _Late):
@@ -477,7 +501,7 @@ class MacBuilder(I.Builder):
             o.add("NSName", *self.ref(self.string(
                 ".AppleSystemUIFontBold" if bold else ".AppleSystemUIFont")))
             o.add("NSSize", *self.float64(size))
-            o.add("NSfFlags", N.INT16, 16)
+            o.add("NSfFlags", *int_fit(16))
             o.add("NSTextStyleDescriptor", *self.ref(self._style_descriptor(usage, size)))
             o.add("NSHasWidth", *self.boolean(True))
             self.fonts[key] = o
@@ -490,7 +514,7 @@ class MacBuilder(I.Builder):
             o.add("NSName", *self.ref(self.string(".AppleSystemUIFont")))
             o.add("NSFontUsesAppearanceFontSize", *self.boolean(False))
             o.add("NSSize", *self.float64(13.0))
-            o.add("NSfFlags", N.INT16, 1044)
+            o.add("NSfFlags", *int_fit(1044))
             self.fonts[key] = o
             return o
         name = fd_el.get("name")
@@ -501,7 +525,7 @@ class MacBuilder(I.Builder):
             o = self.new("NSFont")
             o.add("NSName", *self.ref(self.string(name)))
             o.add("NSSize", *self.float64(float(fd_el.get("size", 13))))
-            o.add("NSfFlags", N.INT16, 16)
+            o.add("NSfFlags", *int_fit(16))
             self.fonts[key] = o
             return o
         meta = fd_el.get("metaFont")
@@ -520,7 +544,7 @@ class MacBuilder(I.Builder):
         o = self.new("NSFont")
         o.add("NSName", *self.ref(self.string(FONT_NAMES[meta])))
         o.add("NSSize", *self.float64(size))
-        o.add("NSfFlags", N.INT16, flags)
+        o.add("NSfFlags", *int_fit(flags))
         self.fonts[key] = o
         return o
 
@@ -528,19 +552,15 @@ class MacBuilder(I.Builder):
         key = ("desc", usage)
         if key in self.fonts:
             return self.fonts[key]
+        o = self.new("NSFontDescriptor")
         attrs = self.new("NSDictionary")
         attrs.add("NSInlinedValue", *self.boolean(False))
         attrs.add("UINibEncoderEmptyKey", *self.ref(self.string("NSCTFontSizeCategoryAttribute")))
-        num = self.new("NSNumber")
-        num.add("NS.intval", N.INT8, 3)
-        attrs.add("UINibEncoderEmptyKey", *self.ref(num))
+        attrs.add("UINibEncoderEmptyKey", *self.ref(self.number(N.INT8, 3)))
         attrs.add("UINibEncoderEmptyKey", *self.ref(self.string("NSCTFontUIUsageAttribute")))
         attrs.add("UINibEncoderEmptyKey", *self.ref(self.string("UICTFontTextStyle" + usage)))
         attrs.add("UINibEncoderEmptyKey", *self.ref(self.string("NSFontSizeAttribute")))
-        sznum = self.new("NSNumber")
-        sznum.add("NS.dblval", N.DOUBLE, size)
-        attrs.add("UINibEncoderEmptyKey", *self.ref(sznum))
-        o = self.new("NSFontDescriptor")
+        attrs.add("UINibEncoderEmptyKey", *self.ref(self.number(N.DOUBLE, size)))
         o.add("NSFontDescriptorAttributes", *self.ref(attrs))
         o.add("NSFontDescriptorOptions", N.INT64, 2147517444)
         self.fonts[key] = o
@@ -612,12 +632,12 @@ class MacBuilder(I.Builder):
     def catalog_color(self, catalog, name, where):
         if catalog != "System":
             raise I.XibError(f"color catalog {catalog!r} not probed ({where})")
-        if name == "textColor":
-            name = "controlTextColor"  # alias archived under its definition
+        if name == "linkColor":
+            return self._named_blue(name)
         if name == "textInsertionPointColor":
-            name = "systemBlueColor"
+            return self._named_blue(name, where=where, inner_name="systemBlueColor")
         if name == "systemBlueColor":
-            return self._blue_color()
+            return self._named_blue(name)
         if name not in CATALOG_COLORS:
             raise I.XibError(f"System color {name!r} not probed ({where})")
         if name in self.catalog_colors:
@@ -626,10 +646,26 @@ class MacBuilder(I.Builder):
         o.add("NSColorSpace", *self.int8(6))
         o.add("NSCatalogName", *self.ref(self.string(catalog)))
         o.add("NSColorName", *self.ref(self.string(name)))
-        if name == "linkColor":
-            o.add("NSColor", *self.ref(self._blue_color()))
+        o.add("NSColor", *self.ref(self.white_color(*CATALOG_COLORS[name])))
+        self.catalog_colors[name] = o
+        return o
+
+    def _named_blue(self, name, where=None, inner_name=None):
+        """Catalog color wrapper around the shared blue (probe About:
+        systemBlueColor -> raw sRGB blue; textInsertionPointColor -> the
+        systemBlueColor wrapper; linkColor -> the raw blue). The wrapper
+        object is allocated before its inner color (probe About [74..78])."""
+        if name in self.catalog_colors:
+            return self.catalog_colors[name]
+        o = self.new("NSColor")
+        o.add("NSColorSpace", *self.int8(6))
+        o.add("NSCatalogName", *self.ref(self.string("System")))
+        o.add("NSColorName", *self.ref(self.string(name)))
+        if inner_name is not None:
+            inner = self.catalog_color("System", inner_name, where)
         else:
-            o.add("NSColor", *self.ref(self.white_color(*CATALOG_COLORS[name])))
+            inner = self._blue_color()
+        o.add("NSColor", *self.ref(inner))
         self.catalog_colors[name] = o
         return o
 
@@ -665,8 +701,15 @@ def _custom_object(b, el, class_name, where):
     return o
 
 
+def _translates(el):
+    """translatesAutoresizingMaskIntoConstraints=NO, but a fixedFrame canvas
+    element keeps the autoresizing path (probe About field/scrollView)."""
+    return (el.get("translatesAutoresizingMaskIntoConstraints") == "NO"
+            and el.get("fixedFrame") != "YES")
+
+
 def _vflags(el, where, solved=False):
-    translates = el.get("translatesAutoresizingMaskIntoConstraints") == "NO"
+    translates = _translates(el)
     if translates:
         v = 268
     else:
@@ -816,9 +859,13 @@ def _cell(b, el, control, where, owner_id=None, cell_cls="NSTextFieldCell"):
 
 
 def _field(b, el, where, superview, id_map, parent=None):
-    """<textField>: NSTextField with its cell; returns (obj, [(obj, parent)])."""
+    """<textField>: NSTextField (NSClassSwapper when customClass, probe About
+    LinkLabel) with its cell; returns (obj, [(obj, parent)])."""
     guides = {}
-    o = b.new("NSTextField")
+    o = b.new("NSClassSwapper" if el.get("customClass") else "NSTextField")
+    if el.get("customClass"):
+        o.add("NSClassName", *b.ref(b.string(I._swift_class(el))))
+        o.add("NSOriginalClassName", *b.ref(b.string("NSTextField")))
     o.add("NSNextResponder", *(b.ref(superview) if superview is not None else (N.NIL, None)))
     o.add("NSNibTouchBar", *(N.NIL, None))
     v, vt = _vflags(el, where)
@@ -826,7 +873,7 @@ def _field(b, el, where, superview, id_map, parent=None):
     o.add("NSFrame", *b.ref(b.string(_rect(el, "frame", where))))
     o.add("NSSuperview", *b.ref(superview))
     o.add("NSViewWantsBestResolutionOpenGLSurface", *b.boolean(False))
-    if el.get("translatesAutoresizingMaskIntoConstraints") == "NO":
+    if _translates(el):
         o.add("NSDoNotTranslateAutoresizingMask", *b.boolean(False))
     h, v2 = el.get("horizontalHuggingPriority"), el.get("verticalHuggingPriority")
     if (h is not None and h != "250") or (v2 is not None and v2 != "750"):
@@ -876,6 +923,8 @@ def _field(b, el, where, superview, id_map, parent=None):
     o.add("NSControlWritingDirection", N.INT64, -1)
     o.add("NSControlSendActionMask", *b.int8(4))
     o.add("NSTextFieldAlignmentRectInsetsVersion", *b.int8(2))
+    if el.get("contentType"):
+        o.add("NSTextContentType", *b.ref(b.string(el.get("contentType"))))
     o.add("NSAllowsWritingTools", *b.boolean(False))
     o.add("NSTextFieldAllowsWritingToolsAffordance", *b.boolean(True))
     o.add("NS.resolvesNaturalAlignmentWithBaseWritingDirection", *b.boolean(True))
@@ -959,7 +1008,7 @@ def _view(b, el, where, superview=None, id_map=None, guides=None, parent=None,
     if el.get("alphaValue") is not None:
         o.add("NSViewAlphaValue", *b.float64(float(el.get("alphaValue"))))
     o.add("NSViewWantsBestResolutionOpenGLSurface", *b.boolean(False))
-    if superview is not None and el.get("translatesAutoresizingMaskIntoConstraints") == "NO":
+    if superview is not None and _translates(el):
         o.add("NSDoNotTranslateAutoresizingMask", *b.boolean(False))
     cons_el = el.find("constraints")
     cons = []
@@ -1039,9 +1088,13 @@ def _build_element(b, el, where, superview, id_map, guides, parent=None, root=Fa
     raise I.XibError(f"unsupported element <{el.tag}> ({where})")
 
 
-def _window(b, el, where, id_map, parent=None):
-    """<window> -> NSWindowTemplate with the probed key order."""
-    o = b.new("NSWindowTemplate")
+def _window(b, el, where, id_map, parent=None, obj=None):
+    """<window> -> NSWindowTemplate with the probed key order.
+
+    obj is pre-allocated for a visible-at-launch window: the canvas inlines
+    the whole content tree right after the window head (probe About), with the
+    window in NSVisibleWindows and the trailing keys after the tree."""
+    o = obj if obj is not None else b.new("NSWindowTemplate")
     mask = el.find("windowStyleMask[@key='styleMask']")
     style = 0
     if mask is not None:
@@ -1086,22 +1139,17 @@ def _window(b, el, where, id_map, parent=None):
     if min_sz is not None:
         o.add("NSWindowContentMinSize", *b.ref(b.string(min_sz)))
     cv = el.find("view[@key='contentView']")
+    cv_pairs = []
     if cv is not None:
-        b.cv_rect = cv.find("rect[@key='frame']")
-        cr = el.find("rect[@key='contentRect']")
-        b.cv_content_rect = (float(cr.get("width")), float(cr.get("height"))) if cr is not None else None
-        r0 = cv.find("rect[@key='frame']")
-        b.cv_solved = (cr is not None and r0 is not None
-                       and (float(r0.get("width")), float(r0.get("height"))) != b.cv_content_rect)
-        b.cv_wants_layer = cv.get("wantsLayer") == "YES"
-        _cv_obj, cv_pairs = _build_element(b, cv, where, superview=None,
-                                           id_map=id_map, guides={}, parent=o)
-        b.cv_solved = False
-        o.add("NSWindowView", *b.ref(_cv_obj))
+        if obj is not None:
+            cv_obj, cv_pairs = _window_content(b, el, cv, o, where, id_map)
+            o.add("NSWindowView", *b.ref(cv_obj))
     else:
         b.cv_rect = None
-        cv_pairs = []
         o.add("NSWindowView", *(N.NIL, None))
+    if cv is not None and obj is None:
+        cv_obj, cv_pairs = _window_content(b, el, cv, o, where, id_map)
+        o.add("NSWindowView", *b.ref(cv_obj))
     o.add("NSScreenRect", *b.ref(b.string(_rect(el, "screenRect", where))))
     if min_sz is not None:
         # content min/max plus the titled-window title bar (probe win-minmax, +24)
@@ -1123,6 +1171,19 @@ def _window(b, el, where, id_map, parent=None):
     o.add("NSWindowIsRestorable", *b.boolean(el.get("restorable") == "NO"))
     o.add("NSMinFullScreenContentSize", *b.ref(b.string("{0, 0}")))
     o.add("NSMaxFullScreenContentSize", *b.ref(b.string("{0, 0}")))
+    if el.get("titleVisibility"):
+        if el.get("titleVisibility") != "hidden":
+            raise I.XibError(f"titleVisibility {el.get('titleVisibility')!r} not probed ({where})")
+        o.add("NSWindowTitleVisibility", *b.int8(1))
+    if el.get("titlebarAppearsTransparent"):
+        if el.get("titlebarAppearsTransparent") != "YES":
+            raise I.XibError(f"titlebarAppearsTransparent "
+                             f"{el.get('titlebarAppearsTransparent')!r} not probed ({where})")
+        o.add("NSTitlebarAppearsTransparent", *b.boolean(False))
+    if el.get("separatorStyle"):
+        if el.get("separatorStyle") != "none":
+            raise I.XibError(f"separatorStyle {el.get('separatorStyle')!r} not probed ({where})")
+        o.add("NSTitlebarSeparatorStyle", *b.int8(1))
     if el.get("tabbingMode"):
         if el.get("tabbingMode") not in TABBING_MODE:
             raise I.XibError(f"tabbingMode {el.get('tabbingMode')!r} not probed ({where})")
@@ -1135,6 +1196,21 @@ def _window(b, el, where, id_map, parent=None):
         o.add("IBClassReference", *b.ref(_classref(b, el.get("customClass"), None, None)))
     id_map[el.get("id")] = o
     return o, [(o, parent)] + cv_pairs
+
+
+def _window_content(b, el, cv, o, where, id_map):
+    """Build the contentView inline; returns (obj, pairs)."""
+    b.cv_rect = cv.find("rect[@key='frame']")
+    cr = el.find("rect[@key='contentRect']")
+    b.cv_content_rect = (float(cr.get("width")), float(cr.get("height"))) if cr is not None else None
+    r0 = cv.find("rect[@key='frame']")
+    b.cv_solved = (cr is not None and r0 is not None
+                   and (float(r0.get("width")), float(r0.get("height"))) != b.cv_content_rect)
+    b.cv_wants_layer = cv.get("wantsLayer") == "YES"
+    cv_obj, pairs = _build_element(b, cv, where, superview=None,
+                                   id_map=id_map, guides={}, parent=o)
+    b.cv_solved = False
+    return cv_obj, pairs
 
 
 def _conn_blocks(objects_el):
@@ -1215,6 +1291,20 @@ def compile_xib(path):
 
     vis = b.new("NSMutableSet")
     vis.add("NSInlinedValue", *b.boolean(False))
+
+    # Windows without visibleAtLaunch="NO" are built up front, before the
+    # connections array (probe About: set -> window template with the full
+    # content tree inlined -> trailing window keys -> connections last).
+    keys = []
+    vis_ids = set()
+    for w_el in objects:
+        if w_el.tag == "window" and w_el.get("visibleAtLaunch") != "NO":
+            o = b.new("NSWindowTemplate")
+            vis.add("UINibEncoderEmptyKey", *b.ref(o))
+            _wobj, wkeys = _window(b, w_el, where, id_map, parent=owner, obj=o)
+            keys.extend(wkeys)
+            vis_ids.add(w_el.get("id"))
+
     conns_arr = b.new("NSMutableArray")
     conns_arr.add("NSInlinedValue", *b.boolean(False))
 
@@ -1284,7 +1374,7 @@ def compile_xib(path):
     # NSObjectsKeys follows document pre-order (probe DetailView/NothingInspector),
     # not the lazy build order: window/contentView or view, cell after its control,
     # subviews, then the view's constraints; the parent array mirrors it.
-    keys = []
+    # Visible-at-launch windows were collected when built up front.
 
     def collect(el, parent):
         obj = id_map.get(el.get("id"))
@@ -1332,6 +1422,8 @@ def compile_xib(path):
     for el in objects:
         if el.get("id") in ("-1", "-2", "-3") or el.tag == "placeholder":
             continue
+        if el.get("id") in vis_ids:
+            continue
         collect(el, owner)
 
     # NSObjectsKeys: NSApplication proxy, then the collected (obj, parent) pairs.
@@ -1364,10 +1456,8 @@ def compile_xib(path):
     oids_values_arr.add("NSInlinedValue", *b.boolean(False))
     numbers = []
     for i in range(1, len(oids) + 1):
-        n = b.new("NSNumber")
-        n.add("NS.intval", *b.int8(i))
-        numbers.append(n)
-        oids_values_arr.add("UINibEncoderEmptyKey", *b.ref(n))
+        numbers.append(b.number(N.INT8, i))
+        oids_values_arr.add("UINibEncoderEmptyKey", *b.ref(numbers[-1]))
     access_conns = b.new("NSMutableArray")
     access_conns.add("NSInlinedValue", *b.boolean(False))
     access_oids = b.new("NSArray")
@@ -1517,15 +1607,17 @@ def _image_view(b, el, where, superview, id_map, parent=None):
     if superview is not None:
         o.add("NSSuperview", *b.ref(superview))
     o.add("NSViewWantsBestResolutionOpenGLSurface", *b.boolean(False))
-    if el.get("translatesAutoresizingMaskIntoConstraints") == "NO":
+    if _translates(el):
         o.add("NSDoNotTranslateAutoresizingMask", *b.boolean(False))
     cons_el = el.find("constraints")
+    cons = []
     if cons_el is not None and cons_el.findall("constraint"):
         carr = b.new("NSArray")
         carr.add("NSInlinedValue", *b.boolean(False))
         els = I._constraint_order(el, cons_el.findall("constraint"), where, mac=True)
         for c in els:
             con = _constraint(b, c, o, el.get("id"), id_map, {}, {}, where)
+            cons.append(con)
             carr.add("UINibEncoderEmptyKey", *b.ref(con))
         b.cons_order[el.get("id")] = [c.get("id") for c in els]
         o.add("NSViewConstraints", *b.ref(carr))
@@ -1541,7 +1633,7 @@ def _image_view(b, el, where, superview, id_map, parent=None):
     if cell_el is None:
         raise I.XibError(f"<imageView> without imageCell ({where})")
     cell = b.new("NSImageCell")
-    cell.add("NSCellFlags", N.INT32, 0)
+    cell.add("NSCellFlags", *int_fit(0))
     cell.add("NSCellFlags2", N.INT32, 33554432)
     img = cell_el.get("image")
     if img is None:
@@ -1555,7 +1647,7 @@ def _image_view(b, el, where, superview, id_map, parent=None):
     cell.add("NSScale", *b.int8(IMAGE_SCALE[scale]))
     cell.add("NSStyle", *b.int8(0))
     cell.add("NSAnimates", *b.boolean(True))
-    cell.add("NSImageAnimation", N.INT32, -1)
+    cell.add("NSImageAnimation", *int_fit(-1))
     o.add("NSCell", *b.ref(cell))
     id_map[el.get("id") + "#cell"] = cell
     id_map[cell_el.get("id")] = cell
@@ -1571,7 +1663,7 @@ def _image_view(b, el, where, superview, id_map, parent=None):
     o.add("NSEditable", *b.boolean(cell_el.get("editable") == "YES"))
     o.add("NSImageViewPlaceholderPrecedence", *b.int8(0))
     o.add("IBNSShadowedSymbolConfiguration", *(N.NIL, None))
-    return o, [(o, parent), (cell, o)]
+    return o, [(o, parent), (cell, o)] + [(c, o) for c in cons]
 
 
 def _cursor(b, hotspot, kind):
@@ -1580,17 +1672,13 @@ def _cursor(b, hotspot, kind):
         return b.cursors[key]
     o = b.new("NSCursor")
     o.add("NSHotSpot", *b.ref(b.string(hotspot)))
-    o.add("NSCursorType", N.INT32, kind)
+    o.add("NSCursorType", *int_fit(kind))
     b.cursors[key] = o
     return o
 
 
 def _underline(b):
-    if b.underline is None:
-        o = b.new("NSNumber")
-        o.add("NS.intval", N.INT8, 1)
-        b.underline = o
-    return b.underline
+    return b.number(N.INT8, 1)
 
 
 def _text_view(b, el, where, superview):
@@ -1604,8 +1692,12 @@ def _text_view(b, el, where, superview):
     v, vt = _vflags(el, where)
     o.add("NSvFlags", vt, v)
     r = el.find("rect[@key='frame']")
-    o.add("NSFrameSize", *b.ref(b.string("{%s, %s}" % (_fmt_g(r.get("width")),
-                                                       _fmt_g(r.get("height"))))))
+    vert = el.get("verticallyResizable") == "YES"
+    if vert:
+        o.add("NSFrameSize", *b.ref(b.string("{%s, %s}" % (_fmt_g(r.get("width")),
+                                                           _fmt_g(r.get("height"))))))
+    else:
+        o.add("NSFrame", *b.ref(b.string(_rect(el, "frame", where))))
     max_sz = el.find("size[@key='maxSize']")
     max_s = "{%s, %s}" % (_fmt_g(max_sz.get("width")), _fmt_g(max_sz.get("height"))) \
         if max_sz is not None else "{0, 0}"
@@ -1633,9 +1725,9 @@ def _text_view(b, el, where, superview):
 
     sd = b.new("NSTextViewSharedData")
     sd.add("NSAutomaticTextCompletionDisabled", *b.boolean(False))
-    sd.add("NSFlags", N.INT32, 67111429)
+    sd.add("NSFlags", *int_fit(67111429 if vert else 2049))
     sd.add("NSMoreFlags", *b.int8(3))
-    sd.add("NSTextCheckingTypes", N.INT64, 0)
+    sd.add("NSTextCheckingTypes", *int_fit(0))
     sd.add("NSMarkedAttributes", *(N.NIL, None))
     bg = el.find("color[@key='backgroundColor']")
     sd.add("NSBackgroundColor", *b.ref(_color_ref(b, bg, where)))
@@ -1663,7 +1755,7 @@ def _text_view(b, el, where, superview):
     sd.add("NSTextFinder", *(N.NIL, None))
     sd.add("NSPreferredTextFinderStyle", *b.int8(0))
     sd.add("NSTextHighlightAttributes", *(N.NIL, None))
-    sd.add("NSWritingToolsFlags", N.INT32, 256)
+    sd.add("NSWritingToolsFlags", *int_fit(256))
 
     o.add("NSSuperview", *(b.ref(superview) if superview is not None else (N.NIL, None)))
     o.add("NSViewIsLayerTreeHost", *b.boolean(False))
@@ -1673,8 +1765,9 @@ def _text_view(b, el, where, superview):
     o.add("IBNSClipsToBounds", *b.int8(0))
     o.add("NSTextContainer", *b.ref(tc))
     o.add("NSSharedData", *b.ref(sd))
-    o.add("NSTVFlags", N.INT16, 134)
-    o.add("NSMaxSize", *b.ref(b.string(max_s)))
+    o.add("NSTVFlags", N.INT16, 134 if vert else 132)
+    if vert:
+        o.add("NSMaxSize", *b.ref(b.string(max_s)))
     o.add("NSDelegate", *(N.NIL, None))
     tc_el = el.find("color[@key='textColor']")
     if tc_el is not None:
@@ -1704,7 +1797,7 @@ def _scroller(b, el, where, scroll):
     o.add("NSControlUsesSingleLineMode", *b.boolean(True))
     o.add("NSControlTextAlignment", *b.int8(0))
     o.add("NSControlLineBreakMode", *b.int8(0))
-    o.add("NSControlWritingDirection", N.INT64, 0)
+    o.add("NSControlWritingDirection", *int_fit(0))
     o.add("NSControlSendActionMask", *b.int8(4))
     if el.get("hidden") == "YES":
         o.add("NSsFlags", *b.int8(1))
@@ -1774,6 +1867,10 @@ def _scroll_view(b, el, where, superview, id_map, parent=None):
     v_el = el.find("scroller[@key='verticalScroller']")
     hs = _scroller(b, h_el, where, o) if h_el is not None else None
     vs = _scroller(b, v_el, where, o) if v_el is not None else None
+    if hs is not None:
+        arr.add("UINibEncoderEmptyKey", *b.ref(hs))
+    if vs is not None:
+        arr.add("UINibEncoderEmptyKey", *b.ref(vs))
     o.add("NSFrame", *b.ref(b.string(_rect(el, "frame", where))))
     if superview is not None:
         o.add("NSSuperview", *b.ref(superview))
@@ -1804,7 +1901,7 @@ def _scroll_view(b, el, where, superview, id_map, parent=None):
     o.add("NSMinMagnification", N.DOUBLE, 0.25)
     o.add("NSMaxMagnification", N.DOUBLE, 4.0)
     o.add("NSMagnification", N.DOUBLE, 1.0)
-    pairs = [(o, parent), (cv, o)]
+    pairs = [(o, parent), (cv, o), (doc, cv)]
     if hs is not None:
         pairs.append((hs, o))
     if vs is not None:
@@ -1834,7 +1931,7 @@ def _button(b, el, where, superview, id_map, parent=None):
     if superview is not None:
         o.add("NSSuperview", *b.ref(superview))
     o.add("NSViewWantsBestResolutionOpenGLSurface", *b.boolean(False))
-    if el.get("translatesAutoresizingMaskIntoConstraints") == "NO":
+    if _translates(el):
         o.add("NSDoNotTranslateAutoresizingMask", *b.boolean(False))
     h, v2 = el.get("horizontalHuggingPriority"), el.get("verticalHuggingPriority")
     if h is not None and v2 is not None:
@@ -1965,7 +2062,7 @@ def _popup(b, el, where, superview, id_map, parent=None):
     if superview is not None:
         o.add("NSSuperview", *b.ref(superview))
     o.add("NSViewWantsBestResolutionOpenGLSurface", *b.boolean(False))
-    if el.get("translatesAutoresizingMaskIntoConstraints") == "NO":
+    if _translates(el):
         o.add("NSDoNotTranslateAutoresizingMask", *b.boolean(False))
     h, v2 = el.get("horizontalHuggingPriority"), el.get("verticalHuggingPriority")
     if (h is not None and h != "750") or (v2 is not None and v2 != "750"):
