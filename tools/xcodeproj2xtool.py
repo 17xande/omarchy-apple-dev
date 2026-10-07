@@ -1554,6 +1554,16 @@ class Generator:
             "DEVELOPMENT_LANGUAGE": dev_region or "en",
             "PRODUCT_BUNDLE_PACKAGE_TYPE": "XPC!" if extension else "APPL",
         })
+        if self.forced_bundle_id:
+            # An App Group named after the original app bundle id cannot be granted
+            # to another team; follow the --bundle-id override.
+            orig = self.bundle_id(layers)
+            for k, v in flat.items():
+                if not isinstance(v, str):
+                    continue
+                g = self.expand(v, [flat])
+                if g.startswith("group.") and (orig + ".").startswith(g[6:] + "."):
+                    flat[k] = f"group.{self.forced_bundle_id}"
 
         kept_prefixes = []
 
