@@ -4411,7 +4411,8 @@ def self_test():
         if N.encode(N.parse(raw)) != raw:
             failed.append(f"round-trip {os.path.basename(p)}")
     for src in sorted(glob.glob(os.path.join(_TOOLS, "..", "tests", "ibtool",
-                                             "src-mac", "*.xib"))):
+                                             "src-mac", "**", "*.xib"),
+                                recursive=True)):
         name = os.path.splitext(os.path.basename(src))[0]
         global TARGET_MODULE
         TARGET_MODULE = "NetNewsWire"

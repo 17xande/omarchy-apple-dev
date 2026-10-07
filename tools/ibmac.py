@@ -543,6 +543,10 @@ def _cell(b, el, control, where, owner_id=None, cell_cls="NSTextFieldCell"):
     if fd is None:
         raise I.XibError(f"<textFieldCell> without <font> ({where})")
     o.add("NSSupport", *b.ref(b.font(fd, where)))
+    if el.get("placeholderString") is not None:
+        o.add("NSPlaceholderString",
+              *b.ref(_localizable(b, el.get("id") or "", el.get("placeholderString"),
+                                  where, suffix=".placeholderString")))
     o.add("NSControlView", *b.ref(control))
     for key in ("backgroundColor", "textColor"):
         c = el.find(f"color[@key='{key}']")
@@ -600,10 +604,11 @@ def _field(b, el, where, superview, id_map, parent=None):
     o.add("NSCell", *b.ref(cell))
     id_map[el.get("id") + "#cell"] = cell
     o.add("NSAllowsLogicalLayoutDirection",
-          *b.boolean(el.get("horizontalHuggingPriority") is not None
-                     or cell_el.get("scrollable") == "YES"
-                     or (cell_el.get("selectable") == "YES"
-                         and el.get("editable") is None)))
+          *b.boolean(not b.localize
+                     and (el.get("horizontalHuggingPriority") is not None
+                          or cell_el.get("scrollable") == "YES"
+                          or (cell_el.get("selectable") == "YES"
+                              and el.get("editable") is None))))
     o.add("NSControlSize", *b.int8(0))
     o.add("NSControlContinuous", *b.boolean(True))
     o.add("NSControlRefusesFirstResponder", *b.boolean(True))
@@ -918,9 +923,11 @@ def compile_xib(path):
         raise I.XibError(f"{path}: no <objects> element")
     where = os.path.basename(path)
     b = MacBuilder()
-    # Probe: a window with oneShot="NO" localizes every user string
-    # (NSLocalizableString); all other xibs keep plain pooled strings.
-    b.localize = any(w.get("oneShot") == "NO" for w in objects.findall("window"))
+    # Oracle (reg-nnw-1818): xibs inside an .lproj directory are built by the
+    # localized-variant step (project deployment target 15.0), which wraps user
+    # strings in NSLocalizableString and clears NSAllowsLogicalLayoutDirection;
+    # xibs outside any .lproj keep plain strings and the default-target flags.
+    b.localize = ".lproj" in path
 
     root = b.new("NSObject")
     ibd = b.new("NSIBObjectData")
@@ -1188,7 +1195,7 @@ def _button(b, el, where, superview, id_map, parent=None):
     o.add("NSCell", *b.ref(cell))
     id_map[el.get("id") + "#cell"] = cell
     id_map[cell_el.get("id")] = cell
-    o.add("NSAllowsLogicalLayoutDirection", *b.boolean(True))
+    o.add("NSAllowsLogicalLayoutDirection", *b.boolean(not b.localize))
     o.add("NSControlSize", *b.int8(0))
     o.add("NSControlContinuous", *b.boolean(True))
     o.add("NSControlRefusesFirstResponder", *b.boolean(True))
@@ -1315,7 +1322,7 @@ def _popup(b, el, where, superview, id_map, parent=None):
     o.add("NSCell", *b.ref(cell))
     id_map[cell_el.get("id")] = cell
     id_map[el.get("id") + "#cell"] = cell
-    o.add("NSAllowsLogicalLayoutDirection", *b.boolean(True))
+    o.add("NSAllowsLogicalLayoutDirection", *b.boolean(not b.localize))
     o.add("NSControlSize", *b.int8(0))
     o.add("NSControlContinuous", *b.boolean(True))
     o.add("NSControlRefusesFirstResponder", *b.boolean(True))
