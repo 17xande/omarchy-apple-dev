@@ -451,6 +451,14 @@ class _Late:
         self.obj = None
 
 
+class _DeferredPairs:
+    """(obj, parent) key pairs computed later: prototype cells build lazily
+    at connection time, after the window tree produced the pair list."""
+
+    def __init__(self, fn):
+        self.fn = fn
+
+
 class MacBuilder(I.Builder):
     """Adds the Mac-side object pools (fonts, colors, guides) to the iOS Builder."""
 
@@ -883,7 +891,8 @@ def _constraint(b, el, owner_obj, owner_id, id_map, guides, guide_kinds, where,
     return o
 
 
-def _cell(b, el, control, where, owner_id=None, cell_cls="NSTextFieldCell"):
+def _cell(b, el, control, where, owner_id=None, cell_cls="NSTextFieldCell",
+          id_map=None):
     """<textFieldCell>: NSCellFlags/Flags2 from the probe matrix."""
     o = b.new(cell_cls)
     flags = 0x4000000
@@ -923,11 +932,20 @@ def _cell(b, el, control, where, owner_id=None, cell_cls="NSTextFieldCell"):
     o.add("NSCellFlags2", N.INT32, _i32(flags2))
     title_el = el.find("string[@key='title']")
     title = el.get("title", title_el.text if title_el is not None and title_el.text else "")
-    o.add("NSContents", *b.ref(_localizable(b, owner_id or "", title, where)))
+    # formatter cells drop NSContents (probe DinosaursWindow pSw); plain cells
+    # archive it even when empty (probe DetailView [22])
+    if el.find("numberFormatter[@key='formatter']") is None:
+        o.add("NSContents", *b.ref(_localizable(b, owner_id or "", title, where)))
     fd = el.find("font[@key='font']")
     if fd is None:
         raise I.XibError(f"<textFieldCell> without <font> ({where})")
     o.add("NSSupport", *b.ref(b.font(fd, where)))
+    fel = el.find("numberFormatter[@key='formatter']")
+    if fel is not None:
+        fobj = _number_formatter(b, fel, where)
+        if id_map is not None and fel.get("id"):
+            id_map[fel.get("id")] = fobj
+        o.add("NSFormatter", *b.ref(fobj))
     if el.get("placeholderString") is not None:
         o.add("NSPlaceholderString",
               *b.ref(_localizable(b, el.get("id") or "", el.get("placeholderString"),
@@ -947,6 +965,98 @@ def _cell(b, el, control, where, owner_id=None, cell_cls="NSTextFieldCell"):
                                      if key == "textColor"
                                      and c.get("name") == "textColor"
                                      else c.get("name"), where)))
+    return o
+
+
+def _number_formatter(b, el, where):
+    """<numberFormatter> -> NSNumberFormatter (probe DinosaursWindow [46]):
+    fixed Apple template; only behavior/style/width/digits follow the xib."""
+    ns = el.get("numberStyle", "decimal")
+    if ns != "decimal":
+        raise I.XibError(f"numberStyle {ns!r} not probed ({where})")
+    beh = el.get("formatterBehavior", "default10_4")
+    if beh != "default10_4":
+        raise I.XibError(f"formatterBehavior {beh!r} not probed ({where})")
+    maxfrac = int(el.get("maximumFractionDigits", 3))
+    fmt = "#,##0" + ("." + "#" * maxfrac if maxfrac else "")
+
+    def bool_num(v):
+        key = ("boolval", bool(v))
+        n = b.bool_nums.get(key)
+        if n is None:
+            n = b.new("NSNumber")
+            n.add("NS.boolval", N.TRUE if v else N.FALSE, None)
+            b.bool_nums[key] = n
+        return n
+
+    o = b.new("NSNumberFormatter")
+    d = b.new("NSMutableDictionary")
+    d.add("NSInlinedValue", *b.boolean(False))
+    for k, kind, v in (
+            ("allowsFloats", "bool", False),
+            ("alwaysShowsDecimalSeparator", "bool", True),
+            ("formatWidth", "int", int(el.get("formatWidth", -1))),
+            ("formatterBehavior", "int", 1040),
+            ("generatesDecimalNumbers", "bool", True),
+            ("groupingSize", "int", 3),
+            ("lenient", "bool", True),
+            ("maximumFractionDigits", "int", maxfrac),
+            ("maximumIntegerDigits", "int",
+             int(el.get("maximumIntegerDigits", 2000000000))),
+            ("minimumFractionDigits", "int",
+             int(el.get("minimumFractionDigits", 0))),
+            ("minimumIntegerDigits", "int",
+             int(el.get("minimumIntegerDigits", 1))),
+            ("negativeInfinitySymbol", "str", "-\u221e"),
+            ("nilSymbol", "str", ""),
+            ("numberStyle", "int", 1),
+            ("paddingPosition", "int", 0),
+            ("positiveInfinitySymbol", "str", "+\u221e"),
+            ("roundingMode", "int", 4),
+            ("secondaryGroupingSize", "int", 0),
+            ("usesGroupingSeparator", "bool", False)):
+        d.add("UINibEncoderEmptyKey", *b.ref(b.string(k)))
+        if kind == "str":
+            d.add("UINibEncoderEmptyKey", *b.ref(b.string(v)))
+        elif kind == "int":
+            d.add("UINibEncoderEmptyKey", *b.ref(b.number(*int_fit(v))))
+        else:
+            d.add("UINibEncoderEmptyKey", *b.ref(bool_num(v)))
+    o.add("NS.attributes", *b.ref(d))
+    o.add("NS.positiveformat", *b.ref(b.string(fmt)))
+    o.add("NS.negativeformat", *b.ref(b.string(fmt)))
+    o.add("NS.positiveattrs", *(N.NIL, None))
+    o.add("NS.negativeattrs", *(N.NIL, None))
+    o.add("NS.zero", *(N.NIL, None))
+    nilattr = b.new("NSAttributedString")
+    nilattr.add("NSString", *b.ref(b.string("")))
+    o.add("NS.nil", *b.ref(nilattr))
+    nan = b.new("NSAttributedString")
+    nan.add("NSString", *b.ref(b.string("NaN")))
+    nanattrs = b.new("NSDictionary")
+    nanattrs.add("NSInlinedValue", *b.boolean(False))
+    nan.add("NSAttributes", *b.ref(nanattrs))
+    o.add("NS.nan", *b.ref(nan))
+    ph = b.new("NSDecimalNumberPlaceholder")
+    ph.add("NS.exponent", *b.int8(0))
+    ph.add("NS.length", *b.int8(0))
+    ph.add("NS.negative", *b.boolean(False))
+    ph.add("NS.compact", *b.boolean(True))
+    ph.add("NS.mantissa.bo", *b.int8(1))
+    ph.add("NS.mantissa", N.DATA, b"\x00" * 16)
+    o.add("NS.min", *b.ref(ph))
+    o.add("NS.max", *b.ref(ph))
+    rh = b.new("NSDecimalNumberHandler")
+    rh.add("NS.roundingmode", *b.int8(3))
+    rh.add("NS.raise.overflow", *b.boolean(False))
+    rh.add("NS.raise.underflow", *b.boolean(False))
+    rh.add("NS.raise.dividebyzero", *b.boolean(False))
+    o.add("NS.rounding", *b.ref(rh))
+    o.add("NS.decimal", *b.ref(b.string(".")))
+    o.add("NS.thousand", *b.ref(b.string(",")))
+    o.add("NS.hasthousands", *b.boolean(False))
+    o.add("NS.localized", *b.boolean(False))
+    o.add("NS.allowsfloats", *b.boolean(False))
     return o
 
 
@@ -974,6 +1084,7 @@ def _field(b, el, where, superview, id_map, parent=None):
     # probe FeedInspector [38]: the constraints array precedes the priority
     # strings on textFields
     cons_el = el.find("constraints")
+    cons = []
     if cons_el is not None and cons_el.findall("constraint"):
         carr = b.new("NSArray")
         carr.add("NSInlinedValue", *b.boolean(False))
@@ -981,6 +1092,7 @@ def _field(b, el, where, superview, id_map, parent=None):
         for c in els:
             con = _constraint(b, c, o, el.get("id"), id_map, guides, {}, where)
             carr.add("UINibEncoderEmptyKey", *b.ref(con))
+            cons.append(con)
         b.cons_order[el.get("id")] = [c.get("id") for c in els]
         o.add("NSViewConstraints", *b.ref(carr))
     h, v2 = el.get("horizontalHuggingPriority"), el.get("verticalHuggingPriority")
@@ -1002,7 +1114,8 @@ def _field(b, el, where, superview, id_map, parent=None):
     if cell_el is None:
         raise I.XibError(f"<textField> without textFieldCell ({where})")
     cell = _cell(b, cell_el, o, where, owner_id=cell_el.get("id"),
-                 cell_cls="NSSecureTextFieldCell" if secure else "NSTextFieldCell")
+                 cell_cls="NSSecureTextFieldCell" if secure else "NSTextFieldCell",
+                 id_map=id_map)
     locales = el.find("allowedInputSourceLocales")
     if locales is not None:
         # probe AccountsFeedbin [72]: array of the locale strings on the CELL
@@ -1022,6 +1135,10 @@ def _field(b, el, where, superview, id_map, parent=None):
                           or cell_el.get("scrollable") == "YES"
                           or (cell_el.get("selectable") == "YES"
                               and el.get("editable") is None))))
+    if el.get("allowsExpansionToolTips"):
+        # probe DinosaursWindow proto field [346]: attr archives INVERTED
+        o.add("NSControlAllowsExpansionToolTips",
+              *b.boolean(el.get("allowsExpansionToolTips") != "YES"))
     o.add("NSControlSize", *b.int8(0))
     o.add("NSControlContinuous", *b.boolean(True))
     o.add("NSControlRefusesFirstResponder", *b.boolean(True))
@@ -1046,7 +1163,12 @@ def _field(b, el, where, superview, id_map, parent=None):
     o.add("NS.resolvesNaturalAlignmentWithBaseWritingDirection", *b.boolean(True))
     id_map[el.get("id")] = o
     cell = id_map[el.get("id") + "#cell"]
-    return o, [(o, parent), (cell, o)]
+    pairs = [(o, parent), (cell, o)]
+    fel = cell_el.find("numberFormatter[@key='formatter']")
+    if fel is not None and fel.get("id") in id_map:
+        pairs.append((id_map[fel.get("id")], cell))
+    pairs.extend((con, o) for con in cons)
+    return o, pairs
 
 
 def lb_of(cell_el):
@@ -1329,7 +1451,7 @@ def _size_str(el):
     return "{%s, %s}" % (_fmt_g(r.get("width")), _fmt_g(r.get("height")))
 
 
-def _table_cell_view(b, el, where, superview, id_map, parent=None):
+def _table_cell_view(b, el, where, superview, id_map, parent=None, ident=None):
     """<tableCellView> prototype: NSTableCellView, swapper when customClass
     (probe golden SidebarCell: NSOriginalClassName NSTableCellView, no
     NSSuperview key, NSReuseIdentifierKey from the identifier)."""
@@ -1361,8 +1483,11 @@ def _table_cell_view(b, el, where, superview, id_map, parent=None):
     else:
         o.add("NSFrame", *b.ref(b.string(_rect(el, "frame", where))))
     o.add("NSViewWantsBestResolutionOpenGLSurface", *b.boolean(False))
-    if el.get("identifier"):
-        o.add("NSReuseIdentifierKey", *b.ref(b.string(el.get("identifier"))))
+    ident_attr = el.get("identifier") or ident
+    if ident_attr:
+        # embedded reusables fall back to the column identifier (probe
+        # DinosaursWindow 'account' proto: cell element has no identifier)
+        o.add("NSReuseIdentifierKey", *b.ref(b.string(ident_attr)))
     cons_el = el.find("constraints")
     if cons_el is not None and cons_el.findall("constraint"):
         # golden CurrentActivity [179]: NSViewConstraints after
@@ -1469,6 +1594,8 @@ def _build_element(b, el, where, superview, id_map, guides, parent=None, root=Fa
         return _field(b, el, where, superview, id_map, parent=parent)
     if el.tag == "button":
         return _button(b, el, where, superview, id_map, parent=parent)
+    if el.tag == "stepper":
+        return _stepper(b, el, where, superview, id_map, parent=parent)
     if el.tag == "popUpButton":
         return _popup(b, el, where, superview, id_map, parent=parent)
     if el.tag == "imageView":
@@ -2056,6 +2183,12 @@ def compile_xib(path):
     keys.extend(bind_key_pairs)  # userDefaultsControllers (probe CrashReporter [131])
     for late, menu_id in late_menus:
         late.obj = id_map[menu_id]
+    if any(isinstance(k, _DeferredPairs) for k in keys):
+        expanded = []
+        for k in keys:
+            expanded.extend(k.fn()) if isinstance(k, _DeferredPairs) \
+                else expanded.append(k)
+        keys = expanded
     values = [(nsapp, owner)]
     values.extend(keys)
     keys_arr.add("UINibEncoderEmptyKey", *b.ref(nsapp))
@@ -2241,8 +2374,20 @@ def _image_ref(b, name, where):
     o = b.new("NSCustomResource")
     o.add("NSClassName", *b.ref(b.string("NSImage")))
     o.add("NSResourceName", *b.ref(b.string(name)))
+    if el is not None and el.get("catalog") == "system":
+        # probe CurrentActivity circle [198]: catalog resources carry
+        # NSCatalogName before the namespace id
+        o.add("NSCatalogName", *b.ref(b.string("system")))
     o.add("IBNamespaceID", *b.ref(b.string("system")) if system else (N.NIL, None))
     size = "{%s, %s}" % (el.get("width", "0"), el.get("height", "0")) if el is not None else None
+    if name == "NSActionTemplate":
+        # probe DinosaursWindow [340]: the declared 20x20 archives as the
+        # template's intrinsic 19x19
+        size = "{19, 19}"
+    elif el is not None and el.get("catalog") == "system":
+        # probe CurrentActivity circle [198]: declared 15x15 archives as the
+        # symbol's intrinsic 32x32
+        size = "{32, 32}"
     if size is not None:
         val = b.new("NSValue")
         val.add("NS.special", *b.int8(2))
@@ -2613,6 +2758,7 @@ def _scroll_view(b, el, where, superview, id_map, parent=None):
     if _translates(el):
         o.add("NSDoNotTranslateAutoresizingMask", *b.boolean(False))
     cons_el = el.find("constraints")
+    scons = []
     if cons_el is not None and cons_el.findall("constraint"):
         carr2 = b.new("NSArray")
         carr2.add("NSInlinedValue", *b.boolean(False))
@@ -2620,6 +2766,7 @@ def _scroll_view(b, el, where, superview, id_map, parent=None):
         for c in els:
             con = _constraint(b, c, o, el.get("id"), id_map, {}, {}, where)
             carr2.add("UINibEncoderEmptyKey", *b.ref(con))
+            scons.append(con)
         b.cons_order[el.get("id")] = [c.get("id") for c in els]
         o.add("NSViewConstraints", *b.ref(carr2))
     gest = b.new("NSArray")
@@ -2662,10 +2809,18 @@ def _scroll_view(b, el, where, superview, id_map, parent=None):
     o.add("NSMaxMagnification", N.DOUBLE, 4.0)
     o.add("NSMagnification", N.DOUBLE, 1.0)
     pairs = [(o, parent), (cv, o), (doc, cv)]
+    if is_table:
+        pairs.append(_DeferredPairs(
+            lambda: _table_pairs(b, doc_el, id_map)))
     if hs is not None:
         pairs.append((hs, o))
     if vs is not None:
         pairs.append((vs, o))
+    if hv_el0 is not None and hv_el0.get("id") in id_map:
+        # golden DinosaursWindow [120]: headerView keys under the scroll,
+        # after the scrollers
+        pairs.append((id_map[hv_el0.get("id")], o))
+    pairs.extend((con, o) for con in scons)
     return o, pairs
 
 
@@ -2778,6 +2933,76 @@ def _button(b, el, where, superview, id_map, parent=None):
     return o, [(o, parent)] + [(con, o) for con in cons] + [(cell, o)]
 
 
+def _stepper(b, el, where, superview, id_map, parent=None):
+    """<stepper> -> NSStepper with its NSStepperCell (probe DinosaursWindow [89])."""
+    o = b.new("NSStepper")
+    o.add("NSNextResponder", *(b.ref(superview) if superview is not None else (N.NIL, None)))
+    o.add("NSNibTouchBar", *(N.NIL, None))
+    v, vt = _vflags(el, where)
+    o.add("NSvFlags", vt, v)
+    id_map[el.get("id")] = o
+    o.add("NSFrame", *b.ref(b.string(_rect(el, "frame", where))))
+    if superview is not None:
+        o.add("NSSuperview", *b.ref(superview))
+    o.add("NSViewWantsBestResolutionOpenGLSurface", *b.boolean(False))
+    if _translates(el):
+        o.add("NSDoNotTranslateAutoresizingMask", *b.boolean(False))
+    cons_el = el.find("constraints")
+    cons = []
+    if cons_el is not None and cons_el.findall("constraint"):
+        carr = b.new("NSArray")
+        carr.add("NSInlinedValue", *b.boolean(False))
+        els = I._constraint_order(el, cons_el.findall("constraint"), where, mac=True)
+        for c in els:
+            con = _constraint(b, c, o, el.get("id"), id_map, {}, {}, where)
+            carr.add("UINibEncoderEmptyKey", *b.ref(con))
+            cons.append(con)
+        b.cons_order[el.get("id")] = [c.get("id") for c in els]
+        o.add("NSViewConstraints", *b.ref(carr))
+    cell_el = el.find("stepperCell[@key='cell']")
+    if cell_el is None:
+        raise I.XibError(f"<stepper> without stepperCell ({where})")
+    o.add("IBNSSafeAreaLayoutGuide", *(N.NIL, None))
+    o.add("IBNSLayoutMarginsGuide", *(N.NIL, None))
+    o.add("IBNSClipsToBounds", *b.int8(0))
+    o.add("NSEnabled", *b.boolean(False))
+    cell = b.new("NSStepperCell")
+    align = cell_el.get("alignment", "left")
+    if align not in CONTROL_ALIGN:
+        raise I.XibError(f"alignment {align!r} not probed ({where})")
+    cell.add("NSCellFlags", *int_fit(786464))
+    cell.add("NSCellFlags2", *int_fit(_i32(TEXT_ALIGN[align] << 26)))
+    cell.add("NSControlView", *b.ref(o))
+    id_map[el.get("id") + "#cell"] = cell
+    id_map[cell_el.get("id")] = cell
+    if cell_el.get("minValue") is not None:
+        cell.add("NSMinValue", N.DOUBLE, float(cell_el.get("minValue")))
+    if cell_el.get("maxValue") is not None:
+        cell.add("NSMaxValue", N.DOUBLE, float(cell_el.get("maxValue")))
+    cell.add("NSIncrement", N.DOUBLE, float(cell_el.get("increment", 1)))
+    cell.add("NSAutorepeat", *b.boolean(cell_el.get("autorepeat") == "YES"))
+    o.add("NSCell", *b.ref(cell))
+    o.add("NSAllowsLogicalLayoutDirection", *b.boolean(not b.localize))
+    o.add("NSControlSize", *b.int8(0))
+    # golden archives the VIEW's continuous state (default NO), not the
+    # cell attr — DinosaursWindow cell continuous="YES" but key is false
+    o.add("NSControlContinuous", *b.boolean(False))
+    o.add("NSControlRefusesFirstResponder", *b.boolean(True))
+    o.add("NSControlUsesSingleLineMode", *b.boolean(True))
+    o.add("NSControlTextAlignment", *b.int8(CONTROL_ALIGN[align]))
+    o.add("NSControlLineBreakMode", *b.int8(0))
+    o.add("NSControlWritingDirection", N.INT64, -1)
+    o.add("NSControlSendActionMask", *int_fit(65538))
+    # view-level stepper keys archive fresh-NSStepper defaults (golden:
+    # 0.0/0.0/0.0 even with cell maxValue=100), wraps+autorepeat true
+    o.add("NSStepperMinValue", N.DOUBLE, 0.0)
+    o.add("NSStepperMaxValue", N.DOUBLE, 0.0)
+    o.add("NSStepperIncrement", N.DOUBLE, 0.0)
+    o.add("NSStepperWraps", *b.boolean(True))
+    o.add("NSStepperAutorepeat", *b.boolean(True))
+    return o, [(o, parent)] + [(con, o) for con in cons] + [(cell, o)]
+
+
 def _button_cell(b, el, control, where):
     o = b.new("NSButtonCell")
     btype = el.get("type", "momentaryPushIn")
@@ -2855,6 +3080,7 @@ MENU_MOD_BITS = {"option": 524288, "shift": 131072, "control": 262144}
 # combination; unknown combos raise (same policy as SCROLL_SFLAGS).
 TABLE_TVFLAGS = {
     (("allowsExpansionToolTips", "YES"), ("autosaveColumns", "NO"), ("columnAutoresizingStyle", "lastColumnOnly"), ("columnReordering", "NO"), ("columnResizing", "NO"), ("rowHeight", "96"), ("typeSelect", "NO"), ("verticalHuggingPriority", "750"), ("viewBased", "YES")): 438304768,  # TimelineTableView (tableView)
+    (("allowsExpansionToolTips", "YES"), ("alternatingRowBackgroundColors", "YES"), ("autosaveColumns", "NO"), ("columnAutoresizingStyle", "firstColumnOnly"), ("columnReordering", "NO"), ("rowHeight", "24"), ("rowSizeStyle", "medium"), ("tableStyle", "inset"), ("verticalHuggingPriority", "750"), ("viewBased", "YES")): 1522532352,  # DinosaursWindow (tableView)
     (("allowsExpansionToolTips", "YES"), ("alternatingRowBackgroundColors", "YES"), ("autosaveColumns", "NO"), ("columnAutoresizingStyle", "lastColumnOnly"), ("columnReordering", "NO"), ("multipleSelection", "NO"), ("rowHeight", "24"), ("rowSizeStyle", "medium"), ("tableStyle", "inset"), ("typeSelect", "NO"), ("verticalHuggingPriority", "750"), ("viewBased", "YES")): 1388314624,  # CurrentActivityWindow (tableView)
     (("allowsExpansionToolTips", "YES"), ("alternatingRowBackgroundColors", "YES"), ("autosaveName", "AccountStatsTable"), ("columnAutoresizingStyle", "firstColumnOnly"), ("multipleSelection", "NO"), ("rowHeight", "24"), ("rowSizeStyle", "medium"), ("tableStyle", "inset"), ("verticalHuggingPriority", "750"), ("viewBased", "YES")): 3552575488,  # AccountStatsWindow (tableView)
     (("allowsExpansionToolTips", "YES"), ("autosaveColumns", "NO"), ("columnAutoresizingStyle", "firstColumnOnly"), ("columnReordering", "NO"), ("columnResizing", "NO"), ("floatsGroupRows", "NO"), ("indentationPerLevel", "13"), ("rowHeight", "40"), ("rowSizeStyle", "systemDefault"), ("selectionHighlightStyle", "sourceList"), ("typeSelect", "NO"), ("verticalHuggingPriority", "750"), ("viewBased", "YES")): 440401920,  # SidebarView (outlineView)
@@ -3304,7 +3530,7 @@ def _progress_indicator(b, el, where, superview, id_map, parent=None):
     return o, [(o, parent)]
 
 
-def _compile_cell_nib(cell_el, where, localize):
+def _compile_cell_nib(cell_el, where, localize, ident=None):
     """Prototype <tableCellView> -> standalone NIBArchive bytes (golden
     SidebarView [57]/[60]: NSTableViewArchivedReusableViewsKey NSNib payloads;
     proxy owner NSObject, NSApplication proxy, cell's own outlets)."""
@@ -3323,27 +3549,55 @@ def _compile_cell_nib(cell_el, where, localize):
     conns_arr = b.new("NSMutableArray")
     conns_arr.add("NSInlinedValue", *b.boolean(False))
     conn_els = cell_el.findall("connections/outlet")
-    conns = [b.new("NSNibOutletConnector") for _ in conn_els]
-    for c in conns:
-        conns_arr.add("UINibEncoderEmptyKey", *b.ref(c))
+    # golden Dinosaurs feed proto [6]/[62]: the FIRST outlet connector
+    # allocates before the tree, later ones right after it post-tree
+    conn_first = b.new("NSNibOutletConnector") if conn_els else None
+    if conn_first is not None:
+        conns_arr.add("UINibEncoderEmptyKey", *b.ref(conn_first))
     if not conn_els:
         # golden DataCell proto57 [6]: with no outlets the keys shell lands
         # right after the connections array, before the cell tree
         keys_arr = b.new("NSArray")
-    cell, pairs = _table_cell_view(b, cell_el, where, None, id_map, parent=owner)
-    for c, conn_el in zip(conns, conn_els):
+    cell, pairs = _table_cell_view(b, cell_el, where, None, id_map,
+                                   parent=owner, ident=ident)
+    # golden Dinosaurs feed proto: embedded tree pairs order textField
+    # groups before imageView groups (same tf<img precedence as constraint
+    # groups), unlike the inline doc-order pairs
+    groups, cur = [], []
+    for pair in pairs[1:]:
+        cur.append(pair)
+        if pair[1] is cell:
+            groups.append(cur)
+            cur = []
+    if cur:
+        groups.append(cur)
+    groups.sort(key=lambda g: 0 if g[0][0].cls in ("NSTextField",
+                                                   "NSSecureTextField") else 1)
+    flat = [p for g in groups for p in g]
+    keys = [cell]
+    if conn_els:
+        c = conn_first
+        c.add("NSSource", *b.ref(cell))
+        c.add("NSDestination", *b.ref(id_map[conn_els[0].get("destination")]))
+        c.add("NSLabel", *b.ref(b.string(conn_els[0].get("property"))))
+        c.add("NSChildControllerCreationSelectorName", *(N.NIL, None))
+    conns = [conn_first] if conn_first else []
+    for conn_el in conn_els[1:]:
+        c = b.new("NSNibOutletConnector")
+        conns_arr.add("UINibEncoderEmptyKey", *b.ref(c))
         c.add("NSSource", *b.ref(cell))
         c.add("NSDestination", *b.ref(id_map[conn_el.get("destination")]))
         c.add("NSLabel", *b.ref(b.string(conn_el.get("property"))))
         c.add("NSChildControllerCreationSelectorName", *(N.NIL, None))
-    keys = [cell] + [o2 for o2, _ in pairs[1:]]
+        conns.append(c)
     if conn_els:
         # golden HeaderCell proto60 [27]: keys shell after the label strings
         keys_arr = b.new("NSArray")
     nsapp = b.new("NSCustomObject")
     nsapp.add("NSClassName", *b.ref(b.string("NSApplication")))
+    keys.extend(o2 for o2, _ in flat)
     keys.append(nsapp)
-    values = [owner] + [p for _, p in pairs[1:]] + [owner]
+    values = [owner] + [p for _, p in flat] + [owner]
     keys_arr.add("NSInlinedValue", *b.boolean(False))
     values_arr = b.new("NSArray")
     values_arr.add("NSInlinedValue", *b.boolean(False))
@@ -3384,6 +3638,40 @@ def _table_row_height(el, where):
     if rss == "systemDefault":
         return 32.0 if el.get("selectionHighlightStyle") == "sourceList" else 24.0
     raise I.XibError(f"rowSizeStyle {rss!r} not probed ({where})")
+
+
+def _table_pairs(b, doc_el, id_map):
+    """Key pairs for a table/outline subtree (golden DinosaursWindow: per
+    column (col, table), (dataCell, col), (proto cell, col), proto subtree,
+    proto's own constraints; headerCell/cornerView never keyed). Called via
+    _DeferredPairs after the connections walk: prototype cells build lazily."""
+    pairs = []
+    cols_el = doc_el.find("tableColumns")
+    for col_el in (cols_el if cols_el is not None else []):
+        col = id_map[col_el.get("id")]
+        pairs.append((col, id_map[doc_el.get("id")]))
+        dc_el = col_el.find("textFieldCell[@key='dataCell']")
+        if dc_el is not None:
+            pairs.append((id_map[dc_el.get("id")], col))
+        for pv in col_el.findall("prototypeCellViews/tableCellView"):
+            pobj = id_map[pv.get("id")]
+            pairs.append((pobj, col))
+            subs = pv.find("subviews")
+            for child in (subs if subs is not None else []):
+                cid = child.get("id")
+                cobj = id_map[cid]
+                pairs.append((cobj, pobj))
+                if cid + "#cell" in id_map:
+                    pairs.append((id_map[cid + "#cell"], cobj))
+                fel = child.find("*[@key='cell']/numberFormatter[@key='formatter']")
+                if fel is not None and fel.get("id") in id_map:
+                    pairs.append((id_map[fel.get("id")],
+                                  id_map[cid + "#cell"]))
+                for c2 in b.cons_order.get(cid, []):
+                    pairs.append((id_map[c2], cobj))
+            for c3 in b.cons_order.get(pv.get("id"), []):
+                pairs.append((id_map[c3], pobj))
+    return pairs
 
 
 def _table_view(b, el, where, superview, id_map, parent=None):
@@ -3535,7 +3823,8 @@ def _table_view(b, el, where, superview, id_map, parent=None):
             nib.add("NSNibFileImages", *(N.NIL, None))
             nib.add("NSNibFileSounds", *(N.NIL, None))
             data.add("NS.bytes", N.DATA,
-                     _compile_cell_nib(pv, where, b.localize))
+                     _compile_cell_nib(pv, where, b.localize,
+                                       ident=col_el.get("identifier")))
         o.add("NSTableViewArchivedReusableViewsKey", *b.ref(reusables))
     if el.get("floatsGroupRows") is not None:
         # bug-compat: floatsGroupRows="NO" archives true
@@ -3548,7 +3837,8 @@ def _table_view(b, el, where, superview, id_map, parent=None):
     if is_outline:
         o.add("NSOutlineViewAutoresizesOutlineColumnKey", *b.boolean(True))
         o.add("NSOutineViewStronglyReferencesItems", *b.boolean(False))
-    return o, [(o, parent)]
+    return o, [(o, parent),
+               _DeferredPairs(lambda: _table_pairs(b, el, id_map))]
 
 
 def _popup(b, el, where, superview, id_map, parent=None):
