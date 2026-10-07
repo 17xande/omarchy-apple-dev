@@ -358,7 +358,7 @@ CATALOG_COLORS = {
     "controlAccentColor": (b"0.09019608\x00", b"0.352941 0.666667 0.913725 1"),
     "controlTextColor": (b"0\x00", b"0 1"),
     "disabledControlTextColor": (b"0.4375036359\x00", b"0.4666666667 1"),
-    "controlBackgroundColor": (b"1\x00", b"1 1"),
+    "controlBackgroundColor": (b"0.602715373\x00", b"0.6666666667 1"),
     "selectedControlTextColor": (b"0\x00", b"0 1"),
     "windowBackgroundColor": (b"0.9493610263\x00", b"0.9493610263 1"),
     "windowFrameTextColor": (b"0\x00", b"0 1"),
@@ -369,7 +369,7 @@ CATALOG_COLORS = {
     "alternatingOddBackgroundColor": (b"0.9658410256\x00", b"0.9658410256 1"),
     "linkColor": (b"0.16151028\00", b"0.039216 0.423529 0.815686 1"),
     "separatorColor": (b"0.874618\00", b"0.874618 1"),
-    "gridColor": (b"0.8 got\00", b"0.8 1"),
+    "gridColor": (b"0.4246723652\x00", b"0.5 1"),
     "headerTextColor": (b"0\x00", b"0 1"),
     "headerColor": (b"1\x00", b"1 1"),
     "highlightColor": (b"0.8470830959\x00", b"0.733333 0.827451 0.898039 1"),
@@ -1394,9 +1394,10 @@ def compile_xib(path):
     for src_el, conn_el in _conn_blocks(objects):
         (actions if conn_el.tag == "action" else outlets).append((src_el, conn_el))
 
-    # Outlets build their destination lazily on first reference, in document
-    # order; action connections are emitted in ASCII order of the SOURCE ITEM
-    # id, not document order (probe MainMenu golden: 104 actions sorted).
+    # Outlets and actions both sort by SOURCE element id (ASCII), ties keep
+    # document order (probe TimelineTableView: -2 < MjV < opA outlets); the
+    # processing order drives lazy destination allocation.
+    outlets.sort(key=lambda p: (p[0].get("id") or "").encode())
     for src_el, conn_el in outlets + sorted(
             actions, key=lambda p: (p[0].get("id") or "").encode()):
         if conn_el.tag == "action":
@@ -1994,7 +1995,7 @@ def _scroller(b, el, where, scroll):
     o.add("NSControlLineBreakMode", *b.int8(0))
     o.add("NSControlWritingDirection", *int_fit(0))
     o.add("NSControlSendActionMask", *b.int8(4))
-    if el.get("hidden") == "YES":
+    if el.get("horizontal") == "YES":  # corpus: h-scroller only, hidden or not
         o.add("NSsFlags", *b.int8(1))
     o.add("NSTarget", *b.ref(scroll))
     o.add("NSAction", *b.ref(b.string("_doScroller:")))
@@ -2042,7 +2043,11 @@ def _scroll_view(b, el, where, superview, id_map, parent=None):
         doc = _text_view(b, doc_el, where, cv)
         id_map[doc_el.get("id")] = doc
     elif is_table:
-        doc, _doc_pairs = _table_view(b, doc_el, where, cv, id_map, parent=cv)
+        # the owner's tableView outlet may have built it lazily before the
+        # scroll view (probe TimelineTableView: one table, reused doc)
+        doc = id_map.get(doc_el.get("id"))
+        if doc is None:
+            doc, _doc_pairs = _table_view(b, doc_el, where, cv, id_map, parent=cv)
     else:
         raise I.XibError(f"clipView subview <{doc_el.tag}> not probed ({where})")
     arr.add("UINibEncoderEmptyKey", *b.ref(cv))
@@ -2163,7 +2168,7 @@ def _scroll_view(b, el, where, superview, id_map, parent=None):
     vps = float(el.get("verticalPageScroll", 10))
     if (hls, vls, hps, vps) != (10.0, 10.0, 10.0, 10.0):
         import struct as _struct
-        o.add("NSScrollAmts", N.DATA, _struct.pack("<4f", hps, vps, hls, vls))
+        o.add("NSScrollAmts", N.DATA, _struct.pack(">4f", hps, vps, hls, vls))
     o.add("NSMinMagnification", N.DOUBLE, 0.25)
     o.add("NSMaxMagnification", N.DOUBLE, 4.0)
     o.add("NSMagnification", N.DOUBLE, 1.0)
@@ -2531,13 +2536,13 @@ def _table_header_cell(b, col_el, hc_el, where):
 
 def _table_data_cell(b, col_el, dc_el, table, where):
     o = b.new("NSTextFieldCell")
-    flags = 0x4000000 + 0x20  # truncatingTail base (corpus lineBreakMode)
+    flags = 0x4000000 + 0x40  # truncatingTail base (corpus lineBreakMode)
     if dc_el.get("lineBreakMode", "truncatingTail") != "truncatingTail":
         raise I.XibError(f"dataCell lineBreakMode not probed ({where})")
     if dc_el.get("selectable") == "YES":
-        flags |= 0x200000 | 0x1 | 0x20
+        flags |= 0x200000 | 0x1
     if dc_el.get("editable") == "YES":
-        flags |= 0x10000000 | 0x20
+        flags |= 0x10000000
     o.add("NSCellFlags", N.INT32, flags)
     align = TEXT_ALIGN[dc_el.get("alignment", "natural")]
     o.add("NSCellFlags2", N.INT32, (align << 26) | 0x800)
