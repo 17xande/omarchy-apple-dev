@@ -109,16 +109,28 @@ install_darwin_tools() {
   install -m644 "$REPO_DIR/tools/nibarchive.py" "$REPO_DIR/tools/keyorder.py" "$bin/"
   install -m755 "$REPO_DIR/tools/momc" "$bin/momc"
   install -m644 "$REPO_DIR/tools/xcstrings_symbols.py" "$bin/xcstrings_symbols.py"
+  # macOS builds (swiftbuild --triple arm64-apple-macosx) look in the MacOSX
+  # platform's Developer/usr/bin instead.
+  local macbin="$DARWIN_SDK_BUNDLE/Developer/Platforms/MacOSX.platform/Developer/usr/bin"
+  mkdir -p "$macbin"
+  install -m755 "$REPO_DIR/tools/darwin-tools/.build/release/actool" "$macbin/actool"
+  install -m755 "$REPO_DIR/tools/xcstringstool" "$REPO_DIR/tools/ibtool" "$macbin/"
+  install -m644 "$REPO_DIR/tools/nibarchive.py" "$REPO_DIR/tools/keyorder.py" "$macbin/"
+  install -m755 "$REPO_DIR/tools/momc" "$macbin/momc"
+  install -m644 "$REPO_DIR/tools/xcstrings_symbols.py" "$macbin/xcstrings_symbols.py"
   python3 - "$DARWIN_SDK_BUNDLE" <<'PY'
 import json, os, plistlib, sys
 bundle = sys.argv[1]
-platform = os.path.join(bundle, "Developer/Platforms/iPhoneOS.platform/Info.plist")
-with open(platform, "rb") as f:
-    plist = plistlib.load(f)
-plist.setdefault("DefaultProperties", {})["STRINGS_FILE_INPUT_ENCODING"] = "utf-8"
-with open(platform + ".tmp", "wb") as f:
-    plistlib.dump(plist, f)
-os.replace(platform + ".tmp", platform)
+for platform_name in ("iPhoneOS.platform", "MacOSX.platform"):
+    platform = os.path.join(bundle, "Developer/Platforms", platform_name, "Info.plist")
+    if not os.path.isfile(platform):
+        continue
+    with open(platform, "rb") as f:
+        plist = plistlib.load(f)
+    plist.setdefault("DefaultProperties", {})["STRINGS_FILE_INPUT_ENCODING"] = "utf-8"
+    with open(platform + ".tmp", "wb") as f:
+        plistlib.dump(plist, f)
+    os.replace(platform + ".tmp", platform)
 toolset = os.path.join(bundle, "toolset-swb.json")
 with open(toolset) as f:
     data = json.load(f)
@@ -129,17 +141,29 @@ with open(toolset + ".tmp", "w") as f:
 os.replace(toolset + ".tmp", toolset)
 # Linux has no `tapi`, so swift-build cannot generate eager-linking stubs for
 # promoted dylibs; its non-Darwin platforms hardcode the same DefaultProperties.
-sdks = os.path.join(bundle, "Developer/Platforms/iPhoneOS.platform/Developer/SDKs")
-for sdk in sorted(os.listdir(sdks)) if os.path.isdir(sdks) else []:
-    p = os.path.join(sdks, sdk, "SDKSettings.plist")
-    d = plistlib.load(open(p, "rb")) if os.path.isfile(p) else {"DefaultProperties": {}}
-    dp = d.setdefault("DefaultProperties", {})
-    if dp.get("GENERATE_INTERMEDIATE_TEXT_BASED_STUBS") == "NO":
-        continue
-    dp["GENERATE_INTERMEDIATE_TEXT_BASED_STUBS"] = "NO"
-    dp["GENERATE_TEXT_BASED_STUBS"] = "NO"
-    plistlib.dump(d, open(p + ".tmp", "wb"))
-    os.replace(p + ".tmp", p)
+for platform_name in ("iPhoneOS.platform", "MacOSX.platform"):
+    sdks = os.path.join(bundle, "Developer/Platforms", platform_name, "Developer/SDKs")
+    for sdk in sorted(os.listdir(sdks)) if os.path.isdir(sdks) else []:
+        if os.path.islink(os.path.join(sdks, sdk)):
+            continue
+        for name in ("SDKSettings.json", "SDKSettings.plist"):
+            p = os.path.join(sdks, sdk, name)
+            if not os.path.isfile(p):
+                continue
+            if name.endswith(".json"):
+                d = json.load(open(p)) if os.path.getsize(p) else {"DefaultProperties": {}}
+                dump = lambda d, p: json.dump(d, open(p, "w"))
+            else:
+                d = plistlib.load(open(p, "rb")) if os.path.isfile(p) else {"DefaultProperties": {}}
+                dump = lambda d, p: plistlib.dump(d, open(p + ".tmp", "wb"))
+            dp = d.setdefault("DefaultProperties", {})
+            dp.setdefault("STRINGS_FILE_INPUT_ENCODING", "utf-8")
+            if dp.get("GENERATE_INTERMEDIATE_TEXT_BASED_STUBS") != "NO":
+                dp["GENERATE_INTERMEDIATE_TEXT_BASED_STUBS"] = "NO"
+                dp["GENERATE_TEXT_BASED_STUBS"] = "NO"
+            dump(d, p)
+            if os.path.isfile(p + ".tmp"):
+                os.replace(p + ".tmp", p)
 PY
   echo "Installed actool, xcstringstool, momc and ibtool (version probe; compiles a small xib subset) into $bin"
 }

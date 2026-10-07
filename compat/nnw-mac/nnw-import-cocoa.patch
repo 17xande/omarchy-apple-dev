@@ -1,0 +1,1332 @@
+diff --git i/Mac/Browser.swift w/Mac/Browser.swift
+index 63489eb17..015a1d146 100644
+--- i/Mac/Browser.swift
++++ w/Mac/Browser.swift
+@@ -6,6 +6,7 @@
+ //  Copyright © 2016 Ranchero Software, LLC. All rights reserved.
+ //
+ 
++import Cocoa
+ import Foundation
+ import RSWeb
+ 
+diff --git i/Mac/MainWindow/Detail/DetailIconSchemeHandler.swift w/Mac/MainWindow/Detail/DetailIconSchemeHandler.swift
+index 2bb7ed356..628d631cd 100644
+--- i/Mac/MainWindow/Detail/DetailIconSchemeHandler.swift
++++ w/Mac/MainWindow/Detail/DetailIconSchemeHandler.swift
+@@ -6,6 +6,7 @@
+ //  Copyright © 2019 Ranchero Software. All rights reserved.
+ //
+ 
++import Cocoa
+ import Foundation
+ import WebKit
+ import Articles
+diff --git i/Mac/MainWindow/Detail/DetailViewController.swift w/Mac/MainWindow/Detail/DetailViewController.swift
+index b81c2a3a1..1e51142d6 100644
+--- i/Mac/MainWindow/Detail/DetailViewController.swift
++++ w/Mac/MainWindow/Detail/DetailViewController.swift
+@@ -6,6 +6,7 @@
+ //  Copyright © 2015 Ranchero Software, LLC. All rights reserved.
+ //
+ 
++import Cocoa
+ import Foundation
+ import WebKit
+ import RSCore
+diff --git i/Mac/MainWindow/Detail/DetailWindowState.swift w/Mac/MainWindow/Detail/DetailWindowState.swift
+index e117483f0..91ccfac93 100644
+--- i/Mac/MainWindow/Detail/DetailWindowState.swift
++++ w/Mac/MainWindow/Detail/DetailWindowState.swift
+@@ -6,6 +6,7 @@
+ //  Copyright © 2023 Ranchero Software. All rights reserved.
+ //
+ 
++import Cocoa
+ import Foundation
+ 
+ final class DetailWindowState: NSObject, NSSecureCoding {
+diff --git i/Mac/MainWindow/MainWindowState.swift w/Mac/MainWindow/MainWindowState.swift
+index ff6702ef9..3389a59fe 100644
+--- i/Mac/MainWindow/MainWindowState.swift
++++ w/Mac/MainWindow/MainWindowState.swift
+@@ -6,6 +6,7 @@
+ //  Copyright © 2023 Ranchero Software. All rights reserved.
+ //
+ 
++import Cocoa
+ import Foundation
+ 
+ final class MainWindowState: NSObject, NSSecureCoding {
+diff --git i/Mac/MainWindow/Sidebar/Cell/SidebarCell.swift w/Mac/MainWindow/Sidebar/Cell/SidebarCell.swift
+index 42aea739b..44cb1e9d8 100644
+--- i/Mac/MainWindow/Sidebar/Cell/SidebarCell.swift
++++ w/Mac/MainWindow/Sidebar/Cell/SidebarCell.swift
+@@ -6,6 +6,7 @@
+ //  Copyright © 2015 Ranchero Software, LLC. All rights reserved.
+ //
+ 
++import Cocoa
+ import Foundation
+ import RSCore
+ import Account
+diff --git i/Mac/MainWindow/Sidebar/SidebarWindowState.swift w/Mac/MainWindow/Sidebar/SidebarWindowState.swift
+index 75a1332eb..94c828a1d 100644
+--- i/Mac/MainWindow/Sidebar/SidebarWindowState.swift
++++ w/Mac/MainWindow/Sidebar/SidebarWindowState.swift
+@@ -6,6 +6,7 @@
+ //  Copyright © 2023 Ranchero Software. All rights reserved.
+ //
+ 
++import Cocoa
+ import Foundation
+ 
+ final class SidebarWindowState: NSObject, NSSecureCoding {
+diff --git i/Mac/MainWindow/Timeline/TimelineViewController.swift w/Mac/MainWindow/Timeline/TimelineViewController.swift
+index 145cf7ec9..c85b2a46e 100644
+--- i/Mac/MainWindow/Timeline/TimelineViewController.swift
++++ w/Mac/MainWindow/Timeline/TimelineViewController.swift
+@@ -6,6 +6,7 @@
+ //  Copyright © 2015 Ranchero Software, LLC. All rights reserved.
+ //
+ 
++import Cocoa
+ import Foundation
+ import RSCore
+ import Articles
+diff --git i/Mac/MainWindow/Timeline/TimelineWindowState.swift w/Mac/MainWindow/Timeline/TimelineWindowState.swift
+index dd92cb25e..61d5463de 100644
+--- i/Mac/MainWindow/Timeline/TimelineWindowState.swift
++++ w/Mac/MainWindow/Timeline/TimelineWindowState.swift
+@@ -6,6 +6,7 @@
+ //  Copyright © 2023 Ranchero Software. All rights reserved.
+ //
+ 
++import Cocoa
+ import Foundation
+ 
+ final class TimelineWindowState: NSObject, NSSecureCoding {
+diff --git i/Mac/Preferences/Accounts/AccountsAddCloudKitWindowController.swift w/Mac/Preferences/Accounts/AccountsAddCloudKitWindowController.swift
+index be9996ea5..89e5729ac 100644
+--- i/Mac/Preferences/Accounts/AccountsAddCloudKitWindowController.swift
++++ w/Mac/Preferences/Accounts/AccountsAddCloudKitWindowController.swift
+@@ -6,6 +6,7 @@
+ //  Copyright © 2020 Ranchero Software. All rights reserved.
+ //
+ 
++import Cocoa
+ import Foundation
+ import Account
+ 
+diff --git i/Mac/Preferences/Accounts/AddAccountsView.swift w/Mac/Preferences/Accounts/AddAccountsView.swift
+index 4dd1fff6e..081612d78 100644
+--- i/Mac/Preferences/Accounts/AddAccountsView.swift
++++ w/Mac/Preferences/Accounts/AddAccountsView.swift
+@@ -6,6 +6,7 @@
+ //  Copyright © 2020 Ranchero Software. All rights reserved.
+ //
+ 
++import Cocoa
+ import SwiftUI
+ import Account
+ import RSCore
+diff --git i/Mac/SafariExtension/SafariExtensionHandler.swift w/Mac/SafariExtension/SafariExtensionHandler.swift
+index 1b1b69e6b..9c490cd26 100644
+--- i/Mac/SafariExtension/SafariExtensionHandler.swift
++++ w/Mac/SafariExtension/SafariExtensionHandler.swift
+@@ -6,6 +6,7 @@
+ //  Copyright © 2018 Ranchero Software. All rights reserved.
+ //
+ 
++import Cocoa
+ @preconcurrency import SafariServices
+ 
+ // The extension needs nothing from a page but its URL, which Safari reports directly —
+diff --git i/Mac/Scripting/AppDelegate+Scriptability.swift w/Mac/Scripting/AppDelegate+Scriptability.swift
+index f216471aa..a39ccb005 100644
+--- i/Mac/Scripting/AppDelegate+Scriptability.swift
++++ w/Mac/Scripting/AppDelegate+Scriptability.swift
+@@ -6,6 +6,7 @@
+ //  Copyright © 2018 Olof Hellman. All rights reserved.
+ //
+ 
++import Cocoa
+ /*
+     Note:  strictly, the AppDelegate doesn't appear as part of the scripting model,
+     so this file is rather unlike the other Object+Scriptability.swift files.
+diff --git i/Mac/Scripting/Article+Scriptability.swift w/Mac/Scripting/Article+Scriptability.swift
+index d47ca8a20..2c46ec9de 100644
+--- i/Mac/Scripting/Article+Scriptability.swift
++++ w/Mac/Scripting/Article+Scriptability.swift
+@@ -6,6 +6,7 @@
+ //  Copyright © 2018 Olof Hellman. All rights reserved.
+ //
+ 
++import Cocoa
+ import Foundation
+ import Account
+ import Articles
+diff --git i/Mac/Scripting/Author+Scriptability.swift w/Mac/Scripting/Author+Scriptability.swift
+index 597dacdfb..9d7602d81 100644
+--- i/Mac/Scripting/Author+Scriptability.swift
++++ w/Mac/Scripting/Author+Scriptability.swift
+@@ -6,6 +6,7 @@
+ //  Copyright © 2018 Olof Hellman. All rights reserved.
+ //
+ 
++import Cocoa
+ import Foundation
+ import Account
+ import Articles
+diff --git i/Mac/Scripting/Feed+Scriptability.swift w/Mac/Scripting/Feed+Scriptability.swift
+index 0c3dc2d5d..f65a81c3b 100644
+--- i/Mac/Scripting/Feed+Scriptability.swift
++++ w/Mac/Scripting/Feed+Scriptability.swift
+@@ -6,6 +6,7 @@
+ //  Copyright © 2018 Olof Hellman. All rights reserved.
+ //
+ 
++import Cocoa
+ import Foundation
+ import RSParser
+ import Account
+diff --git i/Mac/Scripting/Folder+Scriptability.swift w/Mac/Scripting/Folder+Scriptability.swift
+index 965239510..c27649fcc 100644
+--- i/Mac/Scripting/Folder+Scriptability.swift
++++ w/Mac/Scripting/Folder+Scriptability.swift
+@@ -6,6 +6,7 @@
+ //  Copyright © 2018 Olof Hellman. All rights reserved.
+ //
+ 
++import Cocoa
+ import Foundation
+ import Account
+ import Articles
+diff --git i/Mac/Scripting/NSScriptCommand+NetNewsWire.swift w/Mac/Scripting/NSScriptCommand+NetNewsWire.swift
+index caa7f389a..d8ec48366 100644
+--- i/Mac/Scripting/NSScriptCommand+NetNewsWire.swift
++++ w/Mac/Scripting/NSScriptCommand+NetNewsWire.swift
+@@ -6,6 +6,7 @@
+ //  Copyright © 2018 Olof Hellman. All rights reserved.
+ //
+ 
++import Cocoa
+ import Foundation
+ import Account
+ 
+diff --git i/Mac/Scripting/ScriptingObject.swift w/Mac/Scripting/ScriptingObject.swift
+index f71fc36e6..4e3aeba2b 100644
+--- i/Mac/Scripting/ScriptingObject.swift
++++ w/Mac/Scripting/ScriptingObject.swift
+@@ -6,6 +6,7 @@
+ //  Copyright © 2018 Olof Hellman. All rights reserved.
+ //
+ 
++import Cocoa
+ import Foundation
+ 
+ protocol ScriptingObject {
+diff --git i/Modules/Account/Sources/Account/Account.swift w/Modules/Account/Sources/Account/Account.swift
+index 3df1aaec6..814318bf4 100644
+--- i/Modules/Account/Sources/Account/Account.swift
++++ w/Modules/Account/Sources/Account/Account.swift
+@@ -6,6 +6,7 @@
+ //  Copyright © 2017 Ranchero Software, LLC. All rights reserved.
+ //
+ 
++import Cocoa
+ #if os(iOS)
+ import UIKit
+ #endif
+diff --git i/Modules/Account/Sources/Account/AccountError.swift w/Modules/Account/Sources/Account/AccountError.swift
+index 6e4f0844e..fd73bf70d 100644
+--- i/Modules/Account/Sources/Account/AccountError.swift
++++ w/Modules/Account/Sources/Account/AccountError.swift
+@@ -6,6 +6,7 @@
+ //  Copyright © 2019 Ranchero Software, LLC. All rights reserved.
+ //
+ 
++import Cocoa
+ import Foundation
+ import RSWeb
+ 
+diff --git i/Modules/Account/Sources/Account/AccountManager.swift w/Modules/Account/Sources/Account/AccountManager.swift
+index ffb3d8337..72b5cb7ac 100644
+--- i/Modules/Account/Sources/Account/AccountManager.swift
++++ w/Modules/Account/Sources/Account/AccountManager.swift
+@@ -6,6 +6,7 @@
+ //  Copyright © 2015 Ranchero Software, LLC. All rights reserved.
+ //
+ 
++import Cocoa
+ import Foundation
+ import os
+ import RSCore
+diff --git i/Modules/Account/Sources/Account/AccountSettingsImporter.swift w/Modules/Account/Sources/Account/AccountSettingsImporter.swift
+index 0e9afd414..9b840781c 100644
+--- i/Modules/Account/Sources/Account/AccountSettingsImporter.swift
++++ w/Modules/Account/Sources/Account/AccountSettingsImporter.swift
+@@ -5,6 +5,7 @@
+ //  Created by Brent Simmons on 3/6/26.
+ //
+ 
++import Cocoa
+ import Foundation
+ import RSCore
+ import os
+diff --git i/Modules/Account/Sources/Account/CloudKit/CloudKitAccountDelegate.swift w/Modules/Account/Sources/Account/CloudKit/CloudKitAccountDelegate.swift
+index c577e0b06..939a49abc 100644
+--- i/Modules/Account/Sources/Account/CloudKit/CloudKitAccountDelegate.swift
++++ w/Modules/Account/Sources/Account/CloudKit/CloudKitAccountDelegate.swift
+@@ -6,6 +6,7 @@
+ //  Copyright © 2020 Ranchero Software, LLC. All rights reserved.
+ //
+ 
++import Cocoa
+ import Foundation
+ import CloudKit
+ import ErrorLog
+diff --git i/Modules/Account/Sources/Account/CloudKit/CloudKitAccountZone.swift w/Modules/Account/Sources/Account/CloudKit/CloudKitAccountZone.swift
+index 0a43343a9..766c496ee 100644
+--- i/Modules/Account/Sources/Account/CloudKit/CloudKitAccountZone.swift
++++ w/Modules/Account/Sources/Account/CloudKit/CloudKitAccountZone.swift
+@@ -6,6 +6,7 @@
+ //  Copyright © 2020 Ranchero Software, LLC. All rights reserved.
+ //
+ 
++import Cocoa
+ import Foundation
+ import os
+ import RSCore
+diff --git i/Modules/Account/Sources/Account/CloudKit/CloudKitArticlesZone.swift w/Modules/Account/Sources/Account/CloudKit/CloudKitArticlesZone.swift
+index 0e6d7d719..e0a5c7479 100644
+--- i/Modules/Account/Sources/Account/CloudKit/CloudKitArticlesZone.swift
++++ w/Modules/Account/Sources/Account/CloudKit/CloudKitArticlesZone.swift
+@@ -6,6 +6,7 @@
+ //  Copyright © 2020 Ranchero Software, LLC. All rights reserved.
+ //
+ 
++import Cocoa
+ import Foundation
+ import os
+ import RSParser
+diff --git i/Modules/Account/Sources/Account/CloudKit/CloudKitArticlesZoneDelegate.swift w/Modules/Account/Sources/Account/CloudKit/CloudKitArticlesZoneDelegate.swift
+index 90d28be97..79a9f63f1 100644
+--- i/Modules/Account/Sources/Account/CloudKit/CloudKitArticlesZoneDelegate.swift
++++ w/Modules/Account/Sources/Account/CloudKit/CloudKitArticlesZoneDelegate.swift
+@@ -6,6 +6,7 @@
+ //  Copyright © 2020 Ranchero Software, LLC. All rights reserved.
+ //
+ 
++import Cocoa
+ import Foundation
+ import os
+ import RSCore
+diff --git i/Modules/Account/Sources/Account/CloudKit/CloudKitStatsViewModel.swift w/Modules/Account/Sources/Account/CloudKit/CloudKitStatsViewModel.swift
+index e462540dc..756de8a81 100644
+--- i/Modules/Account/Sources/Account/CloudKit/CloudKitStatsViewModel.swift
++++ w/Modules/Account/Sources/Account/CloudKit/CloudKitStatsViewModel.swift
+@@ -5,6 +5,7 @@
+ //  Created by Brent Simmons on 3/21/26.
+ //
+ 
++import Cocoa
+ import Foundation
+ 
+ public enum CloudKitStatsError: LocalizedError {
+diff --git i/Modules/Account/Sources/Account/CloudKit/CloudKitWebDocumentation.swift w/Modules/Account/Sources/Account/CloudKit/CloudKitWebDocumentation.swift
+index 3aee2e603..ebbdf514d 100644
+--- i/Modules/Account/Sources/Account/CloudKit/CloudKitWebDocumentation.swift
++++ w/Modules/Account/Sources/Account/CloudKit/CloudKitWebDocumentation.swift
+@@ -5,6 +5,7 @@
+ //  Created by Maurice Parker on 9/22/22.
+ //
+ 
++import Cocoa
+ import Foundation
+ 
+ public struct CloudKitWebDocumentation {
+diff --git i/Modules/Account/Sources/Account/Feed.swift w/Modules/Account/Sources/Account/Feed.swift
+index b1b9ebda5..7b4085d60 100644
+--- i/Modules/Account/Sources/Account/Feed.swift
++++ w/Modules/Account/Sources/Account/Feed.swift
+@@ -6,6 +6,7 @@
+ //  Copyright © 2017 Ranchero Software, LLC. All rights reserved.
+ //
+ 
++import Cocoa
+ import Foundation
+ import RSCore
+ import RSWeb
+diff --git i/Modules/Account/Sources/Account/FeedSettingsDatabase.swift w/Modules/Account/Sources/Account/FeedSettingsDatabase.swift
+index 3cf826fa0..db9f756e3 100644
+--- i/Modules/Account/Sources/Account/FeedSettingsDatabase.swift
++++ w/Modules/Account/Sources/Account/FeedSettingsDatabase.swift
+@@ -5,6 +5,7 @@
+ //  Created by Brent Simmons on 3/6/26.
+ //
+ 
++import Cocoa
+ import Foundation
+ import RSCore
+ import os
+diff --git i/Modules/Account/Sources/Account/FeedSettingsImporter.swift w/Modules/Account/Sources/Account/FeedSettingsImporter.swift
+index 456a1629d..22f23bdc8 100644
+--- i/Modules/Account/Sources/Account/FeedSettingsImporter.swift
++++ w/Modules/Account/Sources/Account/FeedSettingsImporter.swift
+@@ -5,6 +5,7 @@
+ //  Created by Brent Simmons on 3/6/26.
+ //
+ 
++import Cocoa
+ import Foundation
+ import RSCore
+ import os
+diff --git i/Modules/Account/Sources/Account/Feedbin/FeedbinAccountDelegate.swift w/Modules/Account/Sources/Account/Feedbin/FeedbinAccountDelegate.swift
+index b4b647964..1bc465bf7 100644
+--- i/Modules/Account/Sources/Account/Feedbin/FeedbinAccountDelegate.swift
++++ w/Modules/Account/Sources/Account/Feedbin/FeedbinAccountDelegate.swift
+@@ -6,6 +6,7 @@
+ //  Copyright © 2019 Ranchero Software, LLC. All rights reserved.
+ //
+ 
++import Cocoa
+ import Foundation
+ import ActivityLog
+ import Articles
+diff --git i/Modules/Account/Sources/Account/Feedly/FeedlyAccountDelegate.swift w/Modules/Account/Sources/Account/Feedly/FeedlyAccountDelegate.swift
+index 6350c0bfb..074dd616f 100644
+--- i/Modules/Account/Sources/Account/Feedly/FeedlyAccountDelegate.swift
++++ w/Modules/Account/Sources/Account/Feedly/FeedlyAccountDelegate.swift
+@@ -6,6 +6,7 @@
+ //  Copyright © 2019 Ranchero Software, LLC. All rights reserved.
+ //
+ 
++import Cocoa
+ import Foundation
+ import ActivityLog
+ import Articles
+diff --git i/Modules/Account/Sources/Account/Feedly/FeedlyAccountDelegateError.swift w/Modules/Account/Sources/Account/Feedly/FeedlyAccountDelegateError.swift
+index c3f5819be..79fe276ca 100644
+--- i/Modules/Account/Sources/Account/Feedly/FeedlyAccountDelegateError.swift
++++ w/Modules/Account/Sources/Account/Feedly/FeedlyAccountDelegateError.swift
+@@ -6,6 +6,7 @@
+ //  Copyright © 2019 Ranchero Software, LLC. All rights reserved.
+ //
+ 
++import Cocoa
+ import Foundation
+ 
+ enum FeedlyAccountDelegateError: LocalizedError {
+diff --git i/Modules/Account/Sources/Account/Feedly/OAuthAccountAuthorizationOperation.swift w/Modules/Account/Sources/Account/Feedly/OAuthAccountAuthorizationOperation.swift
+index a87f95d05..f7f4f1411 100644
+--- i/Modules/Account/Sources/Account/Feedly/OAuthAccountAuthorizationOperation.swift
++++ w/Modules/Account/Sources/Account/Feedly/OAuthAccountAuthorizationOperation.swift
+@@ -6,6 +6,7 @@
+ //  Copyright © 2019 Ranchero Software. All rights reserved.
+ //
+ 
++import Cocoa
+ import Foundation
+ @preconcurrency import AuthenticationServices
+ import os
+diff --git i/Modules/Account/Sources/Account/Folder.swift w/Modules/Account/Sources/Account/Folder.swift
+index 247af6f17..82890144a 100644
+--- i/Modules/Account/Sources/Account/Folder.swift
++++ w/Modules/Account/Sources/Account/Folder.swift
+@@ -6,6 +6,7 @@
+ //  Copyright © 2017 Ranchero Software, LLC. All rights reserved.
+ //
+ 
++import Cocoa
+ import Foundation
+ import Articles
+ import RSCore
+diff --git i/Modules/Account/Sources/Account/LocalAccount/LocalAccountRefresher.swift w/Modules/Account/Sources/Account/LocalAccount/LocalAccountRefresher.swift
+index 8bf8ee583..03b304e1c 100644
+--- i/Modules/Account/Sources/Account/LocalAccount/LocalAccountRefresher.swift
++++ w/Modules/Account/Sources/Account/LocalAccount/LocalAccountRefresher.swift
+@@ -6,6 +6,7 @@
+ //  Copyright © 2016 Ranchero Software, LLC. All rights reserved.
+ //
+ 
++import Cocoa
+ import Foundation
+ import ErrorLog
+ import RSCore
+diff --git i/Modules/Account/Sources/Account/OPMLFile.swift w/Modules/Account/Sources/Account/OPMLFile.swift
+index f1579b95c..9dfc6ce15 100644
+--- i/Modules/Account/Sources/Account/OPMLFile.swift
++++ w/Modules/Account/Sources/Account/OPMLFile.swift
+@@ -6,6 +6,7 @@
+ //  Copyright © 2019 Ranchero Software, LLC. All rights reserved.
+ //
+ 
++import Cocoa
+ import Foundation
+ import os
+ import RSCore
+diff --git i/Modules/Account/Sources/Account/ReaderAPI/ReaderAPIAccountDelegate.swift w/Modules/Account/Sources/Account/ReaderAPI/ReaderAPIAccountDelegate.swift
+index 536031902..d026581d0 100644
+--- i/Modules/Account/Sources/Account/ReaderAPI/ReaderAPIAccountDelegate.swift
++++ w/Modules/Account/Sources/Account/ReaderAPI/ReaderAPIAccountDelegate.swift
+@@ -6,6 +6,7 @@
+ //  Copyright © 2019 Ranchero Software, LLC. All rights reserved.
+ //
+ 
++import Cocoa
+ import Foundation
+ import ActivityLog
+ import Articles
+diff --git i/Modules/Account/Tests/AccountTests/AccountSettingsImporterTests.swift w/Modules/Account/Tests/AccountTests/AccountSettingsImporterTests.swift
+index 94e898fed..7965c1bf1 100644
+--- i/Modules/Account/Tests/AccountTests/AccountSettingsImporterTests.swift
++++ w/Modules/Account/Tests/AccountTests/AccountSettingsImporterTests.swift
+@@ -5,6 +5,7 @@
+ //  Created by Brent Simmons on 3/8/26.
+ //
+ 
++import Cocoa
+ import XCTest
+ import RSWeb
+ @testable import Account
+diff --git i/Modules/Account/Tests/AccountTests/FeedSettingsImporterTests.swift w/Modules/Account/Tests/AccountTests/FeedSettingsImporterTests.swift
+index 0b63c5a59..a36746450 100644
+--- i/Modules/Account/Tests/AccountTests/FeedSettingsImporterTests.swift
++++ w/Modules/Account/Tests/AccountTests/FeedSettingsImporterTests.swift
+@@ -5,6 +5,7 @@
+ //  Created by Brent Simmons on 3/8/26.
+ //
+ 
++import Cocoa
+ import XCTest
+ import RSWeb
+ import Articles
+diff --git i/Modules/ActivityLog/Sources/ActivityLog/ActivityKind.swift w/Modules/ActivityLog/Sources/ActivityLog/ActivityKind.swift
+index 579cc39f1..6bbeebf91 100644
+--- i/Modules/ActivityLog/Sources/ActivityLog/ActivityKind.swift
++++ w/Modules/ActivityLog/Sources/ActivityLog/ActivityKind.swift
+@@ -5,6 +5,7 @@
+ //  Created by Brent Simmons on 4/4/26.
+ //
+ 
++import Cocoa
+ import Foundation
+ 
+ /// The kind of work an activity represents. Cases that have a URL
+diff --git i/Modules/ActivityLog/Sources/ActivityLog/ActivityOwner.swift w/Modules/ActivityLog/Sources/ActivityLog/ActivityOwner.swift
+index cc9181714..a8f133561 100644
+--- i/Modules/ActivityLog/Sources/ActivityLog/ActivityOwner.swift
++++ w/Modules/ActivityLog/Sources/ActivityLog/ActivityOwner.swift
+@@ -5,6 +5,7 @@
+ //  Created by Brent Simmons on 4/4/26.
+ //
+ 
++import Cocoa
+ import Foundation
+ 
+ public enum ActivityOwner: Sendable, Hashable {
+diff --git i/Modules/ActivityLog/Tests/ActivityLogTests/ActivityLogTests.swift w/Modules/ActivityLog/Tests/ActivityLogTests/ActivityLogTests.swift
+index 93c68afe6..56c66a4a6 100644
+--- i/Modules/ActivityLog/Tests/ActivityLogTests/ActivityLogTests.swift
++++ w/Modules/ActivityLog/Tests/ActivityLogTests/ActivityLogTests.swift
+@@ -5,6 +5,7 @@
+ //  Created by Brent Simmons on 4/4/26.
+ //
+ 
++import Cocoa
+ import Testing
+ import Foundation
+ @testable import ActivityLog
+diff --git i/Modules/ArticlesDatabase/Sources/ArticlesDatabase/ArticlesTable.swift w/Modules/ArticlesDatabase/Sources/ArticlesDatabase/ArticlesTable.swift
+index 88c90a7c3..cb3b3a762 100644
+--- i/Modules/ArticlesDatabase/Sources/ArticlesDatabase/ArticlesTable.swift
++++ w/Modules/ArticlesDatabase/Sources/ArticlesDatabase/ArticlesTable.swift
+@@ -6,6 +6,7 @@
+ //  Copyright © 2016 Ranchero Software, LLC. All rights reserved.
+ //
+ 
++import Cocoa
+ import Foundation
+ import os
+ import RSCore
+diff --git i/Modules/ArticlesDatabase/Sources/ArticlesDatabase/AuthorsSchemaMigration.swift w/Modules/ArticlesDatabase/Sources/ArticlesDatabase/AuthorsSchemaMigration.swift
+index 7359cabd8..e1219e79b 100644
+--- i/Modules/ArticlesDatabase/Sources/ArticlesDatabase/AuthorsSchemaMigration.swift
++++ w/Modules/ArticlesDatabase/Sources/ArticlesDatabase/AuthorsSchemaMigration.swift
+@@ -5,6 +5,7 @@
+ //  Created by Brent Simmons on 4/29/26.
+ //
+ 
++import Cocoa
+ import Foundation
+ import RSCore
+ import os
+diff --git i/Modules/ArticlesDatabase/Sources/ArticlesDatabase/Extensions/Article+Database.swift w/Modules/ArticlesDatabase/Sources/ArticlesDatabase/Extensions/Article+Database.swift
+index 6d76ebdfb..3b4d63782 100644
+--- i/Modules/ArticlesDatabase/Sources/ArticlesDatabase/Extensions/Article+Database.swift
++++ w/Modules/ArticlesDatabase/Sources/ArticlesDatabase/Extensions/Article+Database.swift
+@@ -6,6 +6,7 @@
+ //  Copyright © 2017 Ranchero Software. All rights reserved.
+ //
+ 
++import Cocoa
+ import Foundation
+ import RSDatabase
+ import RSDatabaseObjC
+diff --git i/Modules/ArticlesDatabase/Sources/ArticlesDatabase/SearchTable.swift w/Modules/ArticlesDatabase/Sources/ArticlesDatabase/SearchTable.swift
+index 56a5bacab..4460f9cdc 100644
+--- i/Modules/ArticlesDatabase/Sources/ArticlesDatabase/SearchTable.swift
++++ w/Modules/ArticlesDatabase/Sources/ArticlesDatabase/SearchTable.swift
+@@ -6,6 +6,7 @@
+ //  Copyright © 2019 Ranchero Software. All rights reserved.
+ //
+ 
++import Cocoa
+ import Foundation
+ import RSCore
+ import RSDatabase
+diff --git i/Modules/ArticlesDatabase/Sources/ArticlesDatabase/StatusesTable.swift w/Modules/ArticlesDatabase/Sources/ArticlesDatabase/StatusesTable.swift
+index 47afcede1..cb68dc259 100644
+--- i/Modules/ArticlesDatabase/Sources/ArticlesDatabase/StatusesTable.swift
++++ w/Modules/ArticlesDatabase/Sources/ArticlesDatabase/StatusesTable.swift
+@@ -6,6 +6,7 @@
+ //  Copyright © 2016 Ranchero Software, LLC. All rights reserved.
+ //
+ 
++import Cocoa
+ import Foundation
+ import os
+ import RSCore
+diff --git i/Modules/CloudKitSync/Sources/CloudKitSync/CloudKitError.swift w/Modules/CloudKitSync/Sources/CloudKitSync/CloudKitError.swift
+index 0f3f7dc48..a65bb9165 100644
+--- i/Modules/CloudKitSync/Sources/CloudKitSync/CloudKitError.swift
++++ w/Modules/CloudKitSync/Sources/CloudKitSync/CloudKitError.swift
+@@ -6,6 +6,7 @@
+ //  Copyright © 2020 Ranchero Software, LLC. All rights reserved.
+ //
+ 
++import Cocoa
+ import Foundation
+ import CloudKit
+ 
+diff --git i/Modules/CloudKitSync/Sources/CloudKitSync/CloudKitZone.swift w/Modules/CloudKitSync/Sources/CloudKitSync/CloudKitZone.swift
+index 7a72207b4..b5990023a 100644
+--- i/Modules/CloudKitSync/Sources/CloudKitSync/CloudKitZone.swift
++++ w/Modules/CloudKitSync/Sources/CloudKitSync/CloudKitZone.swift
+@@ -6,6 +6,7 @@
+ //  Copyright © 2020 Ranchero Software, LLC. All rights reserved.
+ //
+ 
++import Cocoa
+ import CloudKit
+ import os
+ import RSCore
+diff --git i/Modules/CloudKitSync/Sources/CloudKitSync/CloudKitZoneResult.swift w/Modules/CloudKitSync/Sources/CloudKitSync/CloudKitZoneResult.swift
+index f50374cac..483e148a0 100644
+--- i/Modules/CloudKitSync/Sources/CloudKitSync/CloudKitZoneResult.swift
++++ w/Modules/CloudKitSync/Sources/CloudKitSync/CloudKitZoneResult.swift
+@@ -6,6 +6,7 @@
+ //  Copyright © 2020 Ranchero Software, LLC. All rights reserved.
+ //
+ 
++import Cocoa
+ import Foundation
+ import CloudKit
+ 
+diff --git i/Modules/ErrorLog/Tests/ErrorLogTests/ErrorLogDatabaseTests.swift w/Modules/ErrorLog/Tests/ErrorLogTests/ErrorLogDatabaseTests.swift
+index 6007affaf..d61026bd2 100644
+--- i/Modules/ErrorLog/Tests/ErrorLogTests/ErrorLogDatabaseTests.swift
++++ w/Modules/ErrorLog/Tests/ErrorLogTests/ErrorLogDatabaseTests.swift
+@@ -5,6 +5,7 @@
+ //  Created by Brent Simmons on 3/12/26.
+ //
+ 
++import Cocoa
+ import Testing
+ import Foundation
+ @testable import ErrorLog
+diff --git i/Modules/FeedFinder/Sources/FeedFinder/FeedFinder.swift w/Modules/FeedFinder/Sources/FeedFinder/FeedFinder.swift
+index 4b953e364..c0f2b0ddb 100644
+--- i/Modules/FeedFinder/Sources/FeedFinder/FeedFinder.swift
++++ w/Modules/FeedFinder/Sources/FeedFinder/FeedFinder.swift
+@@ -6,6 +6,7 @@
+ //  Copyright © 2016 Ranchero Software, LLC. All rights reserved.
+ //
+ 
++import Cocoa
+ import Foundation
+ import os
+ import RSParser
+diff --git i/Modules/FeedFinder/Sources/FeedFinder/HTMLFeedFinder.swift w/Modules/FeedFinder/Sources/FeedFinder/HTMLFeedFinder.swift
+index 4d3363060..5e49f65ce 100644
+--- i/Modules/FeedFinder/Sources/FeedFinder/HTMLFeedFinder.swift
++++ w/Modules/FeedFinder/Sources/FeedFinder/HTMLFeedFinder.swift
+@@ -6,6 +6,7 @@
+ //  Copyright © 2016 Ranchero Software, LLC. All rights reserved.
+ //
+ 
++import Cocoa
+ import Foundation
+ import RSParser
+ 
+diff --git i/Modules/HTMLMetadata/Sources/HTMLMetadata/HTMLMetadataDownloader.swift w/Modules/HTMLMetadata/Sources/HTMLMetadata/HTMLMetadataDownloader.swift
+index 5e14cfc35..e2ab725c4 100644
+--- i/Modules/HTMLMetadata/Sources/HTMLMetadata/HTMLMetadataDownloader.swift
++++ w/Modules/HTMLMetadata/Sources/HTMLMetadata/HTMLMetadataDownloader.swift
+@@ -6,6 +6,7 @@
+ //  Copyright © 2017 Ranchero Software. All rights reserved.
+ //
+ 
++import Cocoa
+ import Foundation
+ import os
+ import RSCore
+diff --git i/Modules/NewsBlur/Sources/NewsBlur/Models/NewsBlurStory.swift w/Modules/NewsBlur/Sources/NewsBlur/Models/NewsBlurStory.swift
+index b6c603734..da1195a72 100644
+--- i/Modules/NewsBlur/Sources/NewsBlur/Models/NewsBlurStory.swift
++++ w/Modules/NewsBlur/Sources/NewsBlur/Models/NewsBlurStory.swift
+@@ -6,6 +6,7 @@
+ //  Copyright (c) 2020 Ranchero Software, LLC. All rights reserved.
+ //
+ 
++import Cocoa
+ import Foundation
+ import RSCore
+ import RSParser
+diff --git i/Modules/NewsBlur/Sources/NewsBlur/Models/NewsBlurStoryHash.swift w/Modules/NewsBlur/Sources/NewsBlur/Models/NewsBlurStoryHash.swift
+index 9cfd6cb3e..bd1524b39 100644
+--- i/Modules/NewsBlur/Sources/NewsBlur/Models/NewsBlurStoryHash.swift
++++ w/Modules/NewsBlur/Sources/NewsBlur/Models/NewsBlurStoryHash.swift
+@@ -6,6 +6,7 @@
+ //  Copyright (c) 2020 Ranchero Software, LLC. All rights reserved.
+ //
+ 
++import Cocoa
+ import Foundation
+ import RSCore
+ import RSParser
+diff --git i/Modules/RSCore/Sources/RSCore/AppConfig.swift w/Modules/RSCore/Sources/RSCore/AppConfig.swift
+index 2b8f3d257..ce23ec601 100644
+--- i/Modules/RSCore/Sources/RSCore/AppConfig.swift
++++ w/Modules/RSCore/Sources/RSCore/AppConfig.swift
+@@ -6,6 +6,7 @@
+ //  Copyright © 2024 Ranchero Software. All rights reserved.
+ //
+ 
++import Cocoa
+ import Foundation
+ 
+ @MainActor public final class AppConfig {
+diff --git i/Modules/RSCore/Sources/RSCore/BinaryDiskCache.swift w/Modules/RSCore/Sources/RSCore/BinaryDiskCache.swift
+index aac68f50f..ab103fb5f 100644
+--- i/Modules/RSCore/Sources/RSCore/BinaryDiskCache.swift
++++ w/Modules/RSCore/Sources/RSCore/BinaryDiskCache.swift
+@@ -6,6 +6,7 @@
+ //  Copyright © 2017 Ranchero Software, LLC. All rights reserved.
+ //
+ 
++import Cocoa
+ import Foundation
+ import os
+ 
+diff --git i/Modules/RSCore/Sources/RSCore/CoalescingQueue.swift w/Modules/RSCore/Sources/RSCore/CoalescingQueue.swift
+index e7840f27c..e7c5ca423 100644
+--- i/Modules/RSCore/Sources/RSCore/CoalescingQueue.swift
++++ w/Modules/RSCore/Sources/RSCore/CoalescingQueue.swift
+@@ -6,6 +6,7 @@
+ //  Copyright © 2018 Ranchero Software, LLC. All rights reserved.
+ //
+ 
++import Cocoa
+ import Foundation
+ 
+ // Use when you want to coalesce calls for something like updating visible table cells.
+diff --git i/Modules/RSCore/Sources/RSCore/Platform.swift w/Modules/RSCore/Sources/RSCore/Platform.swift
+index 572aed3b1..c09e88a05 100644
+--- i/Modules/RSCore/Sources/RSCore/Platform.swift
++++ w/Modules/RSCore/Sources/RSCore/Platform.swift
+@@ -6,6 +6,7 @@
+ //  Copyright © 2020 Ranchero Software, LLC. All rights reserved.
+ //
+ 
++import Cocoa
+ import Foundation
+ import os
+ 
+diff --git i/Modules/RSCore/Sources/RSCore/SendToBlogEditorApp.swift w/Modules/RSCore/Sources/RSCore/SendToBlogEditorApp.swift
+index 6e2f7e065..0a37e0d7c 100644
+--- i/Modules/RSCore/Sources/RSCore/SendToBlogEditorApp.swift
++++ w/Modules/RSCore/Sources/RSCore/SendToBlogEditorApp.swift
+@@ -5,6 +5,7 @@
+ //  Created by Nate Weaver on 2020-01-04.
+ //  Copyright © 2020 Ranchero Software, LLC. All rights reserved.
+ //
++import Cocoa
+ #if os(macOS)
+ import Foundation
+ 
+diff --git i/Modules/RSCore/Sources/RSCore/String+RSCore.swift w/Modules/RSCore/Sources/RSCore/String+RSCore.swift
+index 82d223651..3f1497f91 100644
+--- i/Modules/RSCore/Sources/RSCore/String+RSCore.swift
++++ w/Modules/RSCore/Sources/RSCore/String+RSCore.swift
+@@ -6,6 +6,7 @@
+ //  Copyright © 2018 Ranchero Software, LLC. All rights reserved.
+ //
+ 
++import Cocoa
+ import Foundation
+ import CryptoKit
+ 
+diff --git i/Modules/RSCore/Sources/RSCore/UIKit/ImageHeaderView.swift w/Modules/RSCore/Sources/RSCore/UIKit/ImageHeaderView.swift
+index 9bb8bf3e6..60c4911c1 100644
+--- i/Modules/RSCore/Sources/RSCore/UIKit/ImageHeaderView.swift
++++ w/Modules/RSCore/Sources/RSCore/UIKit/ImageHeaderView.swift
+@@ -6,6 +6,7 @@
+ //  Copyright © 2019 Ranchero Software. All rights reserved.
+ //
+ 
++import Cocoa
+ #if os(iOS)
+ 
+ import UIKit
+diff --git i/Modules/RSCore/Sources/RSCore/UIKit/PoppableGestureRecognizerDelegate.swift w/Modules/RSCore/Sources/RSCore/UIKit/PoppableGestureRecognizerDelegate.swift
+index 02cb442ed..d5607168b 100644
+--- i/Modules/RSCore/Sources/RSCore/UIKit/PoppableGestureRecognizerDelegate.swift
++++ w/Modules/RSCore/Sources/RSCore/UIKit/PoppableGestureRecognizerDelegate.swift
+@@ -7,6 +7,7 @@
+ //
+ // https://stackoverflow.com/a/41248703
+ 
++import Cocoa
+ #if os(iOS)
+ 
+ import UIKit
+diff --git i/Modules/RSCore/Sources/RSCore/UIKit/UIFont+RSCore.swift w/Modules/RSCore/Sources/RSCore/UIKit/UIFont+RSCore.swift
+index 910907d48..35cc72cf9 100644
+--- i/Modules/RSCore/Sources/RSCore/UIKit/UIFont+RSCore.swift
++++ w/Modules/RSCore/Sources/RSCore/UIKit/UIFont+RSCore.swift
+@@ -6,6 +6,7 @@
+ //  Copyright © 2019 Ranchero Software. All rights reserved.
+ //
+ 
++import Cocoa
+ #if os(iOS)
+ 
+ import UIKit
+diff --git i/Modules/RSCore/Sources/RSCore/UIKit/UIViewController+RSCore.swift w/Modules/RSCore/Sources/RSCore/UIKit/UIViewController+RSCore.swift
+index f516bec9e..815fce646 100644
+--- i/Modules/RSCore/Sources/RSCore/UIKit/UIViewController+RSCore.swift
++++ w/Modules/RSCore/Sources/RSCore/UIKit/UIViewController+RSCore.swift
+@@ -6,6 +6,7 @@
+ //  Copyright © 2019 Ranchero Software. All rights reserved.
+ //
+ 
++import Cocoa
+ #if os(iOS)
+ 
+ import UIKit
+diff --git i/Modules/RSCore/Tests/RSCoreTests/CollapsingWhitespaceTests.swift w/Modules/RSCore/Tests/RSCoreTests/CollapsingWhitespaceTests.swift
+index e9d37e9bb..df33b2882 100644
+--- i/Modules/RSCore/Tests/RSCoreTests/CollapsingWhitespaceTests.swift
++++ w/Modules/RSCore/Tests/RSCoreTests/CollapsingWhitespaceTests.swift
+@@ -6,6 +6,7 @@
+ //  Copyright © 2026 Ranchero Software, LLC. All rights reserved.
+ //
+ 
++import Cocoa
+ import Testing
+ @testable import RSCore
+ 
+diff --git i/Modules/RSCore/Tests/RSCoreTests/Data+RSCoreTests.swift w/Modules/RSCore/Tests/RSCoreTests/Data+RSCoreTests.swift
+index 92f352705..c8a0338da 100644
+--- i/Modules/RSCore/Tests/RSCoreTests/Data+RSCoreTests.swift
++++ w/Modules/RSCore/Tests/RSCoreTests/Data+RSCoreTests.swift
+@@ -6,6 +6,7 @@
+ //  Copyright © 2020 Ranchero Software, LLC. All rights reserved.
+ //
+ 
++import Cocoa
+ import XCTest
+ import Foundation
+ @testable import RSCore
+diff --git i/Modules/RSDatabase/Sources/RSDatabase/FMResultSet+Extras.swift w/Modules/RSDatabase/Sources/RSDatabase/FMResultSet+Extras.swift
+index 47f7920c7..8fe4e613f 100644
+--- i/Modules/RSDatabase/Sources/RSDatabase/FMResultSet+Extras.swift
++++ w/Modules/RSDatabase/Sources/RSDatabase/FMResultSet+Extras.swift
+@@ -5,6 +5,7 @@
+ //  Created by Brent Simmons on 3/10/24.
+ //
+ 
++import Cocoa
+ import Foundation
+ import RSDatabaseObjC
+ 
+diff --git i/Modules/RSDatabase/Tests/RSDatabaseTests/DatabaseTests.swift w/Modules/RSDatabase/Tests/RSDatabaseTests/DatabaseTests.swift
+index f485a7163..bf48bce03 100644
+--- i/Modules/RSDatabase/Tests/RSDatabaseTests/DatabaseTests.swift
++++ w/Modules/RSDatabase/Tests/RSDatabaseTests/DatabaseTests.swift
+@@ -5,6 +5,7 @@
+ //  Created by Brent Simmons on 4/24/25.
+ //
+ 
++import Cocoa
+ import Testing
+ import Foundation
+ import RSDatabase
+diff --git i/Modules/RSParser/Sources/RSParser/Feeds/Data+ProbablyFormat.swift w/Modules/RSParser/Sources/RSParser/Feeds/Data+ProbablyFormat.swift
+index 4277e622f..c7148d8c1 100644
+--- i/Modules/RSParser/Sources/RSParser/Feeds/Data+ProbablyFormat.swift
++++ w/Modules/RSParser/Sources/RSParser/Feeds/Data+ProbablyFormat.swift
+@@ -5,6 +5,7 @@
+ //  Created by Brent Simmons on 4/20/26.
+ //
+ 
++import Cocoa
+ import Foundation
+ 
+ // Heuristic byte-level format detection for feed data. Direct port of the
+diff --git i/Modules/RSParser/Sources/RSParser/Feeds/JSON/RSSInJSONParser.swift w/Modules/RSParser/Sources/RSParser/Feeds/JSON/RSSInJSONParser.swift
+index 19b995ee4..a1edf9e0e 100644
+--- i/Modules/RSParser/Sources/RSParser/Feeds/JSON/RSSInJSONParser.swift
++++ w/Modules/RSParser/Sources/RSParser/Feeds/JSON/RSSInJSONParser.swift
+@@ -6,6 +6,7 @@
+ //  Copyright © 2017 Ranchero Software, LLC. All rights reserved.
+ //
+ 
++import Cocoa
+ import Foundation
+ import RSCore
+ 
+diff --git i/Modules/RSParser/Sources/RSParser/XML/String+HTMLEntities.swift w/Modules/RSParser/Sources/RSParser/XML/String+HTMLEntities.swift
+index 96530ab2d..f428b9a39 100644
+--- i/Modules/RSParser/Sources/RSParser/XML/String+HTMLEntities.swift
++++ w/Modules/RSParser/Sources/RSParser/XML/String+HTMLEntities.swift
+@@ -9,6 +9,7 @@
+ // using `.html` mode (predefined XML, numeric, and HTML named entities). Unrecognized
+ // entities pass through literally.
+ 
++import Cocoa
+ public extension String {
+ 
+ 	/// Return the string with all HTML entities (named, decimal, hex) decoded.
+diff --git i/Modules/RSParser/Sources/RSParser/XML/XMLEntities.swift w/Modules/RSParser/Sources/RSParser/XML/XMLEntities.swift
+index 5a0440596..77a958238 100644
+--- i/Modules/RSParser/Sources/RSParser/XML/XMLEntities.swift
++++ w/Modules/RSParser/Sources/RSParser/XML/XMLEntities.swift
+@@ -5,6 +5,7 @@
+ //  Created by Brent Simmons on 4/18/26.
+ //
+ 
++import Cocoa
+ import Foundation
+ 
+ // Entity decoding for the XML and HTML scanners.
+diff --git i/Modules/RSParser/Tests/RSParserTests/XML/EntityDecodingPerformanceTests.swift w/Modules/RSParser/Tests/RSParserTests/XML/EntityDecodingPerformanceTests.swift
+index cbf33e92b..5791e1ee3 100644
+--- i/Modules/RSParser/Tests/RSParserTests/XML/EntityDecodingPerformanceTests.swift
++++ w/Modules/RSParser/Tests/RSParserTests/XML/EntityDecodingPerformanceTests.swift
+@@ -6,6 +6,7 @@
+ //  Copyright © 2026 Ranchero Software, LLC. All rights reserved.
+ //
+ 
++import Cocoa
+ import XCTest
+ @testable import RSParser
+ 
+diff --git i/Modules/RSWeb/Sources/RSWeb/DownloadSession.swift w/Modules/RSWeb/Sources/RSWeb/DownloadSession.swift
+index 6151461d7..b178d5aba 100755
+--- i/Modules/RSWeb/Sources/RSWeb/DownloadSession.swift
++++ w/Modules/RSWeb/Sources/RSWeb/DownloadSession.swift
+@@ -6,6 +6,7 @@
+ //  Copyright © 2016 Ranchero Software, LLC. All rights reserved.
+ //
+ 
++import Cocoa
+ import Foundation
+ import os
+ import RSCore
+diff --git i/Modules/RSWeb/Sources/RSWeb/URL+RSWeb.swift w/Modules/RSWeb/Sources/RSWeb/URL+RSWeb.swift
+index f90fa8cc4..966402240 100755
+--- i/Modules/RSWeb/Sources/RSWeb/URL+RSWeb.swift
++++ w/Modules/RSWeb/Sources/RSWeb/URL+RSWeb.swift
+@@ -6,6 +6,7 @@
+ //  Copyright © 2016 Ranchero Software, LLC. All rights reserved.
+ //
+ 
++import Cocoa
+ import Foundation
+ 
+ private struct URLConstants {
+diff --git i/Modules/RSWeb/Sources/RSWeb/URLRequest+RSWeb.swift w/Modules/RSWeb/Sources/RSWeb/URLRequest+RSWeb.swift
+index 654663bf3..14f3e2237 100755
+--- i/Modules/RSWeb/Sources/RSWeb/URLRequest+RSWeb.swift
++++ w/Modules/RSWeb/Sources/RSWeb/URLRequest+RSWeb.swift
+@@ -6,6 +6,7 @@
+ //  Copyright © 2016 Ranchero Software, LLC. All rights reserved.
+ //
+ 
++import Cocoa
+ import Foundation
+ 
+ public extension URLRequest {
+diff --git i/Modules/RSWeb/Sources/RSWeb/WebServices/URLSession+Webservice.swift w/Modules/RSWeb/Sources/RSWeb/WebServices/URLSession+Webservice.swift
+index ca4781c42..9d7895c64 100644
+--- i/Modules/RSWeb/Sources/RSWeb/WebServices/URLSession+Webservice.swift
++++ w/Modules/RSWeb/Sources/RSWeb/WebServices/URLSession+Webservice.swift
+@@ -6,6 +6,7 @@
+ //  Copyright © 2019 Ranchero Software. All rights reserved.
+ //
+ 
++import Cocoa
+ import Foundation
+ import RSCore
+ 
+diff --git i/Modules/RSWeb/Tests/RSWebTests/DownloadSession429Tests.swift w/Modules/RSWeb/Tests/RSWebTests/DownloadSession429Tests.swift
+index bd9759055..93dcf1875 100644
+--- i/Modules/RSWeb/Tests/RSWebTests/DownloadSession429Tests.swift
++++ w/Modules/RSWeb/Tests/RSWebTests/DownloadSession429Tests.swift
+@@ -5,6 +5,7 @@
+ //  Created by Brent Simmons on 9/17/26.
+ //
+ 
++import Cocoa
+ import Foundation
+ import Testing
+ @testable import RSWeb
+diff --git i/Modules/SyncDatabase/Sources/SyncDatabase/SyncStatusTable.swift w/Modules/SyncDatabase/Sources/SyncDatabase/SyncStatusTable.swift
+index ed82bbe5a..2204422dd 100644
+--- i/Modules/SyncDatabase/Sources/SyncDatabase/SyncStatusTable.swift
++++ w/Modules/SyncDatabase/Sources/SyncDatabase/SyncStatusTable.swift
+@@ -6,6 +6,7 @@
+ //  Copyright © 2019 Ranchero Software. All rights reserved.
+ //
+ 
++import Cocoa
+ import Foundation
+ import Articles
+ import RSDatabase
+diff --git i/Shared/AccountStats/AccountStatsViewModel.swift w/Shared/AccountStats/AccountStatsViewModel.swift
+index d1d72e5ee..41fc9cac2 100644
+--- i/Shared/AccountStats/AccountStatsViewModel.swift
++++ w/Shared/AccountStats/AccountStatsViewModel.swift
+@@ -5,6 +5,7 @@
+ //  Created by Brent Simmons on 4/7/26.
+ //
+ 
++import Cocoa
+ import Foundation
+ import Account
+ import ArticlesDatabase
+diff --git i/Shared/Activity/ActivityManager.swift w/Shared/Activity/ActivityManager.swift
+index 3f1758554..ca39d5804 100644
+--- i/Shared/Activity/ActivityManager.swift
++++ w/Shared/Activity/ActivityManager.swift
+@@ -6,6 +6,7 @@
+ //  Copyright © 2019 Ranchero Software. All rights reserved.
+ //
+ 
++import Cocoa
+ import Foundation
+ import CoreSpotlight
+ import CoreServices
+diff --git i/Shared/ActivityLog/ActivityLogViewModel.swift w/Shared/ActivityLog/ActivityLogViewModel.swift
+index d51d4cb6d..58c4d67d4 100644
+--- i/Shared/ActivityLog/ActivityLogViewModel.swift
++++ w/Shared/ActivityLog/ActivityLogViewModel.swift
+@@ -5,6 +5,7 @@
+ //  Created by Brent Simmons on 6/11/26.
+ //
+ 
++import Cocoa
+ import Foundation
+ import ActivityLog
+ 
+diff --git i/Shared/Article Rendering/ArticleRenderer.swift w/Shared/Article Rendering/ArticleRenderer.swift
+index ba859a4ed..ccc662348 100644
+--- i/Shared/Article Rendering/ArticleRenderer.swift	
++++ w/Shared/Article Rendering/ArticleRenderer.swift	
+@@ -6,6 +6,7 @@
+ //  Copyright © 2015 Ranchero Software, LLC. All rights reserved.
+ //
+ 
++import Cocoa
+ import Foundation
+ #if os(iOS)
+ import UIKit
+diff --git i/Shared/Article Rendering/ArticleRenderingSpecialCases.swift w/Shared/Article Rendering/ArticleRenderingSpecialCases.swift
+index 1cce9a0cf..626f54b2f 100644
+--- i/Shared/Article Rendering/ArticleRenderingSpecialCases.swift	
++++ w/Shared/Article Rendering/ArticleRenderingSpecialCases.swift	
+@@ -6,6 +6,7 @@
+ //  Copyright © 2025 Ranchero Software. All rights reserved.
+ //
+ 
++import Cocoa
+ import Foundation
+ import RSWeb
+ import Articles
+diff --git i/Shared/Article Rendering/ArticleTextSize.swift w/Shared/Article Rendering/ArticleTextSize.swift
+index 456bee65d..939c16d3e 100644
+--- i/Shared/Article Rendering/ArticleTextSize.swift	
++++ w/Shared/Article Rendering/ArticleTextSize.swift	
+@@ -6,6 +6,7 @@
+ //  Copyright © 2020 Ranchero Software. All rights reserved.
+ //
+ 
++import Cocoa
+ import Foundation
+ 
+ enum ArticleTextSize: Int, CaseIterable, Identifiable {
+diff --git i/Shared/Article Rendering/WebViewConfiguration.swift w/Shared/Article Rendering/WebViewConfiguration.swift
+index f2b3a9eb3..2437d7c4b 100644
+--- i/Shared/Article Rendering/WebViewConfiguration.swift	
++++ w/Shared/Article Rendering/WebViewConfiguration.swift	
+@@ -6,6 +6,7 @@
+ //  Copyright © 2025 Ranchero Software. All rights reserved.
+ //
+ 
++import Cocoa
+ import Foundation
+ import RSCore
+ import os
+diff --git i/Shared/ArticleStyles/ArticleTheme.swift w/Shared/ArticleStyles/ArticleTheme.swift
+index e9583a95c..24e1e58a6 100644
+--- i/Shared/ArticleStyles/ArticleTheme.swift
++++ w/Shared/ArticleStyles/ArticleTheme.swift
+@@ -6,6 +6,7 @@
+ //  Copyright © 2015 Ranchero Software, LLC. All rights reserved.
+ //
+ 
++import Cocoa
+ import Foundation
+ 
+ struct ArticleTheme: Equatable, Sendable {
+diff --git i/Shared/ArticleStyles/ArticleThemesManager.swift w/Shared/ArticleStyles/ArticleThemesManager.swift
+index 110a4ccff..78e2eb006 100644
+--- i/Shared/ArticleStyles/ArticleThemesManager.swift
++++ w/Shared/ArticleStyles/ArticleThemesManager.swift
+@@ -6,6 +6,7 @@
+ //  Copyright © 2015 Ranchero Software, LLC. All rights reserved.
+ //
+ 
++import Cocoa
+ import Foundation
+ import os
+ import RSCore
+diff --git i/Shared/Assets.swift w/Shared/Assets.swift
+index a17c3d4a6..3100d0c68 100644
+--- i/Shared/Assets.swift
++++ w/Shared/Assets.swift
+@@ -6,6 +6,7 @@
+ //  Copyright © 2025 Ranchero Software. All rights reserved.
+ //
+ 
++import Cocoa
+ import Foundation
+ 
+ #if canImport(UIKit)
+diff --git i/Shared/Commands/DeleteCommand.swift w/Shared/Commands/DeleteCommand.swift
+index c5d3cf34d..5f560a82e 100644
+--- i/Shared/Commands/DeleteCommand.swift
++++ w/Shared/Commands/DeleteCommand.swift
+@@ -6,6 +6,7 @@
+ //  Copyright © 2017 Ranchero Software. All rights reserved.
+ //
+ 
++import Cocoa
+ import Foundation
+ import RSCore
+ import RSTree
+diff --git i/Shared/Commands/MarkStatusCommand.swift w/Shared/Commands/MarkStatusCommand.swift
+index 5eb438519..1e6599d8c 100644
+--- i/Shared/Commands/MarkStatusCommand.swift
++++ w/Shared/Commands/MarkStatusCommand.swift
+@@ -6,6 +6,7 @@
+ //  Copyright © 2017 Ranchero Software. All rights reserved.
+ //
+ 
++import Cocoa
+ import Foundation
+ import RSCore
+ import Articles
+diff --git i/Shared/CurrentActivity/CurrentActivityViewModel.swift w/Shared/CurrentActivity/CurrentActivityViewModel.swift
+index f6afa3d07..f048d9d44 100644
+--- i/Shared/CurrentActivity/CurrentActivityViewModel.swift
++++ w/Shared/CurrentActivity/CurrentActivityViewModel.swift
+@@ -5,6 +5,7 @@
+ //  Created by Brent Simmons on 6/9/26.
+ //
+ 
++import Cocoa
+ import Foundation
+ import ActivityLog
+ 
+diff --git i/Shared/Dinosaurs/DinosaursViewModel.swift w/Shared/Dinosaurs/DinosaursViewModel.swift
+index 016a760d5..2f3ff1393 100644
+--- i/Shared/Dinosaurs/DinosaursViewModel.swift
++++ w/Shared/Dinosaurs/DinosaursViewModel.swift
+@@ -5,6 +5,7 @@
+ //  Created by Brent Simmons on 6/1/26.
+ //
+ 
++import Cocoa
+ import Foundation
+ import os
+ import Account
+diff --git i/Shared/Extensions/ArticleStringFormatter.swift w/Shared/Extensions/ArticleStringFormatter.swift
+index ec45d85c2..20279f4d1 100644
+--- i/Shared/Extensions/ArticleStringFormatter.swift
++++ w/Shared/Extensions/ArticleStringFormatter.swift
+@@ -6,6 +6,7 @@
+ //  Copyright © 2015 Ranchero Software, LLC. All rights reserved.
+ //
+ 
++import Cocoa
+ import Foundation
+ import Articles
+ import RSCore
+diff --git i/Shared/ShareExtension/ExtensionContainersFile.swift w/Shared/ShareExtension/ExtensionContainersFile.swift
+index ef05cf15c..0790087d9 100644
+--- i/Shared/ShareExtension/ExtensionContainersFile.swift
++++ w/Shared/ShareExtension/ExtensionContainersFile.swift
+@@ -6,6 +6,7 @@
+ //  Copyright © 2020 Ranchero Software. All rights reserved.
+ //
+ 
++import Cocoa
+ import Foundation
+ import os
+ import RSCore
+diff --git i/Shared/ShareExtension/ExtensionFeedAddRequestFile.swift w/Shared/ShareExtension/ExtensionFeedAddRequestFile.swift
+index 9ea8fbbc5..90d2b17eb 100644
+--- i/Shared/ShareExtension/ExtensionFeedAddRequestFile.swift
++++ w/Shared/ShareExtension/ExtensionFeedAddRequestFile.swift
+@@ -6,6 +6,7 @@
+ //  Copyright © 2020 Ranchero Software. All rights reserved.
+ //
+ 
++import Cocoa
+ import Foundation
+ import RSCore
+ import os
+diff --git i/Shared/SmartFeeds/SearchFeedDelegate.swift w/Shared/SmartFeeds/SearchFeedDelegate.swift
+index 2503981bd..43a328ee5 100644
+--- i/Shared/SmartFeeds/SearchFeedDelegate.swift
++++ w/Shared/SmartFeeds/SearchFeedDelegate.swift
+@@ -6,6 +6,7 @@
+ //  Copyright © 2019 Ranchero Software. All rights reserved.
+ //
+ 
++import Cocoa
+ import Foundation
+ import RSCore
+ import Account
+diff --git i/Shared/SmartFeeds/SearchTimelineFeedDelegate.swift w/Shared/SmartFeeds/SearchTimelineFeedDelegate.swift
+index 5e97846d0..69dbb3ee5 100644
+--- i/Shared/SmartFeeds/SearchTimelineFeedDelegate.swift
++++ w/Shared/SmartFeeds/SearchTimelineFeedDelegate.swift
+@@ -6,6 +6,7 @@
+ //  Copyright © 2019 Ranchero Software. All rights reserved.
+ //
+ 
++import Cocoa
+ import Foundation
+ import RSCore
+ import Account
+diff --git i/Shared/SmartFeeds/SmartFeed.swift w/Shared/SmartFeeds/SmartFeed.swift
+index ece8c8c92..11970096e 100644
+--- i/Shared/SmartFeeds/SmartFeed.swift
++++ w/Shared/SmartFeeds/SmartFeed.swift
+@@ -6,6 +6,7 @@
+ //  Copyright © 2017 Ranchero Software. All rights reserved.
+ //
+ 
++import Cocoa
+ import Foundation
+ import RSCore
+ import Articles
+diff --git i/Shared/SmartFeeds/SmartFeedsController.swift w/Shared/SmartFeeds/SmartFeedsController.swift
+index da9902ee3..544664dfa 100644
+--- i/Shared/SmartFeeds/SmartFeedsController.swift
++++ w/Shared/SmartFeeds/SmartFeedsController.swift
+@@ -6,6 +6,7 @@
+ //  Copyright © 2017 Ranchero Software. All rights reserved.
+ //
+ 
++import Cocoa
+ import Foundation
+ import RSCore
+ import Account
+diff --git i/Shared/SmartFeeds/StarredFeedDelegate.swift w/Shared/SmartFeeds/StarredFeedDelegate.swift
+index 06cf76018..97f04c09a 100644
+--- i/Shared/SmartFeeds/StarredFeedDelegate.swift
++++ w/Shared/SmartFeeds/StarredFeedDelegate.swift
+@@ -6,6 +6,7 @@
+ //  Copyright © 2017 Ranchero Software. All rights reserved.
+ //
+ 
++import Cocoa
+ import Foundation
+ import RSCore
+ import Articles
+diff --git i/Shared/SmartFeeds/TodayFeedDelegate.swift w/Shared/SmartFeeds/TodayFeedDelegate.swift
+index f7f73695b..29b4636b5 100644
+--- i/Shared/SmartFeeds/TodayFeedDelegate.swift
++++ w/Shared/SmartFeeds/TodayFeedDelegate.swift
+@@ -6,6 +6,7 @@
+ //  Copyright © 2017 Ranchero Software. All rights reserved.
+ //
+ 
++import Cocoa
+ import Foundation
+ import RSCore
+ import Articles
+diff --git i/Shared/Timeline/ArticleArray.swift w/Shared/Timeline/ArticleArray.swift
+index b4e552895..f7e86ef71 100644
+--- i/Shared/Timeline/ArticleArray.swift
++++ w/Shared/Timeline/ArticleArray.swift
+@@ -6,6 +6,7 @@
+ //  Copyright © 2017 Ranchero Software. All rights reserved.
+ //
+ 
++import Cocoa
+ import Foundation
+ import Articles
+ 
+diff --git i/Shared/Timeline/ArticleSortParameters.swift w/Shared/Timeline/ArticleSortParameters.swift
+index 86244dd7c..ae2cfead5 100644
+--- i/Shared/Timeline/ArticleSortParameters.swift
++++ w/Shared/Timeline/ArticleSortParameters.swift
+@@ -6,6 +6,7 @@
+ //  Copyright © 2026 Ranchero Software. All rights reserved.
+ //
+ 
++import Cocoa
+ import Foundation
+ 
+ /// The field a timeline is sorted by. Raw values double as table column identifiers, sort descriptor keys, and menu item identifiers.
+diff --git i/Shared/Timer/RefreshInterval.swift w/Shared/Timer/RefreshInterval.swift
+index 53ae2a8ee..05a4b8d99 100644
+--- i/Shared/Timer/RefreshInterval.swift
++++ w/Shared/Timer/RefreshInterval.swift
+@@ -6,6 +6,7 @@
+ //  Copyright © 2019 Ranchero Software. All rights reserved.
+ //
+ 
++import Cocoa
+ import Foundation
+ 
+ enum RefreshInterval: Int, CaseIterable, Identifiable {
+diff --git i/Shared/UserNotifications/UserNotificationManager.swift w/Shared/UserNotifications/UserNotificationManager.swift
+index 53f043c36..6b0936c81 100644
+--- i/Shared/UserNotifications/UserNotificationManager.swift
++++ w/Shared/UserNotifications/UserNotificationManager.swift
+@@ -6,6 +6,7 @@
+ //  Copyright © 2019 Ranchero Software. All rights reserved.
+ //
+ 
++import Cocoa
+ import Foundation
+ import Account
+ import Articles
