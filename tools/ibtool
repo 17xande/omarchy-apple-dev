@@ -1387,6 +1387,41 @@ RELATION_ORDER = {"lessThanOrEqual": 0, "greaterThanOrEqual": 1, "equal": 2}
 
 def _constraint_order(view_el, cons, where, mac=False):
     owner = view_el.get("id")
+    par = {}
+    def _walk_par(e, aid):
+        for ch in e:
+            cid = ch.get("id")
+            if cid:
+                par[cid] = aid
+                _walk_par(ch, cid)
+            else:
+                _walk_par(ch, aid)
+    _walk_par(view_el, owner)
+    sidx = {}
+    def _walk_sidx(e):
+        subs = e.find("subviews")
+        if subs is not None:
+            for i, ch in enumerate(subs):
+                if ch.get("id"):
+                    sidx[ch.get("id")] = i
+                _walk_sidx(ch)
+    _walk_sidx(view_el)
+
+    def _gidx(item_id):
+        """Group index; a grandchild sorts inside its direct-subview
+        ancestor's group, after that ancestor's own constraints (golden
+        SidebarView: Mnm to iyL is the last root constraint)."""
+        if item_id in index:
+            return index[item_id]
+        if item_id in guides or item_id is None or item_id == owner:
+            return -1
+        anc, depth = item_id, 0
+        while anc is not None and anc not in index:
+            anc = par.get(anc)
+            depth += 1
+        if anc is None:
+            raise XibError(f"no frame for item {item_id!r} ({where})")
+        return index[anc] + depth / 10
     guides = [g.get("id") for g in view_el.findall("viewLayoutGuide")]
     subs = view_el.find("subviews")
     index, origin = {}, {}
@@ -1437,9 +1472,21 @@ def _constraint_order(view_el, cons, where, mac=False):
                 gkey = (1, 0.0, 0.0)
             elif item in origin:
                 x, y = origin[item]
-                gkey = (1, math.hypot(x, y), x) if not mac else (1, index.get(item, -1))
+                gkey = (1, math.hypot(x, y), x) if not mac else (1, index.get(item, -1), 0)
             elif item == owner and other is None:
-                gkey = (1, 0.0, 0.0) if not mac else (1, -1)
+                gkey = (1, 0.0, 0.0) if not mac else (1, -1, 0)
+            elif mac:
+                # grandchild: group by its nearest direct-subview ancestor,
+                # after that ancestor's own constraints (probe golden
+                # SidebarView: Mnm to iyL sorts after the HZs group)
+                anc, depth = item, 0
+                while anc is not None and anc not in index:
+                    anc = par.get(anc)
+                    depth += 1
+                if anc is None:
+                    raise XibError(f"constraint {c.get('id')}: no frame for item "
+                                   f"{item!r}; Apple's order unknown ({where})")
+                gkey = (1, index[anc], depth)
             else:
                 raise XibError(f"constraint {c.get('id')}: no frame for item {item!r}; "
                                f"Apple's order unknown ({where})")
@@ -1451,7 +1498,7 @@ def _constraint_order(view_el, cons, where, mac=False):
             if mac:
                 # relation ties break before the attribute (probe RenameSheet:
                 # the >= leading constraint precedes the equal trailing one)
-                return (index.get(item, -1), 0, rel, OWNER_ORDER.index(attr), 0)
+                return (_gidx(item), 0, rel, OWNER_ORDER.index(attr), 0)
             return gkey + (0, OWNER_ORDER.index(attr), 0, 0)
         order = MAC_OTHER_ORDER if mac else OTHER_ORDER
         if attr not in order or (oattr is not None and oattr not in order):
@@ -1459,7 +1506,7 @@ def _constraint_order(view_el, cons, where, mac=False):
                            f"Apple's order unknown ({where})")
         other_idx = 0 if guide_item else index.get(other, -1)
         if mac:
-            return (index.get(item, -1), 1, order.index(attr), rel, other_idx)
+            return (_gidx(item), 1, order.index(attr), rel, other_idx)
         return gkey + (1, OTHER_ORDER.index(attr), rel, other_idx)
 
     return sorted(cons, key=key)

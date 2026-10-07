@@ -328,7 +328,7 @@ LINE_BREAK_FLAGS2 = {"wordWrap": 0, "charWrap": 0x200, "clipping": 0x400,
 META_FONTS = {  # metaFont -> (NSSize, NSfFlags); probed names and flags
     "system": (13.0, 1044), "smallSystem": (11.0, 3100),
     "miniSystem": (9.0, 3100), "boldSystem": (13.0, 2072),
-    "smallBoldSystem": (11.0, 6204), "label": (10.0, 3100),
+    "smallBoldSystem": (11.0, 6204), "smallSystemBold": (11.0, 3357), "label": (10.0, 3100),
     "toolTips": (11.0, 3100), "menu": (13.0, 1558), "message": (13.0, 1044),
     "palette": (11.0, 3100), "titleBar": (13.0, 1044),
     "systemDetail": (11.0, 3100), "cellTitle": (11.0, 3100),
@@ -337,6 +337,7 @@ META_FONTS = {  # metaFont -> (NSSize, NSfFlags); probed names and flags
 FONT_NAMES = {"system": ".AppleSystemUIFont", "smallSystem": ".AppleSystemUIFont",
               "miniSystem": ".AppleSystemUIFont", "boldSystem": ".AppleSystemUIFontBold",
               "smallBoldSystem": ".AppleSystemUIFontBold", "systemBold": ".AppleSystemUIFontBold",
+              "smallSystemBold": ".AppleSystemUIFontBold",
               "cellTitle": ".AppleSystemUIFontMedium", "menu": ".AppleSystemUIFont",
               "message": ".AppleSystemUIFont", "palette": ".AppleSystemUIFont",
               "label": ".AppleSystemUIFont", "toolTips": ".AppleSystemUIFont",
@@ -359,6 +360,7 @@ CATALOG_COLORS = {
     "controlTextColor": (b"0\x00", b"0 1"),
     "disabledControlTextColor": (b"0.4375036359\x00", b"0.4666666667 1"),
     "controlBackgroundColor": (b"0.602715373\x00", b"0.6666666667 1"),
+    "_sourceListBackgroundColor": (b"0.602715373\x00", b"0.6666666667 1"),
     "selectedControlTextColor": (b"0\x00", b"0 1"),
     "windowBackgroundColor": (b"0.9493610263\x00", b"0.9493610263 1"),
     "windowFrameTextColor": (b"0\x00", b"0 1"),
@@ -640,6 +642,19 @@ class MacBuilder(I.Builder):
             return self._named_blue(name, where=where, inner_name="systemBlueColor")
         if name == "systemBlueColor":
             return self._named_blue(name)
+        if name == "_sourceListBackgroundColor":
+            # golden SidebarView [49]: own wrapper whose inner color is the
+            # controlBackgroundColor catalog WRAPPER object
+            if name in self.catalog_colors:
+                return self.catalog_colors[name]
+            inner = self.catalog_color("System", "controlBackgroundColor", where)
+            o = self.new("NSColor")
+            o.add("NSColorSpace", *self.int8(6))
+            o.add("NSCatalogName", *self.ref(self.string(catalog)))
+            o.add("NSColorName", *self.ref(self.string(name)))
+            o.add("NSColor", *self.ref(inner))
+            self.catalog_colors[name] = o
+            return o
         if name not in CATALOG_COLORS:
             raise I.XibError(f"System color {name!r} not probed ({where})")
         if name in self.catalog_colors:
@@ -937,6 +952,10 @@ def _field(b, el, where, superview, id_map, parent=None):
     o.add("NSControlWritingDirection", N.INT64, -1)
     o.add("NSControlSendActionMask", *b.int8(4))
     o.add("NSTextFieldAlignmentRectInsetsVersion", *b.int8(2))
+    if getattr(b, "proto_mode", False):
+        # prototypeCellView embedded nib compile (golden SidebarView proto60)
+        o.add("NSTextFieldLineBreakStrategyVersion", *b.int8(2))
+        o.add("NSLineBreakStrategy", *int_fit(65535))
     if el.get("contentType"):
         o.add("NSTextContentType", *b.ref(b.string(el.get("contentType"))))
     o.add("NSAllowsWritingTools", *b.boolean(False))
@@ -1020,9 +1039,13 @@ def _view(b, el, where, superview=None, id_map=None, guides=None, parent=None,
                 o.add("NSViewIsLayerTreeHost", *b.boolean(False))
         else:
             o.add("NSFrameSize", *b.ref(b.string(_size_str(el))))
+        if el.get("wantsLayer") == "YES":
+            o.add("NSViewIsLayerTreeHost", *b.boolean(False))
     else:
         o.add("NSFrame", *b.ref(b.string(_rect(el, "frame", where))))
         o.add("NSSuperview", *b.ref(superview))
+        if el.get("wantsLayer") == "YES":
+            o.add("NSViewIsLayerTreeHost", *b.boolean(False))
     if el.get("alphaValue") is not None:
         o.add("NSViewAlphaValue", *b.float64(float(el.get("alphaValue"))))
     o.add("NSViewWantsBestResolutionOpenGLSurface", *b.boolean(False))
@@ -1094,18 +1117,6 @@ def _table_cell_view(b, el, where, superview, id_map, parent=None):
     o.add("NSNibTouchBar", *(N.NIL, None))
     v, vt = _vflags(el, where)
     o.add("NSvFlags", vt, v)
-    r = el.find("rect[@key='frame']")
-    if float(r.get("x", 0)) == 0 and float(r.get("y", 0)) == 0:
-        o.add("NSFrameSize", *b.ref(b.string(_size_str(el))))
-    else:
-        o.add("NSFrame", *b.ref(b.string(_rect(el, "frame", where))))
-    o.add("NSViewWantsBestResolutionOpenGLSurface", *b.boolean(False))
-    if el.get("identifier"):
-        o.add("NSReuseIdentifierKey", *b.ref(b.string(el.get("identifier"))))
-    o.add("IBNSSafeAreaLayoutGuide", *(N.NIL, None))
-    o.add("IBNSLayoutMarginsGuide", *(N.NIL, None))
-    o.add("IBNSClipsToBounds", *b.int8(0))
-    id_map[el.get("id")] = o
     keys = [(o, parent)]
     subs = el.find("subviews")
     if subs is not None:
@@ -1118,6 +1129,19 @@ def _table_cell_view(b, el, where, superview, id_map, parent=None):
                                             id_map=id_map, guides=guides, parent=o)
             arr.add("UINibEncoderEmptyKey", *b.ref(sub))
             keys.extend(sub_pairs)
+    # golden SidebarView [146]: the frame string lands after the subtree
+    r = el.find("rect[@key='frame']")
+    if float(r.get("x", 0)) == 0 and float(r.get("y", 0)) == 0:
+        o.add("NSFrameSize", *b.ref(b.string(_size_str(el))))
+    else:
+        o.add("NSFrame", *b.ref(b.string(_rect(el, "frame", where))))
+    o.add("NSViewWantsBestResolutionOpenGLSurface", *b.boolean(False))
+    if el.get("identifier"):
+        o.add("NSReuseIdentifierKey", *b.ref(b.string(el.get("identifier"))))
+    o.add("IBNSSafeAreaLayoutGuide", *(N.NIL, None))
+    o.add("IBNSLayoutMarginsGuide", *(N.NIL, None))
+    o.add("IBNSClipsToBounds", *b.int8(0))
+    id_map[el.get("id")] = o
     return o, keys
 
 
@@ -1140,6 +1164,10 @@ def _build_element(b, el, where, superview, id_map, guides, parent=None, root=Fa
         return _table_view(b, el, where, superview, id_map, parent=parent)
     if el.tag == "tableCellView":
         return _table_cell_view(b, el, where, superview, id_map, parent=parent)
+    if el.tag == "box":
+        return _box(b, el, where, superview, id_map, parent=parent)
+    if el.tag == "progressIndicator":
+        return _progress_indicator(b, el, where, superview, id_map, parent=parent)
     if el.tag == "textView":
         o = _text_view(b, el, where, superview)
         id_map[el.get("id")] = o
@@ -1297,6 +1325,9 @@ def _conn_blocks(objects_el):
                 walk(child)
         for pv in el.findall("prototypeCellViews/tableCellView"):
             walk(pv)
+        for col in el.findall("tableColumns/tableColumn"):
+            for pv in col.findall("prototypeCellViews/tableCellView"):
+                walk(pv)
 
     def walk_menu(el):
         for c in el.findall("connections"):
@@ -1639,8 +1670,10 @@ def compile_xib(path):
         if ax_el is None or tvel.get("id") not in id_map:
             continue
         c = b.new("NSNibAXAttributeConnector")
+        axt = b.new("NSMutableString")
+        axt.add("NS.bytes", N.DATA, b"AXDescription")
         c.add("AXDestinationArchiveKey", *b.ref(id_map[tvel.get("id")]))
-        c.add("AXAttributeTypeArchiveKey", *b.ref(b.string("AXDescription")))
+        c.add("AXAttributeTypeArchiveKey", *b.ref(axt))
         c.add("AXAttributeValueArchiveKey",
               *b.ref(_localizable(b, tvel.get("id"), ax_el.get("description"),
                                   where,
@@ -2164,6 +2197,11 @@ def _scroll_view(b, el, where, superview, id_map, parent=None):
         o.add("NSHeaderClipView", *b.ref(hclip))
     hls = float(el.get("horizontalLineScroll", 10))
     vls = float(el.get("verticalLineScroll", 10))
+    if is_table:
+        # line scrolls archive the table's ROW height, not the xib attr
+        # (golden SidebarView: lineScroll 40 -> 32 systemDefault sourceList)
+        rowh = _table_row_height(doc_el, where)
+        hls = vls = rowh
     hps = float(el.get("horizontalPageScroll", 10))
     vps = float(el.get("verticalPageScroll", 10))
     if (hls, vls, hps, vps) != (10.0, 10.0, 10.0, 10.0):
@@ -2519,13 +2557,12 @@ def _table_header_cell(b, col_el, hc_el, where):
     o.add("NSCellFlags", N.INT32, TABLE_HEADER_CELL_FLAGS[0])
     o.add("NSCellFlags2", N.INT32, TABLE_HEADER_CELL_FLAGS[1])
     title = hc_el.get("title")
-    has_font = hc_el.find("font[@key='font']") is not None
-    if title is not None or has_font:
-        o.add("NSContents", *b.ref(_localizable(b, col_el.get("id") or "",
-                                                title or "", where,
-                                                suffix=".headerCell.title")))
-        fd = hc_el.find("font[@key='font']")
-        o.add("NSSupport", *b.ref(_header_font(b)))
+    # golden TTT (font, no title) and SidebarView (neither) both archive
+    # NSContents '' + the Subhead header font
+    o.add("NSContents", *b.ref(_localizable(b, col_el.get("id") or "",
+                                            title or "", where,
+                                            suffix=".headerCell.title")))
+    o.add("NSSupport", *b.ref(_header_font(b)))
     for key, store in (("backgroundColor", "NSBackgroundColor"),
                        ("textColor", "NSTextColor")):
         c = hc_el.find(f"color[@key='{key}']")
@@ -2620,6 +2657,204 @@ def _corner_view(b, where):
     return o
 
 
+def _box(b, el, where, superview, id_map, parent=None):
+    """<box boxType="separator"> (probe golden SidebarView [83]): NSBox with
+    the default Title cell (smallSystem, textBackgroundColor/labelColor)."""
+    if el.get("boxType", "primary") != "separator":
+        raise I.XibError(f"boxType {el.get('boxType')!r} not probed ({where})")
+    o = b.new("NSBox")
+    o.add("NSNextResponder", *(b.ref(superview) if superview is not None else (N.NIL, None)))
+    o.add("NSNibTouchBar", *(N.NIL, None))
+    v, vt = _vflags(el, where)
+    o.add("NSvFlags", vt, v)
+    id_map[el.get("id")] = o
+    arr = b.new("NSMutableArray")
+    arr.add("NSInlinedValue", *b.boolean(False))
+    o.add("NSSubviews", *b.ref(arr))
+    r = el.find("rect[@key='frame']")
+    if float(r.get("x", 0)) == 0 and float(r.get("y", 0)) == 0:
+        o.add("NSFrameSize", *b.ref(b.string(
+            "{%s, %s}" % (_fmt_g(r.get("width")), _fmt_g(r.get("height"))))))
+    else:
+        o.add("NSFrame", *b.ref(b.string(_rect(el, "frame", where))))
+    if superview is not None:
+        o.add("NSSuperview", *b.ref(superview))
+    o.add("NSViewWantsBestResolutionOpenGLSurface", *b.boolean(False))
+    if _translates(el):
+        o.add("NSDoNotTranslateAutoresizingMask", *b.boolean(False))
+    cons_el = el.find("constraints")
+    if cons_el is not None and cons_el.findall("constraint"):
+        carr = b.new("NSArray")
+        carr.add("NSInlinedValue", *b.boolean(False))
+        els = I._constraint_order(el, cons_el.findall("constraint"), where, mac=True)
+        for c in els:
+            con = _constraint(b, c, o, el.get("id"), id_map, {}, {}, where)
+            carr.add("UINibEncoderEmptyKey", *b.ref(con))
+        b.cons_order[el.get("id")] = [c.get("id") for c in els]
+        o.add("NSViewConstraints", *b.ref(carr))
+    h = el.get("horizontalHuggingPriority")
+    v2 = el.get("verticalHuggingPriority")
+    o.add("NSHuggingPriority", *b.ref(b.string(
+        "{%s, %s}" % (_fmt_g(h or 250), _fmt_g(v2 or 750)))))
+    o.add("IBNSSafeAreaLayoutGuide", *(N.NIL, None))
+    o.add("IBNSLayoutMarginsGuide", *(N.NIL, None))
+    o.add("IBNSClipsToBounds", *b.int8(0))
+    o.add("NSOffsets", *b.ref(b.string("{5, 5}")))
+    tc = b.new("NSTextFieldCell")
+    tc.add("NSCellFlags", N.INT32, 67108864)
+    tc.add("NSCellFlags2", N.INT32, 134217728)
+    tc.add("NSContents", *b.ref(b.string(el.get("title") or "Title")))
+    tc.add("NSSupport", *b.ref(_plain_system_font(b, 11, 3100)))
+    tc.add("NSControlView", *(N.NIL, None))
+    tc.add("NSBackgroundColor",
+           *b.ref(b.catalog_color("System", "textBackgroundColor", where)))
+    tc.add("NSTextColor", *b.ref(b.catalog_color("System", "labelColor", where)))
+    o.add("NSTitleCell", *b.ref(tc))
+    o.add("NSBorderType", *b.int8(3))
+    o.add("NSBoxType", *b.int8(2))
+    o.add("NSTitlePosition", *b.int8(2))
+    o.add("NSTransparent", *b.boolean(True))
+    return o, [(o, parent)]
+
+
+def _progress_indicator(b, el, where, superview, id_map, parent=None):
+    """<progressIndicator> (golden SidebarView bar+hidden 16389, AccountStats
+    spinning small indeterminate 28935)."""
+    style = el.get("style", "spinning")
+    if style == "bar":
+        if el.get("hidden") != "YES" or el.get("maxValue") != "100":
+            raise I.XibError(f"bar progressIndicator attr set not probed ({where})")
+        spi = 16389
+    elif (style == "spinning" and el.get("indeterminate") == "YES"
+          and el.get("displayedWhenStopped") == "NO"
+          and el.get("controlSize") == "small" and el.get("maxValue") == "100"
+          and el.get("hidden") is None):
+        spi = 28935
+    else:
+        raise I.XibError(f"progressIndicator style {style!r} attr set not probed ({where})")
+    o = b.new("NSProgressIndicator")
+    o.add("NSNextResponder", *(b.ref(superview) if superview is not None else (N.NIL, None)))
+    o.add("NSNibTouchBar", *(N.NIL, None))
+    v, vt = _vflags(el, where)
+    o.add("NSvFlags", vt, v)
+    id_map[el.get("id")] = o
+    r = el.find("rect[@key='frame']")
+    if float(r.get("x", 0)) == 0 and float(r.get("y", 0)) == 0:
+        o.add("NSFrameSize", *b.ref(b.string(
+            "{%s, %s}" % (_fmt_g(r.get("width")), _fmt_g(r.get("height"))))))
+    else:
+        o.add("NSFrame", *b.ref(b.string(_rect(el, "frame", where))))
+    if superview is not None:
+        o.add("NSSuperview", *b.ref(superview))
+    if el.get("wantsLayer") == "YES":
+        o.add("NSViewIsLayerTreeHost", *b.boolean(False))
+    o.add("NSViewWantsBestResolutionOpenGLSurface", *b.boolean(False))
+    if _translates(el):
+        o.add("NSDoNotTranslateAutoresizingMask", *b.boolean(False))
+    cons_el = el.find("constraints")
+    if cons_el is not None and cons_el.findall("constraint"):
+        carr = b.new("NSArray")
+        carr.add("NSInlinedValue", *b.boolean(False))
+        els = I._constraint_order(el, cons_el.findall("constraint"), where, mac=True)
+        for c in els:
+            con = _constraint(b, c, o, el.get("id"), id_map, {}, {}, where)
+            carr.add("UINibEncoderEmptyKey", *b.ref(con))
+        b.cons_order[el.get("id")] = [c.get("id") for c in els]
+        o.add("NSViewConstraints", *b.ref(carr))
+    h = el.get("horizontalHuggingPriority")
+    v2 = el.get("verticalHuggingPriority")
+    o.add("NSHuggingPriority", *b.ref(b.string(
+        "{%s, %s}" % (_fmt_g(h or 250), _fmt_g(v2 or 250)))))
+    o.add("IBNSSafeAreaLayoutGuide", *(N.NIL, None))
+    o.add("IBNSLayoutMarginsGuide", *(N.NIL, None))
+    o.add("IBNSClipsToBounds", *b.int8(0))
+    o.add("NSpiFlags", *int_fit(spi))
+    o.add("NSMaxValue", N.DOUBLE, float(el.get("maxValue", 100)))
+    return o, [(o, parent)]
+
+
+def _compile_cell_nib(cell_el, where, localize):
+    """Prototype <tableCellView> -> standalone NIBArchive bytes (golden
+    SidebarView [57]/[60]: NSTableViewArchivedReusableViewsKey NSNib payloads;
+    proxy owner NSObject, NSApplication proxy, cell's own outlets)."""
+    b = MacBuilder()
+    b.localize = localize
+    b.proto_mode = True
+    root = b.new("NSObject")
+    ibd = b.new("NSIBObjectData")
+    root.add("IB.objectdata", *b.ref(ibd))
+    root.add("IB.systemFontUpdateVersion", *b.int8(1))
+    id_map = {}
+    owner = b.new("NSCustomObject")
+    owner.add("NSClassName", *b.ref(b.string("NSObject")))
+    vis = b.new("NSMutableSet")
+    vis.add("NSInlinedValue", *b.boolean(False))
+    conns_arr = b.new("NSMutableArray")
+    conns_arr.add("NSInlinedValue", *b.boolean(False))
+    conn_els = cell_el.findall("connections/outlet")
+    conns = [b.new("NSNibOutletConnector") for _ in conn_els]
+    for c in conns:
+        conns_arr.add("UINibEncoderEmptyKey", *b.ref(c))
+    if not conn_els:
+        # golden DataCell proto57 [6]: with no outlets the keys shell lands
+        # right after the connections array, before the cell tree
+        keys_arr = b.new("NSArray")
+    cell, pairs = _table_cell_view(b, cell_el, where, None, id_map, parent=owner)
+    for c, conn_el in zip(conns, conn_els):
+        c.add("NSSource", *b.ref(cell))
+        c.add("NSDestination", *b.ref(id_map[conn_el.get("destination")]))
+        c.add("NSLabel", *b.ref(b.string(conn_el.get("property"))))
+        c.add("NSChildControllerCreationSelectorName", *(N.NIL, None))
+    keys = [cell] + [o2 for o2, _ in pairs[1:]]
+    if conn_els:
+        # golden HeaderCell proto60 [27]: keys shell after the label strings
+        keys_arr = b.new("NSArray")
+    nsapp = b.new("NSCustomObject")
+    nsapp.add("NSClassName", *b.ref(b.string("NSApplication")))
+    keys.append(nsapp)
+    values = [owner] + [p for _, p in pairs[1:]] + [owner]
+    keys_arr.add("NSInlinedValue", *b.boolean(False))
+    values_arr = b.new("NSArray")
+    values_arr.add("NSInlinedValue", *b.boolean(False))
+    for o2, p2 in zip(keys, values):
+        keys_arr.add("UINibEncoderEmptyKey", *b.ref(o2))
+        values_arr.add("UINibEncoderEmptyKey", *b.ref(p2))
+    oids = [owner] + keys + conns
+    ok_arr = b.new("NSArray")
+    ok_arr.add("NSInlinedValue", *b.boolean(False))
+    ov_arr = b.new("NSArray")
+    ov_arr.add("NSInlinedValue", *b.boolean(False))
+    for i, o2 in enumerate(oids, 1):
+        ok_arr.add("UINibEncoderEmptyKey", *b.ref(o2))
+        ov_arr.add("UINibEncoderEmptyKey", *b.ref(b.number(*int_fit(i))))
+    axc = b.new("NSMutableArray")
+    axc.add("NSInlinedValue", *b.boolean(False))
+    axk = b.new("NSArray")
+    axk.add("NSInlinedValue", *b.boolean(False))
+    ibd.add("NSRoot", *b.ref(owner))
+    ibd.add("NSVisibleWindows", *b.ref(vis))
+    ibd.add("NSConnections", *b.ref(conns_arr))
+    ibd.add("NSObjectsKeys", *b.ref(keys_arr))
+    ibd.add("NSObjectsValues", *b.ref(values_arr))
+    ibd.add("NSOidsKeys", *b.ref(ok_arr))
+    ibd.add("NSOidsValues", *b.ref(ov_arr))
+    ibd.add("NSAccessibilityConnectors", *b.ref(axc))
+    ibd.add("NSAccessibilityOidsKeys", *b.ref(axk))
+    ibd.add("NSAccessibilityOidsValues", *b.ref(axk))
+    return _finalize(b, root)
+
+
+def _table_row_height(el, where):
+    rss = el.get("rowSizeStyle")
+    if rss is None:
+        return float(el.get("rowHeight", 17))
+    if rss == "medium":
+        return 24.0
+    if rss == "systemDefault":
+        return 32.0 if el.get("selectionHighlightStyle") == "sourceList" else 24.0
+    raise I.XibError(f"rowSizeStyle {rss!r} not probed ({where})")
+
+
 def _table_view(b, el, where, superview, id_map, parent=None):
     """<tableView>/<outlineView> (+ customClass -> NSClassSwapper)."""
     is_outline = el.tag == "outlineView"
@@ -2637,6 +2872,13 @@ def _table_view(b, el, where, superview, id_map, parent=None):
         # autoresizingMask archives widthSizable|heightSizable)
         v = 256 | I.RESIZE_FLAGS["widthSizable"] | I.RESIZE_FLAGS["heightSizable"]
     o.add("NSvFlags", vt, v)
+    mask_el = el.find("autoresizingMask[@key='autoresizingMask']")
+    if mask_el is not None and len(mask_el.attrib) > 1:
+        # explicit autoresizing -> golden archives an EMPTY NSSubviews array
+        # (golden SidebarView [14]; TTT's empty mask omits the key)
+        arr0 = b.new("NSMutableArray")
+        arr0.add("NSInlinedValue", *b.boolean(False))
+        o.add("NSSubviews", *b.ref(arr0))
     id_map[el.get("id")] = o
     r = el.find("rect[@key='frame']")
     if float(r.get("x", 0)) == 0 and float(r.get("y", 0)) == 0:
@@ -2705,14 +2947,7 @@ def _table_view(b, el, where, superview, id_map, parent=None):
     o.add("NSGridColor",
           *b.ref(b.catalog_color("System", "gridColor", where)))
     rss = el.get("rowSizeStyle")
-    if rss is None:
-        rowh = float(el.get("rowHeight", 17))
-    elif rss == "medium":
-        rowh = 24.0
-    elif rss == "systemDefault":
-        rowh = 32.0 if el.get("selectionHighlightStyle") == "sourceList" else 24.0
-    else:
-        raise I.XibError(f"rowSizeStyle {rss!r} not probed ({where})")
+    rowh = _table_row_height(el, where)
     o.add("NSRowHeight", *b.float64(rowh))
     key = _tv_attr_key(el)
     if key not in TABLE_TVFLAGS:
@@ -2741,8 +2976,31 @@ def _table_view(b, el, where, superview, id_map, parent=None):
         o.add("NSTableViewStyle", *b.int8(2))
     o.add("NSTableViewDraggingDestinationStyle",
           *b.int8(1 if el.get("selectionHighlightStyle") == "sourceList" else 0))
-    if rss is not None:
-        o.add("NSTableViewArchivedReusableViewsKey", *b.ref(b.new("NSMutableDictionary")))
+    protos = []
+    for col_el in (cols_el if cols_el is not None else []):
+        pvs = col_el.find("prototypeCellViews")
+        for pv in (pvs if pvs is not None else []):
+            if pv.get("identifier") is None:
+                raise I.XibError(f"prototypeCellView without identifier ({where})")
+            protos.append((pv.get("identifier"), pv))
+    if rss is not None or protos:
+        # golden SidebarView [54]: identifier -> NSNib(embedded cell archive),
+        # entries sorted by identifier
+        reusables = b.new("NSMutableDictionary")
+        reusables.add("NSInlinedValue", *b.boolean(False))
+        for ident, pv in sorted(protos, key=lambda t: t[0].encode()):
+            reusables.add("UINibEncoderEmptyKey", *b.ref(b.string(ident)))
+            nib = b.new("NSNib")
+            reusables.add("UINibEncoderEmptyKey", *b.ref(nib))
+            data = b.new("NSData")
+            nib.add("NSNibFileData", *b.ref(data))
+            nib.add("NSNibFileIsKeyed", *b.boolean(False))
+            nib.add("NSNibFileUseParentBundle", *b.boolean(False))
+            nib.add("NSNibFileImages", *(N.NIL, None))
+            nib.add("NSNibFileSounds", *(N.NIL, None))
+            data.add("NS.bytes", N.DATA,
+                     _compile_cell_nib(pv, where, b.localize))
+        o.add("NSTableViewArchivedReusableViewsKey", *b.ref(reusables))
     if el.get("floatsGroupRows") is not None:
         # bug-compat: floatsGroupRows="NO" archives true
         o.add("NSTableViewShouldFloatGroupRows",
