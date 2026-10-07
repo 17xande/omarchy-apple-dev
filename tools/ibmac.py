@@ -2409,14 +2409,21 @@ def _button(b, el, where, superview, id_map, parent=None):
     if cell_el is None:
         raise I.XibError(f"<button> without buttonCell ({where})")
     btype = cell_el.get("type", "momentaryPushIn")
-    # NSHuggingPriority when the (attr-or-default) pair differs from the
-    # button type's IB default: help 750/750 (probe CurrentActivity/Dinosaurs
-    # help 750/750 -> no key; AccountStats 1000/1000 -> key), every other
-    # type 250/750 (probe ExportOPML eZ4 750/750 -> key, PPB v-only -> none).
+    # NSHuggingPriority: help writes iff (attr-or-default) differs from
+    # (750,750) (probe CurrentActivity/Dinosaurs help 750/750 -> no key;
+    # AccountStats 1000/1000 -> key); check/radio/bevel/smallSquare/roundRect
+    # write whenever ANY hugging attr is present (probe TCV bevel v-only 750
+    # -> key {250, 750}); push family writes iff differs from (250,750)
+    # (probe ExportOPML eZ4 750/750 -> key, PPB v-only -> none).
     # NSAntiCompressionPriority only when a resistance attr differs from 750.
     h, v2 = el.get("horizontalHuggingPriority"), el.get("verticalHuggingPriority")
-    dh, dv = ("750", "750") if btype == "help" else ("250", "750")
-    if (h is not None and h != dh) or (v2 is not None and v2 != dv):
+    if btype == "help":
+        need = (h is not None and h != "750") or (v2 is not None and v2 != "750")
+    elif btype in ("check", "radio", "bevel", "smallSquare", "roundRect"):
+        need = h is not None or v2 is not None
+    else:
+        need = (h is not None and h != "250") or (v2 is not None and v2 != "750")
+    if need:
         o.add("NSHuggingPriority",
               *b.ref(b.string("{%s, %s}" % (_fmt_g(h or 250), _fmt_g(v2 or 750)))))
     h, v2 = (el.get("horizontalCompressionResistancePriority"),
