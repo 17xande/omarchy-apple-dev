@@ -133,5 +133,7 @@ Screenshots (`~/tmp/apple-dev/nnw-mac-shots/`, also on macstudio
   asclib.py, probe2-7.py
 - session probes deleted: cap-probe.py, icloud-probe.py, prov-dump.py,
   push-probe.py, refresh-prov.sh (after use)
-- macstudio still holds ~/tmp/nnw-mac-teamid/NetNewsWire{-prev,-prev2}.app and
-  the three zips from the redeploy swaps (running app is the final build)
+- macstudio keeps the running NetNewsWire.app, its source zip
+  (NetNewsWire3.zip), the four screenshots, and old-runs/ holding the two
+  superseded bundles and zips from the redeploy swaps (moved, not deleted:
+  recursive rm on macstudio needs manual approval)
