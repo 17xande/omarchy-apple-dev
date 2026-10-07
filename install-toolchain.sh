@@ -146,24 +146,54 @@ for platform_name in ("iPhoneOS.platform", "MacOSX.platform"):
     for sdk in sorted(os.listdir(sdks)) if os.path.isdir(sdks) else []:
         if os.path.islink(os.path.join(sdks, sdk)):
             continue
-        for name in ("SDKSettings.json", "SDKSettings.plist"):
-            p = os.path.join(sdks, sdk, name)
-            if not os.path.isfile(p):
-                continue
-            if name.endswith(".json"):
-                d = json.load(open(p)) if os.path.getsize(p) else {"DefaultProperties": {}}
-                dump = lambda d, p: json.dump(d, open(p, "w"))
-            else:
-                d = plistlib.load(open(p, "rb")) if os.path.isfile(p) else {"DefaultProperties": {}}
-                dump = lambda d, p: plistlib.dump(d, open(p + ".tmp", "wb"))
+        p = os.path.join(sdks, sdk, "SDKSettings.json")
+        if os.path.isfile(p):
+            d = json.load(open(p))
             dp = d.setdefault("DefaultProperties", {})
-            dp.setdefault("STRINGS_FILE_INPUT_ENCODING", "utf-8")
-            if dp.get("GENERATE_INTERMEDIATE_TEXT_BASED_STUBS") != "NO":
-                dp["GENERATE_INTERMEDIATE_TEXT_BASED_STUBS"] = "NO"
-                dp["GENERATE_TEXT_BASED_STUBS"] = "NO"
-            dump(d, p)
-            if os.path.isfile(p + ".tmp"):
-                os.replace(p + ".tmp", p)
+            dp["STRINGS_FILE_INPUT_ENCODING"] = "utf-8"
+            dp["STRINGS_FILE_OUTPUT_ENCODING"] = "binary"
+            dp.setdefault("GENERATE_INTERMEDIATE_TEXT_BASED_STUBS", "NO")
+            dp.setdefault("GENERATE_TEXT_BASED_STUBS", "NO")
+            json.dump(d, open(p, "w"))
+        p = os.path.join(sdks, sdk, "SDKSettings.plist")
+        d = plistlib.load(open(p, "rb")) if os.path.isfile(p) else {"DefaultProperties": {}}
+        dp = d.setdefault("DefaultProperties", {})
+        if dp.get("GENERATE_INTERMEDIATE_TEXT_BASED_STUBS") == "NO":
+            continue
+        dp["GENERATE_INTERMEDIATE_TEXT_BASED_STUBS"] = "NO"
+        dp["GENERATE_TEXT_BASED_STUBS"] = "NO"
+        plistlib.dump(d, open(p + ".tmp", "wb"))
+        os.replace(p + ".tmp", p)
+# The CopyStrings task cannot re-encode strings outside Darwin:
+# FileTextEncoding.stringEncoding is `#if canImport(Darwin)`. Only the binary
+# plist output works on Linux, and the input encoding must be spelled out
+# (BOM detection sees only UTF-8/16 BOMs). Patch the spec defaults.
+import re, shutil
+swift_bin = shutil.which("swift")
+if not swift_bin:
+    sys.exit("install_darwin_tools: swift not on PATH")
+toolchain_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(
+    os.path.dirname(os.path.realpath(swift_bin))))))
+for rel, fixes in (
+    ("usr/share/pm/SwiftBuild_SWBUniversalPlatform.bundle/CopyStringsFile.xcspec",
+     [("STRINGS_FILE_INPUT_ENCODING", "utf-8")]),
+    ("usr/share/pm/SwiftBuild_SWBCore.bundle/CoreBuildSystem.xcspec",
+     [("STRINGS_FILE_OUTPUT_ENCODING", "binary")]),
+    ("usr/share/pm/SwiftBuild_SWBCore.bundle/NativeBuildSystem.xcspec",
+     [("STRINGS_FILE_OUTPUT_ENCODING", "binary")]),
+):
+    p = os.path.join(toolchain_root, rel)
+    if not os.path.isfile(p):
+        continue
+    lines = open(p).read().split("\n")
+    for setting, value in fixes:
+        for i, line in enumerate(lines):
+            if f'Name = "{setting}";' in line:
+                for j in range(i + 1, min(i + 12, len(lines))):
+                    if "DefaultValue =" in lines[j]:
+                        lines[j] = re.sub(r'"[^"]*"\s*;', f'"{value}";', lines[j])
+                        break
+    open(p, "w").write("\n".join(lines))
 PY
   echo "Installed actool, xcstringstool, momc and ibtool (version probe; compiles a small xib subset) into $bin"
 }

@@ -1,0 +1,114 @@
+#!/usr/bin/env bash
+# Check out NetNewsWire at the tested commit and generate a macOS adapter with
+# tools/xcodeproj2xtool.py (the Mac app target; the iOS adapter lives in
+# compat/nnw/setup.sh).
+#
+# Three patches, all mechanical:
+# 1. Shared ObjC category members (NSOpenPanel.acceptOPML,
+#    WKPreferences._developerExtrasEnabled) become Swift shims - ObjC sources
+#    do not build on Linux and the bridging header is inert there.
+# 2. Swift files that use AppKit types without importing Cocoa get one
+#    `import Cocoa` after the header comment block. Xcode injects those
+#    imports through the bridging header; SwiftPM does not. The rule scans the
+#    files, nothing is hand-listed.
+# 3. RSCore's two package-declared AppKit xibs (WebViewWindow,
+#    IndeterminateProgressWindow) are removed from its .process resources:
+#    the Linux ibtool compiles only the UIKit golden subset and fails closed
+#    on AppKit nibs. One warning per file; a separate track is writing the
+#    AppKit nib compiler.
+#
+# Usage: compat/nnw-mac/setup.sh DIR
+#   BUNDLE_ID overrides the app's bundleID (the project's
+#   ORGANIZATION_IDENTIFIER placeholder resolves to com.ranchero).
+#   then, with the darwin Swift SDK registered:
+#     S=$HOME/.swiftpm/swift-sdks/darwin.artifactbundle
+#     cd DIR/omarchy-xtool && ulimit -n 65536
+#     XCODE_EXTRA_PLATFORM_FOLDERS=$S/Developer/Platforms PATH=$S/toolset/bin:$PATH \
+#       swift build -c release --build-system swiftbuild \
+#       --triple arm64-apple-macosx --toolset $S/toolset-swb.json
+set -euo pipefail
+here=$(dirname "$(readlink -f "$0")")
+dir=${1:?usage: setup.sh DIR}
+NNW=8c322c287bec510a2ee0ebd0487e0481ad45ad82
+
+git clone -q https://github.com/Ranchero-Software/NetNewsWire "$dir"
+git -C "$dir" checkout -q "$NNW"
+
+# NetNewsWire's own prebuild step (Xcode runs it as a build phase): expand
+# Sources/Secrets/SecretKey.swift.gyb.
+bash "$dir/buildscripts/updateSecrets.sh"
+
+# 2. Rule-based `import Cocoa` for AppKit-using files without an import.
+python3 - "$dir" <<'PY'
+import os, re, sys
+root = sys.argv[1]
+fixed = 0
+for base in ("Mac", "Shared", "Modules"):
+    for b, dirs, files in os.walk(os.path.join(root, base)):
+        dirs[:] = [d for d in dirs if d not in (".build", ".git")]
+        for fn in files:
+            if not fn.endswith(".swift"):
+                continue
+            p = os.path.join(b, fn)
+            s = open(p, encoding="utf-8").read()
+            if "import Cocoa" in s or "import AppKit" in s:
+                continue
+            if not re.search(r"\bNS[A-Z]", s):
+                continue
+            lines = s.split("\n")
+            i = 0
+            while i < len(lines) and (lines[i].startswith("//") or lines[i].strip() == ""):
+                i += 1
+            lines.insert(i, "import Cocoa")
+            open(p, "w").write("\n".join(lines))
+            fixed += 1
+print(f"import Cocoa: {fixed} files patched")
+PY
+
+# 1. Swift shims for the excluded ObjC category members.
+cat > "$dir/Mac/ObjCPrivateShims.swift" <<'EOF'
+// Linux adapter: Swift replacements for the target's ObjC-only category
+// members (ObjC sources do not build on Linux; the bridging header is inert).
+// Same API and semantics as Mac/NSOpenPanel+Extras.m and
+// Mac/WKPreferencesPrivate.h.
+
+import ObjectiveC
+import WebKit
+
+extension NSOpenPanel {
+	// https://github.com/Ranchero-Software/NetNewsWire/issues/4840
+	// The deprecated allowedFileTypes is deliberate: the OPML UTI is not
+	// reliable, so pin the file extensions.
+	func acceptOPML() {
+		allowedFileTypes = ["opml", "xml"]
+	}
+}
+
+nonisolated(unsafe) private var developerExtrasKey: UInt8 = 0
+
+extension WKPreferences {
+	// Private WebKit property; the Darwin SDK hides it. Store the flag on the
+	// object so get/set round-trip (the WebKit-internal effect is not wired).
+	var _developerExtrasEnabled: Bool {
+		get { objc_getAssociatedObject(self, &developerExtrasKey) as? Bool ?? false }
+		set { objc_setAssociatedObject(self, &developerExtrasKey, newValue, .OBJC_ASSOCIATION_RETAIN) }
+	}
+}
+EOF
+
+# 3. Drop RSCore's package-declared AppKit xibs from its resources.
+python3 - "$dir" <<'PY'
+import os, re, sys
+p = os.path.join(sys.argv[1], "Modules/RSCore/Package.swift")
+s = open(p, encoding="utf-8").read()
+for name in ("WebViewWindow", "IndeterminateProgressWindow"):
+    line = f'.process("Resources/{name}.xib")'
+    if line in s:
+        s = s.replace(f"				{line},\n", "").replace(f"\t\t\t\t{line},\n", "")
+        print(f"warning: RSCore: excluded AppKit xib {name}.xib "
+              "(Linux ibtool cannot compile it; the window will be missing)")
+open(p, "w").write(s)
+PY
+
+python3 "$here/../../tools/xcodeproj2xtool.py" "$dir/NetNewsWire.xcodeproj" \
+    --target NetNewsWire ${BUNDLE_ID:+--bundle-id "$BUNDLE_ID"}

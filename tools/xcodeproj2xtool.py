@@ -1850,11 +1850,13 @@ class Generator:
         self.icon_assets += len(seen)
         return len(seen)
 
-    def target_block(self, tname, deps, excludes, resources, swift):
+    def target_block(self, tname, deps, excludes, resources, swift,
+                     executable=False):
         prod_lines = "\n".join(
             f"                .product(name: {sw_sy(n)}, package: {sw_sy(pk)}),"
             for n, pk in deps)
-        txt = f"""        .target(
+        kind = ".executableTarget" if executable else ".target"
+        txt = f"""        {kind}(
             name: {sw_sy(tname)},
             dependencies: [
 {prod_lines}
@@ -1878,11 +1880,17 @@ class Generator:
         plat = re.sub(r"[^0-9.]", "", self.expand(plat, layers)) or default
         deps = (",\n".join(f"        {p}" for p in packages)) or "        // none"
         dev_region = self.project.get("developmentRegion")
-        libs = [f"    .library(name: {sw_sy(name)}, targets: [{sw_sy(name)}])"]
+        if self.platform == "macos":
+            # The app is the deliverable: an executable target + product links
+            # the Mach-O with plain `swift build`; xtool is not involved.
+            libs = [f"    .executable(name: {sw_sy(name)}, targets: [{sw_sy(name)}])"]
+        else:
+            libs = [f"    .library(name: {sw_sy(name)}, targets: [{sw_sy(name)}])"]
         libs += [f"    .library(name: {sw_sy(e['name'])}, targets: [{sw_sy(e['name'])}])"
                  for e in extensions]
         libs_txt = ",\n".join(libs)
-        blocks = self.target_block(name, products, excludes, resources, swift)
+        blocks = self.target_block(name, products, excludes, resources, swift,
+                                   executable=self.platform == "macos")
         for e in extensions:
             blocks += self.target_block(e["name"], e["products"], e["excludes"],
                                         e["resources"], e["swift"])
