@@ -79,8 +79,16 @@ def fill_plist(path, team):
 
 
 def bundle_plists(bundle):
-    """The bundle's own Info.plist, then every embedded extension's."""
+    """A built bundle's own Info.plist plus its embedded extensions', or an
+    xtool adapter's infoPath plists, so a fill made before `xtool dev build`
+    or `device-run.sh --lldb` (which rebuilds) reaches the installed app."""
     bundle = Path(bundle)
+    if (bundle / "xtool.yml").exists():
+        plists = [bundle / "Info.plist"]
+        plists += [bundle / line.split(":", 1)[1].strip()
+                   for line in (bundle / "xtool.yml").read_text().splitlines()
+                   if line.strip().startswith("infoPath:")]
+        return [p for p in plists if p.exists()]
     plists = [bundle / "Info.plist"]
     plists += sorted((bundle / "PlugIns").glob("*.appex/Info.plist"))
     return [p for p in plists if p.exists()]
