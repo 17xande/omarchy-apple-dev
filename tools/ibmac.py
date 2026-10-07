@@ -898,6 +898,10 @@ def _cell(b, el, control, where, owner_id=None, cell_cls="NSTextFieldCell",
     if lb not in LINE_BREAK:
         raise I.XibError(f"lineBreakMode {lb!r} not probed ({where})")
     flags2 |= LINE_BREAK_FLAGS2[lb]
+    if el.get("controlSize") == "small":
+        # probe GeneralPreferencesView [130]/[163] (the corpus's only two
+        # controlSize=small textFieldCells): flags2 bit 17
+        flags2 |= 0x20000
     if lb != "wordWrap":
         flags |= 0x40
     if el.get("scrollable") == "YES":
@@ -1143,7 +1147,8 @@ def _field(b, el, where, superview, id_map, parent=None):
         # probe DinosaursWindow proto field [346]: attr archives INVERTED
         o.add("NSControlAllowsExpansionToolTips",
               *b.boolean(el.get("allowsExpansionToolTips") != "YES"))
-    o.add("NSControlSize", *b.int8(0))
+    # probe GeneralPreferencesView [128]/[161]: controlSize=small -> view 1
+    o.add("NSControlSize", *b.int8(1 if cell_el.get("controlSize") == "small" else 0))
     o.add("NSControlContinuous", *b.boolean(True))
     o.add("NSControlRefusesFirstResponder", *b.boolean(True))
     o.add("NSControlUsesSingleLineMode",
@@ -2056,11 +2061,13 @@ def compile_xib(path):
         c.add("NSBinding", *b.ref(b.string(name)))
         c.add("NSKeyPath", *b.ref(b.string(kp)))
         opts = conn_el.find("dictionary[@key='options']")
-        d = b.new("NSDictionary")
-        d.add("NSInlinedValue", *b.boolean(False))
-        c.add("NSOptions", *b.ref(d))
-        c.add("NSNibBindingConnectorVersion", *b.int8(2))
+        # probe GeneralPreferences golden [309] (QZ4-W8-rPi, no options el):
+        # connectors without <dictionary key="options"> drop NSOptions and
+        # allocate no dict
         if opts is not None:
+            d = b.new("NSDictionary")
+            d.add("NSInlinedValue", *b.boolean(False))
+            c.add("NSOptions", *b.ref(d))
             for o_el in opts:
                 d.add("UINibEncoderEmptyKey", *b.ref(b.string(o_el.get("key"))))
                 # bool values archive INVERTED (probe: value="NO" -> NS.boolval
@@ -2082,6 +2089,7 @@ def compile_xib(path):
                     d.add("UINibEncoderEmptyKey", *b.ref(b.string(o_el.text or "")))
                 else:
                     raise I.XibError(f"binding option <{o_el.tag}> not probed ({where})")
+        c.add("NSNibBindingConnectorVersion", *b.int8(2))
         conns_arr.add("UINibEncoderEmptyKey", *b.ref(c))
         conn_objs.append(c)
     for late, parent_id in late_pending:
@@ -2210,6 +2218,11 @@ def compile_xib(path):
             continue
         if el.tag == "menu":
             collect_menu(el, owner)
+        elif el.tag == "userDefaultsController":
+            # keyed once via bind_key_pairs below (golden GP [120] / Crash [22]
+            # / Adv [58]+[59]: declared top-level UDCs never key from the doc
+            # walk, only from their bindings)
+            pass
         else:
             collect(el, owner)
     keys.extend(bind_key_pairs)  # userDefaultsControllers (probe CrashReporter [131])
@@ -2957,6 +2970,10 @@ def _button(b, el, where, superview, id_map, parent=None):
             raise I.XibError(f"contentTintColor {tint.get('catalog')!r} not probed ({where})")
     o.add("NSAllowsLogicalLayoutDirection", *b.boolean(not b.localize))
     o.add("NSControlSize", *b.int8(0))
+    if cell_el.get("controlSize") == "large":
+        # probe ActivityLog copy button [108]: view mirrors the cell keys
+        o.add("NSControlSize2", *b.int8(3))
+        o.add("NSControlSizeExtraLarge", *b.boolean(True))
     o.add("NSControlContinuous", *b.boolean(True))
     o.add("NSControlRefusesFirstResponder", *b.boolean(True))
     o.add("NSControlUsesSingleLineMode",
@@ -4014,6 +4031,13 @@ def _popup_cell(b, el, control, where, id_map):
         # NSSelectedIndex=-1 + NSPullDown=false
         o.add("NSSelectedIndex", *int_fit(-1))
         o.add("NSPullDown", *b.boolean(False))
+    else:
+        # probe GeneralPreferencesView [36] (jMV index 1): selected item's
+        # index archives between NSMenu and NSPreferredEdge, omitted at 0
+        # ([75]/[144] index 0 -> no key)
+        idx = list(items).index(sel_el)
+        if idx:
+            o.add("NSSelectedIndex", *int_fit(idx))
     o.add("NSPreferredEdge", *b.int8(1))
     o.add("NSUsesItemFromMenu", *b.boolean(False))
     o.add("NSAltersState", *b.boolean(False))
