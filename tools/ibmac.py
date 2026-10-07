@@ -1117,6 +1117,10 @@ def _field(b, el, where, superview, id_map, parent=None):
                  cell_cls="NSSecureTextFieldCell" if secure else "NSTextFieldCell",
                  id_map=id_map)
     locales = el.find("allowedInputSourceLocales")
+    if locales is None:
+        # probe AccountsFeedbin password cell: the element sits inside the
+        # secureTextFieldCell there
+        locales = cell_el.find("allowedInputSourceLocales")
     if locales is not None:
         # probe AccountsFeedbin [72]: array of the locale strings on the CELL
         larr = b.new("NSArray")
