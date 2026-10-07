@@ -137,7 +137,10 @@ print(d["ProductVersion"] + " (" + d["BuildVersion"] + ")")' "$info")"
     printf 'exec lldb "$@" < <(sed -u "s|^platform select remote-ios\\$|platform select remote-ios --sysroot \\"%s\\"|")\n' "$sym"
   } >"$wrap"
   chmod +x "$wrap"
-  sudo env PATH="$PATH" "$PMD3" developer debugserver lldb "$bid" --rsd "$host" "$port" --lldb-command "$wrap"
+  # LLDB_CMDS: LLDB commands to run after the attach, one per line (for scripted sessions).
+  local cmds=()
+  while IFS= read -r line; do [ -z "$line" ] || cmds+=(-c "$line"); done <<<"${LLDB_CMDS:-}"
+  sudo env PATH="$PATH" "$PMD3" developer debugserver lldb "$bid" --rsd "$host" "$port" --lldb-command "$wrap" "${cmds[@]}"
 }
 
 case "$MODE" in

@@ -73,7 +73,12 @@ whole project; cross-file results appear when that ends.
 1. Run `xtool auth` once and sign in with your Apple ID.
 2. Plug in the iPhone and tap **Trust**.
 3. Run `~/.local/share/omarchy-apple-dev/device-run.sh` from the project
-   directory. It installs and starts the app. For LLDB, follow FINDINGS.md 56.
+   directory. It installs and starts the app. With `--lldb` it installs the
+   app, mounts the developer disk image, copies the phone's Swift runtime once
+   (a few GB) and attaches LLDB, so `frame variable` shows Swift values.
+   `LLDB_CMDS` (one command per line) scripts the session, and
+   `LLDB_PYTHONHOME` names a CPython 3.12 when the system has none
+   (FINDINGS.md 56, receipt `receipts/2026-10-07-device-run-lldb.md`).
 
 ## 4. Upload to TestFlight
 

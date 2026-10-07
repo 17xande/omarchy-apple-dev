@@ -17,13 +17,6 @@ Gatekeeper on macstudio accepts it as "Notarized Developer ID". Open: a repo scr
 for the build, bundle, sign and notarize steps; the macOS sdk stamp; NetNewsWire for
 Mac.
 
-## 2026-10-07: device-run.sh --lldb breakpoint proof
-
-Run `device-run.sh --lldb` once more on jw16 (10-minute phone window; the
-shared cache for iOS 27.0.1 24A446 is already copied). Show the breakpoint hit
-and `frame variable greeting launches`, then update FINDINGS.md 56 and
-GETTING-STARTED.md step 3.
-
 ## iOS Simulator on Omarchy Linux
 
 Added 2026-10-06 (lane lead request). Compare the approaches and name the

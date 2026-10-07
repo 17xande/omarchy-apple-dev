@@ -1274,8 +1274,12 @@ runs its own `platform select remote-ios`, which drops the sysroot, so the
 lldb wrapper adds it to that command. With iOS 27.0.1 (24A446) libraries from
 Apple's IPSW (libswiftCore UUID `D65D98D2`, the same as on the phone) and an
 empty cache, `frame variable greeting` prints `"Hello from Omarchy Linux"`.
-`expr` still fails because LLDB cannot load the app's Swift modules. Receipt
-`receipts/2026-10-06-device-lldb.md`.
+`expr` still fails because LLDB cannot load the app's Swift modules. Receipts
+`receipts/2026-10-06-device-lldb.md` (by hand) and
+`receipts/2026-10-07-device-run-lldb.md`: `device-run.sh --lldb` does it all
+in one command (install, DDI, tunnel, the phone's Swift runtime, sysroot,
+attach), and a scripted session hit the breakpoint at `ContentView.swift:7`
+and printed `greeting = "Hello from Omarchy Linux"` and `launches = 42`.
 
 ## A notarized macOS app from Linux, 2026-10-06
 
