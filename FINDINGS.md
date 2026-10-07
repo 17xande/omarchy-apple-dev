@@ -1352,3 +1352,35 @@ the bundle with one `warning:` line each. The SwiftBuild release build for
 adapter for NetNewsWire is byte-identical to the one from the old generator, and
 the full regression passes. The app cannot show its windows yet: its 34 AppKit
 xibs and MainMenu need a macOS nib compiler.
+
+## A real Mac .app bundle from Linux, 2026-10-07
+
+**59. ship-mac.sh turns a generated Mac adapter into a notarized .app; NetNewsWire
+launches and stops one nib short of a window.** The bundle assembles from SwiftPM
+products alone: the executable relinks with `-Xlinker -rpath
+@executable_path/../Frameworks`, the local `lib*.dylib` products and
+Sparkle.framework land in Contents/Frameworks (their `@rpath` install names then
+resolve there), the app target's resource bundle also copies flat into
+Contents/Resources so both `Bundle.main` and `Bundle.module` resolve, and
+tools/ibtool compiles 21 of the Mac target's 35 xibs into
+Resources (Base.lproj kept per nib, failures listed and skipped). Info.plist is
+the generator's placeholder-expanded copy plus CFBundleExecutable/Identifier.
+Two notarization traps: an expanded entitlements file left inside Contents/ makes
+the whole bundle "unsealed contents present in the bundle root", and Apple
+reports that only as "The signature of the binary is invalid" — rcodesign verify
+passes it; `codesign -vvv --deep --strict` on any Mac names the real defect. And
+NetNewsWire's entitlements (iCloud, APNs, app groups, kvstore) are
+provisioning-restricted: without an embedded.provisionprofile macOS kills the
+process at exec (direct exec exits 137/SIGKILL), so the script signs without
+entitlements unless ENTITLEMENTS is set. With those fixed, notary says Accepted,
+spctl says "accepted, source=Notarized Developer ID", and the app on an M1 Max
+macOS 26.6 runs to its main event loop, creates its Application Support
+databases, and aborts 1.0 s in: `TimelineContainerViewController` loads
+`init(nibName: "TimelineContainerView")` and that nib is one of the 14 ibtool
+cannot compile — its connections to in-view NSLayoutConstraints raise
+"connection destination not found". A stub TimelineContainerView.nib moves the
+same crash two outlets deeper (readFilteredButton, then
+containerViewTopToHeaderConstraint), which pins the missing-feature list exactly.
+MainMenu.nib is byte-identical to Xcode's golden; the 14 missing nibs are the
+only gap between a launch and a window. Receipt
+`receipts/2026-10-07-nnw-mac-ship.md`.
