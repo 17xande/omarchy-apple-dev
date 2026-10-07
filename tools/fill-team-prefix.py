@@ -84,11 +84,11 @@ def bundle_plists(bundle):
     or `device-run.sh --lldb` (which rebuilds) reaches the installed app."""
     bundle = Path(bundle)
     if (bundle / "xtool.yml").exists():
-        plists = [bundle / "Info.plist"]
-        plists += [bundle / line.split(":", 1)[1].strip()
-                   for line in (bundle / "xtool.yml").read_text().splitlines()
-                   if line.strip().startswith("infoPath:")]
-        return [p for p in plists if p.exists()]
+        plists = list({bundle / "Info.plist"}
+                      | {bundle / line.split(":", 1)[1].strip()
+                         for line in (bundle / "xtool.yml").read_text().splitlines()
+                         if line.strip().startswith("infoPath:")})
+        return sorted(p for p in plists if p.exists())
     plists = [bundle / "Info.plist"]
     plists += sorted((bundle / "PlugIns").glob("*.appex/Info.plist"))
     return [p for p in plists if p.exists()]
