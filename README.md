@@ -232,6 +232,8 @@ it cannot map (FINDINGS.md item 27).
   Helpers: `tools/asc.py` (stamp, identity, validate, upload) and
   `tools/darwin-tools` (the Linux `actool`, on AssetKit) and
   `tools/xcstringstool` (String Catalogs).
+- `ship-mac.sh`: macOS `.app` from a SwiftPM package, Developer ID signing,
+  and `--notarize` (Apple's notary service, ticket stapled).
 - `tools/xcodeproj2xtool.py`: an xtool adapter for an Xcode project's iOS app
   target (`--self-test` checks it).
 

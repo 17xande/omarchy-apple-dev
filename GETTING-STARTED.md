@@ -105,6 +105,25 @@ This path is proven: a demo app and NetNewsWire, with its widget and share
 extensions, were built, signed and uploaded this way on Linux, and both are
 `VALID` in App Store Connect (FINDINGS.md items 38 and 40).
 
+## 5. A Mac app
+
+For a SwiftPM package with one executable product (a SwiftUI or AppKit app),
+from the package directory:
+
+```
+ASC_KEY_PATH=~/.appstoreconnect/private_keys/AuthKey_XXXXXXXXXX.p8 \
+ASC_ISSUER_ID=<issuer id> ASC_KEY_ID=XXXXXXXXXX BUNDLE_ID=com.example.MyMacApp \
+  ~/.local/share/omarchy-apple-dev/ship-mac.sh --notarize
+```
+
+It builds `build/MyMacApp.app`, signs it with your Developer ID Application
+certificate, and notarizes it, so it opens on any Mac. Only the Account Holder
+can create that certificate, in the developer portal: upload a CSR, and put the
+key and the certificate as `key.pem` and `cert.pem` in
+`~/.config/omarchy-apple-dev/developer-id/`. Without `--notarize` and without
+the certificate, the app is signed ad hoc and opens only on your own Macs.
+FINDINGS.md item 57 has the details.
+
 ## If something fails
 
 - `Too many open files`: run `ulimit -n 65536` first.
