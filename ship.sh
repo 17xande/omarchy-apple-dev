@@ -183,6 +183,9 @@ else
 fi
 team=$("$PY" -c 'import plistlib,sys; print(plistlib.load(open(sys.argv[1],"rb"))["com.apple.developer.team-identifier"])' \
   "$sign_dir/entitlements.plist")
+# rcodesign --team-name wants the bare 10-character team id; a certificate common name makes the
+# signed app fail to exec on a device (EBADEXEC, Code=85). Stop here if the value is anything else.
+[[ "$team" =~ ^[A-Z0-9]{10}$ ]] || { echo "team id '$team' is not a bare 10-character team id" >&2; exit 1; }
 # $(AppIdentifierPrefix)/$(TeamIdentifierPrefix) stay placeholders until the
 # team is known; fill them before signing seals the Info.plists.
 "$PY" "$here/tools/fill-team-prefix.py" --team "$team" "$app"
