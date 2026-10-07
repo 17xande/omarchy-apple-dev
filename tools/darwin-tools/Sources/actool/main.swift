@@ -136,7 +136,11 @@ let alternateIconComposers = prepared.alternateIconComposers.map { input -> Icon
     input.idioms = idioms
     return input
 }
-let result = try await XCAssetCompiler(deploymentTarget: option("--minimum-deployment-target") ?? "17.0")
+// --platform selects the car schema: macosx gets macOS 26's 13-attribute
+// rendition-key layout (FINDINGS 60); every other value keeps the iOS bytes.
+let result = try await XCAssetCompiler(
+        deploymentTarget: option("--minimum-deployment-target") ?? "17.0",
+        platform: option("--platform") ?? "iphoneos")
     .compile(catalog: source, appIconName: appIcon, iconComposer: iconComposer,
              alternateIconComposers: alternateIconComposers)
 var outputs: [URL] = []
