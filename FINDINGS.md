@@ -1228,7 +1228,10 @@ did not help (ac2393f3). Apple writes one atlas per scale
 collide. The pin stays on AssetKit 9f509fe, whose walk order happens to put
 the larger atlas first; a byte-stable car needs Apple's one-atlas-per-scale
 layout, and four cars with merged atlases built so far still did not finish
-processing.
+processing. **See item 59 (2026-10-07, in progress)**: per-scale atlases
+went VALID for NetNewsWire and Mastodon; IceCubes' merged car still stalls
+and the remaining differences are being separated (shelf width 4454 px,
+atlas-after-cached order) with same-night 9f509fe controls.
 
 ## Editor support with SourceKit-LSP, 2026-10-06
 
@@ -1290,6 +1293,43 @@ App Store Connect API key and staples the ticket. On a Mac, `spctl` says
 "accepted, source=Notarized Developer ID". The Mach-O still says `sdk 14.0`
 (the deployment target), as iOS builds do before `asc.py stamp`. Receipt
 `receipts/2026-10-06-macos-notarized.md`.
+
+## A packed-atlas per scale, sized to process, 2026-10-07
+
+**59. AssetKit now writes Apple's one-atlas-per-scale layout; IceCubes'
+merged car still has a processing stall being separated.** The probe (actool
+27.0 on macstudio, IceCubes' 2-set catalog and NNW's 2-set `two.xcassets`):
+Apple packs every symbol set of a catalog into ONE
+`ZZZZPackedAsset-<scale>.0.1-gamut0` per scale (keys element 9/part 181/
+identifier 0, never colliding), cached renditions sit at element 85 with
+`dimension2` = cached index, and each links its atlas through the 1010 INLK
+TVL (key pairs element 9/part 181/scale/deploymentTarget); each scale group
+is ordered [atlas, vectors, cached] at 1x and [atlas, cached] at 2x/3x.
+Apple's packer is multi-row (the IceCubes 1x atlas places six sprites in two
+shelves, 62x44) — its atlases stay tiny because its cached sprites are tiny
+(15x16 at 1x), while AssetKit's template-bbox sprites are 199x110
+(pre-existing; the VALID 9f509fe car carried the same). Branch
+`omarchy/atlas-per-scale` on joshuaswarren/AssetKit merges all sets' sprites
+into one shelf-wrapped atlas per scale (wrap at 2048 px: widest first, index
+tie-break, max-row-width atlas) and orders atlas-first per scale.
+
+Evidence so far, all TestFlight:
+
+| upload | AssetKit | IceCubes atlas layout | result |
+|---|---|---|---|
+| eb830d06 (202610062021) | bece8b6 | merged, single shelf 1496x150/2976x296/**4454x442** | PROCESSING >12 h |
+| 065dc987 (202610070209) | 9f509fe (control) | per-set, larger first, 2078 max | COMPLETE in minutes |
+| fb2771bf (202610070230) | 6b10c19 (wrap) | merged, wrapped 1496x150/1664x546/1713x1187 | PROCESSING >90 min |
+| d9a83f77 (order variant) | d9a83f77 (wrap + atlas-first) | as fb2771bf, atlas first per scale | uploading |
+
+NetNewsWire 202610070306 (c06a0480) and Mastodon 202610070316 (1216a4f5)
+are VALID on 6b10c19; neither wraps (334 px and no symbol sets), so they
+prove the per-scale merge does not reject processing outright. Every car
+that ever processed had max atlas dimension 2078; the 4454 px single shelf
+is the one measured outlier of the first merged car. The pin is NOT bumped
+while IceCubes is unresolved. Interim VALIDs on bece8b6: NetNewsWire
+8443f8d0, Mastodon c598be6d. Receipt:
+`receipts/2026-10-06-atlas-per-scale-testflight.md`.
 
 ## NetNewsWire for Mac compiles and links on Linux, 2026-10-07
 
