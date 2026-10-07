@@ -655,6 +655,19 @@ class MacBuilder(I.Builder):
             o.add("NSColor", *self.ref(inner))
             self.catalog_colors[name] = o
             return o
+        if name == "separatorColor":
+            # golden CurrentActivity [79]: the wrapper's inner color is the
+            # gridColor WRAPPER object (separator's own values never archive);
+            # the wrapper allocates before its inner
+            if name in self.catalog_colors:
+                return self.catalog_colors[name]
+            o = self.new("NSColor")
+            o.add("NSColorSpace", *self.int8(6))
+            o.add("NSCatalogName", *self.ref(self.string(catalog)))
+            o.add("NSColorName", *self.ref(self.string(name)))
+            o.add("NSColor", *self.ref(self.catalog_color("System", "gridColor", where)))
+            self.catalog_colors[name] = o
+            return o
         if name not in CATALOG_COLORS:
             raise I.XibError(f"System color {name!r} not probed ({where})")
         if name in self.catalog_colors:
@@ -1023,7 +1036,6 @@ def _view(b, el, where, superview=None, id_map=None, guides=None, parent=None,
         r = getattr(b, "cv_rect", None)
         if r is not None:
             cr = getattr(b, "cv_content_rect", None)
-            wants = getattr(b, "cv_wants_layer", False)
             rw, rh = float(r.get("width")), float(r.get("height"))
             if cr is None:
                 o.add("NSFrameSize", *b.ref(b.string(_size_str(el))))
@@ -1041,8 +1053,6 @@ def _view(b, el, where, superview=None, id_map=None, guides=None, parent=None,
             else:
                 o.add("NSFrameSize", *b.ref(b.string(
                     "{%s, %s}" % (_fmt_g(cr[0]), _fmt_g(cr[1])))))
-            if wants:
-                o.add("NSViewIsLayerTreeHost", *b.boolean(False))
         else:
             o.add("NSFrameSize", *b.ref(b.string(_size_str(el))))
         if el.get("wantsLayer") == "YES":
@@ -1125,6 +1135,7 @@ def _table_cell_view(b, el, where, superview, id_map, parent=None):
     if el.get("customClass"):
         o.add("NSClassName", *b.ref(b.string(I._swift_class(el))))
         o.add("NSOriginalClassName", *b.ref(b.string("NSTableCellView")))
+    id_map[el.get("id")] = o
     o.add("NSNextResponder", *(b.ref(superview) if superview is not None else (N.NIL, None)))
     o.add("NSNibTouchBar", *(N.NIL, None))
     v, vt = _vflags(el, where)
@@ -1150,10 +1161,98 @@ def _table_cell_view(b, el, where, superview, id_map, parent=None):
     o.add("NSViewWantsBestResolutionOpenGLSurface", *b.boolean(False))
     if el.get("identifier"):
         o.add("NSReuseIdentifierKey", *b.ref(b.string(el.get("identifier"))))
+    cons_el = el.find("constraints")
+    if cons_el is not None and cons_el.findall("constraint"):
+        # golden CurrentActivity [179]: NSViewConstraints after
+        # NSReuseIdentifierKey, before the IB guide placeholders
+        carr = b.new("NSArray")
+        carr.add("NSInlinedValue", *b.boolean(False))
+        els = I._constraint_order(el, cons_el.findall("constraint"), where, mac=True)
+        cons = [id_map[c.get("id")] if c.get("id") in id_map
+                else _constraint(b, c, o, el.get("id"), id_map, {}, {}, where)
+                for c in els]
+        b.cons_order[el.get("id")] = [c.get("id") for c in els]
+        for con in cons:
+            carr.add("UINibEncoderEmptyKey", *b.ref(con))
+        o.add("NSViewConstraints", *b.ref(carr))
+        keys.extend((con, o) for con in cons)
     o.add("IBNSSafeAreaLayoutGuide", *(N.NIL, None))
     o.add("IBNSLayoutMarginsGuide", *(N.NIL, None))
     o.add("IBNSClipsToBounds", *b.int8(0))
+    return o, keys
+
+
+def _visual_effect_view(b, el, where, superview, id_map, parent=None):
+    """<visualEffectView> (probe CurrentActivity [102] / AccountStats [169]):
+    NSView-like shell + NSVisualEffectViewBlendingMode/State; the material
+    attribute is NOT archived."""
+    o = b.new("NSVisualEffectView")
+    o.add("NSNextResponder", *(b.ref(superview) if superview is not None else (N.NIL, None)))
+    o.add("NSNibTouchBar", *(N.NIL, None))
+    v, vt = _vflags(el, where)
+    o.add("NSvFlags", vt, v)
     id_map[el.get("id")] = o
+    keys = [(o, parent)]
+    subs = el.find("subviews")
+    if subs is not None:
+        arr = b.new("NSMutableArray")
+        arr.add("NSInlinedValue", *b.boolean(False))
+        o.add("NSSubviews", *b.ref(arr))
+        for child in subs:
+            existing = id_map.get(child.get("id"))
+            if existing is not None:
+                arr.add("UINibEncoderEmptyKey", *b.ref(existing))
+                continue
+            sub, sub_pairs = _build_element(b, child, where, superview=o,
+                                            id_map=id_map, guides={}, parent=o)
+            arr.add("UINibEncoderEmptyKey", *b.ref(sub))
+            keys.extend(sub_pairs)
+    r = el.find("rect[@key='frame']")
+    zero = r is None or (r.get("x", "0") in ("0", "0.0") and r.get("y", "0") in ("0", "0.0"))
+    o.add("NSFrameSize" if zero else "NSFrame", *b.ref(b.string(
+        _size_str(el) if zero else _rect(el, "frame", where))))
+    if superview is not None:
+        o.add("NSSuperview", *b.ref(superview))
+    if el.get("wantsLayer") == "YES":
+        o.add("NSViewIsLayerTreeHost", *b.boolean(False))
+    o.add("NSViewWantsBestResolutionOpenGLSurface", *b.boolean(False))
+    if _translates(el):
+        o.add("NSDoNotTranslateAutoresizingMask", *b.boolean(False))
+    cons_el = el.find("constraints")
+    if cons_el is not None and cons_el.findall("constraint"):
+        carr = b.new("NSArray")
+        carr.add("NSInlinedValue", *b.boolean(False))
+        els = I._constraint_order(el, cons_el.findall("constraint"), where, mac=True)
+        cons = [id_map[c.get("id")] if c.get("id") in id_map
+                else _constraint(b, c, o, el.get("id"), id_map, {}, {}, where)
+                for c in els]
+        b.cons_order[el.get("id")] = [c.get("id") for c in els]
+        for con in cons:
+            carr.add("UINibEncoderEmptyKey", *b.ref(con))
+        o.add("NSViewConstraints", *b.ref(carr))
+        keys.extend((con, o) for con in cons)
+    o.add("IBNSSafeAreaLayoutGuide", *(N.NIL, None))
+    o.add("IBNSLayoutMarginsGuide", *(N.NIL, None))
+    o.add("IBNSClipsToBounds", *b.int8(0))
+    blending = {"behindWindow": 0, "withinWindow": 1}.get(el.get("blendingMode"))
+    if blending is None:
+        raise I.XibError(f"visualEffectView blendingMode {el.get('blendingMode')!r} "
+                         f"not probed ({where})")
+    o.add("NSVisualEffectViewBlendingMode", *b.int8(blending))
+    state = {"followsWindowActiveState": 0, "active": 1, "inactive": 2}.get(el.get("state"))
+    if state is not None:
+        o.add("NSVisualEffectViewState", *b.int8(state))
+    o.add("NSVisualEffectViewMaskImage", *(N.NIL, None))
+    material = {"titlebar": 3, "menu": 4, "headerView": 5, "sheet": 6,
+                "windowBackground": 7, "hudWindow": 8, "fullScreenUI": 9,
+                "popover": 10, "sidebar": 11, "mediumLight": 12,
+                "underPageBackground": 13}.get(el.get("material"))
+    if material is None:
+        raise I.XibError(f"visualEffectView material {el.get('material')!r} "
+                         f"not probed ({where})")
+    o.add("NSVisualEffectViewMaterial", *b.int8(material))
+    o.add("IBVisualEffectViewExternalMaterial", *b.int8(material))
+    o.add("IBVisualEffectViewAppearanceType", *b.int8(0))
     return o, keys
 
 
@@ -1180,6 +1279,8 @@ def _build_element(b, el, where, superview, id_map, guides, parent=None, root=Fa
         return _box(b, el, where, superview, id_map, parent=parent)
     if el.tag == "progressIndicator":
         return _progress_indicator(b, el, where, superview, id_map, parent=parent)
+    if el.tag == "visualEffectView":
+        return _visual_effect_view(b, el, where, superview, id_map, parent=parent)
     if el.tag == "textView":
         o = _text_view(b, el, where, superview)
         id_map[el.get("id")] = o
@@ -1253,9 +1354,12 @@ def _window(b, el, where, id_map, parent=None, obj=None):
         o.add("NSWindowView", *b.ref(cv_obj))
     o.add("NSScreenRect", *b.ref(b.string(_rect(el, "screenRect", where))))
     if min_sz is not None:
-        # content min/max plus the titled-window title bar (probe win-minmax, +24)
+        # content min/max plus the title bar: +24 for NSPanels (probe
+        # InspectorWindow 256+24), +32 for regular windows (probe
+        # CurrentActivity 200+32 / AccountStats 256+32)
+        delta = 24 if el.get("customClass") == "NSPanel" else 32
         w, h = min_sz.strip("{}").split(", ")
-        o.add("NSMinSize", *b.ref(b.string("{%s, %s}" % (w, _fmt_g(float(h) + 24)))))
+        o.add("NSMinSize", *b.ref(b.string("{%s, %s}" % (w, _fmt_g(float(h) + delta)))))
     o.add("NSMaxSize", *b.ref(b.string(
         max_sz and "{%s, %s}" % (max_sz.strip("{}").split(", ")[0],
                                  _fmt_g(float(max_sz.strip("{}").split(", ")[1]) + 24))
@@ -1838,6 +1942,7 @@ SCROLL_SFLAGS = {
     ("none", True, None, None, True): 199184,
     ("none", True, None, "none", True): 215568,
     ("none", True, "NO", None, False): 133680,
+    ("none", True, "NO", None, True): 133680,  # probe CurrentActivity [19]
 }
 
 
@@ -2122,6 +2227,12 @@ def _scroll_view(b, el, where, superview, id_map, parent=None):
         raise I.XibError(f"<clipView> without exactly one subview ({where})")
     doc_el = doc_els[0]
     is_table = doc_el.tag in ("tableView", "outlineView")
+    if is_table:
+        # xibs may hang the headerView off the scrollView (probe
+        # CurrentActivity); the table build owns it either way
+        hv_out = el.find("tableHeaderView[@key='headerView']")
+        if hv_out is not None and doc_el.find("tableHeaderView[@key='headerView']") is None:
+            doc_el.append(hv_out)
     if doc_el.tag == "textView":
         doc = _text_view(b, doc_el, where, cv)
         id_map[doc_el.get("id")] = doc
@@ -2172,6 +2283,8 @@ def _scroll_view(b, el, where, superview, id_map, parent=None):
         hclip.add("NSDocView", *b.ref(id_map[hv_el.get("id")]))
         hclip.add("NSAutomaticallyAdjustsContentInsets", *b.boolean(False))
         harr.add("UINibEncoderEmptyKey", *b.ref(id_map[hv_el.get("id")]))
+        # the header clip joins the scroll view's subviews (probe CurrentActivity [19])
+        arr.add("UINibEncoderEmptyKey", *b.ref(hclip))
         # patch the header view's forward references to this clip
         doc._hdr_late.obj = hclip
     cv_flags = (0 if cv_el.get("drawsBackground") == "NO" else 4) \
@@ -2296,15 +2409,14 @@ def _button(b, el, where, superview, id_map, parent=None):
     if cell_el is None:
         raise I.XibError(f"<button> without buttonCell ({where})")
     btype = cell_el.get("type", "momentaryPushIn")
-    # probe FeedInspector/GP/Adv: check+radio (and bevel, probe
-    # TimelineContainerView) carry NSHuggingPriority whenever a hugging attr
-    # is present (defaults filled); push only when one differs from 250/750
-    # or both are present (probe ExportOPML eZ4 750/750 vs PPB v-only).
+    # NSHuggingPriority when the (attr-or-default) pair differs from the
+    # button type's IB default: help 750/750 (probe CurrentActivity/Dinosaurs
+    # help 750/750 -> no key; AccountStats 1000/1000 -> key), every other
+    # type 250/750 (probe ExportOPML eZ4 750/750 -> key, PPB v-only -> none).
     # NSAntiCompressionPriority only when a resistance attr differs from 750.
     h, v2 = el.get("horizontalHuggingPriority"), el.get("verticalHuggingPriority")
-    nondef = (h is not None and h != "250") or (v2 is not None and v2 != "750")
-    if nondef or (h is not None and v2 is not None) or \
-            (btype in ("check", "radio", "bevel") and (h is not None or v2 is not None)):
+    dh, dv = ("750", "750") if btype == "help" else ("250", "750")
+    if (h is not None and h != dh) or (v2 is not None and v2 != dv):
         o.add("NSHuggingPriority",
               *b.ref(b.string("{%s, %s}" % (_fmt_g(h or 250), _fmt_g(v2 or 750)))))
     h, v2 = (el.get("horizontalCompressionResistancePriority"),
@@ -3041,8 +3153,10 @@ def _table_view(b, el, where, superview, id_map, parent=None):
     if bg is None:
         raise I.XibError(f"<{el.tag}> without backgroundColor ({where})")
     o.add("NSBackgroundColor", *b.ref(_color_ref(b, bg, where)))
-    o.add("NSGridColor",
-          *b.ref(b.catalog_color("System", "gridColor", where)))
+    grid_el = el.find("color[@key='gridColor']")
+    o.add("NSGridColor", *b.ref(b.catalog_color(
+        "System", grid_el.get("name") if grid_el is not None else "gridColor",
+        where)))
     rss = el.get("rowSizeStyle")
     rowh = _table_row_height(el, where)
     o.add("NSRowHeight", *b.float64(rowh))
@@ -3077,9 +3191,12 @@ def _table_view(b, el, where, superview, id_map, parent=None):
     for col_el in (cols_el if cols_el is not None else []):
         pvs = col_el.find("prototypeCellViews")
         for pv in (pvs if pvs is not None else []):
-            if pv.get("identifier") is None:
+            # the dict key is the cell identifier, else the column's (probe
+            # CurrentActivity [84]: identifier-less cell keyed 'activity')
+            ident = pv.get("identifier") or col_el.get("identifier")
+            if ident is None:
                 raise I.XibError(f"prototypeCellView without identifier ({where})")
-            protos.append((pv.get("identifier"), pv))
+            protos.append((ident, pv))
     if rss is not None or protos:
         # golden SidebarView [54]: identifier -> NSNib(embedded cell archive),
         # entries sorted by identifier
