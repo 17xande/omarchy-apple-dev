@@ -126,6 +126,25 @@ for p in sorted(glob.glob(os.path.join(sys.argv[1], "Modules/*/Package.swift")))
         for x in paths:
             print(f"warning: {os.path.basename(os.path.dirname(p))}: excluded "
                   f"AppKit IB file {x} (Linux ibtool cannot compile it)")
+        # SwiftPM generates Bundle.module only for targets with resources.
+        # If the target's sources still reference it, shim the accessor.
+        src_dir = os.path.join(os.path.dirname(p), "Sources", name)
+        uses = any("Bundle.module" in open(os.path.join(b, f), encoding="utf-8", errors="replace").read()
+                   for b, _d, fs in os.walk(src_dir) for f in fs if f.endswith(".swift"))
+        if uses and not re.search(r"resources:\s*\[\s*[^\]]", new_body):
+            shim = os.path.join(src_dir, "LinuxBundleModule.swift")
+            with open(shim, "w") as f:
+                f.write(
+                    "// Linux adapter: the target's resources were excluded\n"
+                    "// (AppKit IB files); SwiftPM then omits the Bundle.module\n"
+                    "// accessor the sources still reference.\n"
+                    "import Foundation\n\n"
+                    "extension Bundle {\n"
+                    "\tstatic let module: Bundle = Bundle(for: BundleToken.self)\n"
+                    "\tprivate final class BundleToken {}\n"
+                    "}\n")
+            print(f"warning: {os.path.basename(os.path.dirname(p))}: wrote "
+                  "Bundle.module shim for target " + name)
     if s != open(p, encoding="utf-8").read():
         open(p, "w").write(s)
 PY
