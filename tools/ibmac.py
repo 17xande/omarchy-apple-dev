@@ -951,13 +951,17 @@ def _cell(b, el, control, where, owner_id=None, cell_cls="NSTextFieldCell"):
 
 
 def _field(b, el, where, superview, id_map, parent=None):
-    """<textField>: NSTextField (NSClassSwapper when customClass, probe About
-    LinkLabel) with its cell; returns (obj, [(obj, parent)])."""
+    """<textField>/<secureTextField>: NSTextField/NSSecureTextField
+    (NSClassSwapper when customClass, probe About LinkLabel) with its cell;
+    returns (obj, [(obj, parent)])."""
     guides = {}
-    o = b.new("NSClassSwapper" if el.get("customClass") else "NSTextField")
+    secure = el.tag == "secureTextField"
+    o = b.new("NSClassSwapper" if el.get("customClass")
+              else "NSSecureTextField" if secure else "NSTextField")
     if el.get("customClass"):
         o.add("NSClassName", *b.ref(b.string(I._swift_class(el))))
-        o.add("NSOriginalClassName", *b.ref(b.string("NSTextField")))
+        o.add("NSOriginalClassName",
+              *b.ref(b.string("NSSecureTextField" if secure else "NSTextField")))
     o.add("NSNextResponder", *(b.ref(superview) if superview is not None else (N.NIL, None)))
     o.add("NSNibTouchBar", *(N.NIL, None))
     v, vt = _vflags(el, where)
@@ -994,8 +998,19 @@ def _field(b, el, where, superview, id_map, parent=None):
     o.add("NSEnabled", *b.boolean(False))
     cell_el = el.find("textFieldCell[@key='cell']")
     if cell_el is None:
+        cell_el = el.find("secureTextFieldCell[@key='cell']")
+    if cell_el is None:
         raise I.XibError(f"<textField> without textFieldCell ({where})")
-    cell = _cell(b, cell_el, o, where, owner_id=cell_el.get("id"))
+    cell = _cell(b, cell_el, o, where, owner_id=cell_el.get("id"),
+                 cell_cls="NSSecureTextFieldCell" if secure else "NSTextFieldCell")
+    locales = el.find("allowedInputSourceLocales")
+    if locales is not None:
+        # probe AccountsFeedbin [72]: array of the locale strings on the CELL
+        larr = b.new("NSArray")
+        larr.add("NSInlinedValue", *b.boolean(False))
+        for s in locales.findall("string"):
+            larr.add("UINibEncoderEmptyKey", *b.ref(b.string(s.text or "")))
+        cell.add("NSAllowedInputLocales", *b.ref(larr))
     if el.get("textCompletion") == "NO":
         # probe AccountsAddCloudKit [59]: last cell key, bool false
         cell.add("NSAutomaticTextCompletionDisabled", *b.boolean(False))
@@ -1026,7 +1041,7 @@ def _field(b, el, where, superview, id_map, parent=None):
         o.add("NSLineBreakStrategy", *int_fit(65535))
     if el.get("contentType"):
         o.add("NSTextContentType", *b.ref(b.string(el.get("contentType"))))
-    o.add("NSAllowsWritingTools", *b.boolean(False))
+    o.add("NSAllowsWritingTools", *b.boolean(secure))
     o.add("NSTextFieldAllowsWritingToolsAffordance", *b.boolean(True))
     o.add("NS.resolvesNaturalAlignmentWithBaseWritingDirection", *b.boolean(True))
     id_map[el.get("id")] = o
@@ -1051,6 +1066,7 @@ def _view(b, el, where, superview=None, id_map=None, guides=None, parent=None,
     guide_kinds = {}
     is_custom = el.tag == "customView" or el.get("customClass")
     o = b.new("NSStackView" if el.tag == "stackView"
+              else "NSGridView" if el.tag == "gridView"
               else "NSClassSwapper" if is_custom else "NSView")
     if is_custom:
         # probe NNW3OpenPanelAccessoryView: bare <customView> (no customClass)
@@ -1064,7 +1080,27 @@ def _view(b, el, where, superview=None, id_map=None, guides=None, parent=None,
     o.add("NSvFlags", vt, v)
     id_map[el.get("id")] = o
     keys = [(o, parent)]
-    subs = el.find("subviews")
+    if el.tag == "gridView":
+        # gridCell contentView elements are the subview source (probe
+        # AccountsFeedbin [107]: doc order, grid is NSNextResponder)
+        arr = b.new("NSMutableArray")
+        arr.add("NSInlinedValue", *b.boolean(False))
+        o.add("NSSubviews", *b.ref(arr))
+        for c_el in el.findall("gridCells/gridCell"):
+            content_el = c_el.find("*[@key='contentView']")
+            if content_el is None:
+                raise I.XibError(f"<gridCell> without contentView ({where})")
+            existing = id_map.get(content_el.get("id"))
+            if existing is not None:
+                arr.add("UINibEncoderEmptyKey", *b.ref(existing))
+                continue
+            sub, sub_pairs = _build_element(b, content_el, where, superview=o,
+                                            id_map=id_map, guides=guides, parent=o)
+            arr.add("UINibEncoderEmptyKey", *b.ref(sub))
+            keys.extend(sub_pairs)
+        subs = None
+    else:
+        subs = el.find("subviews")
     if subs is not None:
         arr = b.new("NSMutableArray")
         arr.add("NSInlinedValue", *b.boolean(False))
@@ -1216,6 +1252,66 @@ def _view(b, el, where, superview=None, id_map=None, guides=None, parent=None,
         o.add("NSStackViewDetachesHiddenViews",
               *b.boolean(el.get("detachesHiddenViews") != "YES"))
         o.add("NSStackViewHasFlatViewHierarchy", *b.boolean(False))
+    if el.tag == "gridView":
+        # probe AccountsFeedbin [106..128]: contents build as plain subviews
+        # (gridCell doc order), then grid scaffolding after the frame
+        XP = {"trailing": 3, "leading": 2}
+        o.add("NSGrid_rowSpacing", *b.float64(float(el.get("rowSpacing", 0))))
+        o.add("NSGrid_columnSpacing", *b.float64(float(el.get("columnSpacing", 0))))
+        o.add("NSGrid_xPlacement", *b.int8(XP.get(el.get("xPlacement"), 0)))
+        o.add("NSGrid_yPlacement", *b.int8({"center": 4}.get(el.get("yPlacement"), 0)))
+        o.add("NSGrid_alignment", *b.int8({"none": 1}.get(el.get("rowAlignment"), 0)))
+        FLT_MIN = 1.1754943508222875e-38
+        rows = {r.get("id"): r for r in el.findall("rows/gridRow")}
+        cols = {c.get("id"): c for c in el.findall("columns/gridColumn")}
+        rarr = b.new("NSMutableArray")
+        rarr.add("NSInlinedValue", *b.boolean(False))
+        o.add("NSGrid_rows", *b.ref(rarr))
+        col_objs = {}
+        for r_el in el.findall("rows/gridRow"):
+            row = b.new("NSGridRow")
+            rarr.add("UINibEncoderEmptyKey", *b.ref(row))
+            row.add("NSGrid_owningGrid", *b.ref(o))
+            row.add("NSGrid_yPlacement", *b.int8(0))
+            row.add("NSGrid_alignment", *b.int8(0))
+            row.add("NSGrid_height", *b.float64(FLT_MIN))
+            row.add("NSGrid_topPadding", *b.float64(0.0))
+            row.add("NSGrid_bottomPadding", *b.float64(0.0))
+            row.add("NSGrid_hidden", *b.boolean(True))  # inverted: no attr -> True
+            carr = b.new("NSMutableArray")
+            carr.add("NSInlinedValue", *b.boolean(False))
+            row.add("NSGrid_cells", *b.ref(carr))
+            for c_el in el.findall(f"gridCells/gridCell[@row='{r_el.get('id')}']"):
+                cell = b.new("NSGridCell")
+                carr.add("UINibEncoderEmptyKey", *b.ref(cell))
+                cell.add("NSGrid_owningRow", *b.ref(row))
+                col_id = c_el.get("column")
+                if col_id not in col_objs:
+                    col_el = cols[col_id]
+                    col = b.new("NSGridColumn")
+                    col_objs[col_id] = col
+                    col.add("NSGrid_owningGrid", *b.ref(o))
+                    col.add("NSGrid_xPlacement", *b.int8(XP.get(col_el.get("xPlacement"), 0)))
+                    col.add("NSGrid_width", *b.float64(FLT_MIN))
+                    col.add("NSGrid_leadingPadding", *b.float64(0.0))
+                    col.add("NSGrid_trailingPadding", *b.float64(0.0))
+                    col.add("NSGrid_hidden", *b.boolean(True))
+                cell.add("NSGrid_owningColumn", *b.ref(col_objs[col_id]))
+                cell.add("NSGrid_mergeHead", *(N.NIL, None))
+                cell.add("NSGrid_xPlacement", *b.int8(0))
+                cell.add("NSGrid_yPlacement", *b.int8(0))
+                cell.add("NSGrid_alignment", *b.int8(0))
+                content_el = c_el.find("*[@key='contentView']")
+                sub = id_map.get(content_el.get("id")) if content_el is not None else None
+                if sub is None:
+                    raise I.XibError(f"<gridCell> without built contentView "
+                                     f"{content_el.get('id')!r} ({where})")
+                cell.add("NSGrid_content", *b.ref(sub))
+        clarr = b.new("NSMutableArray")
+        clarr.add("NSInlinedValue", *b.boolean(False))
+        for c_el in el.findall("columns/gridColumn"):
+            clarr.add("UINibEncoderEmptyKey", *b.ref(col_objs[c_el.get("id")]))
+        o.add("NSGrid_columns", *b.ref(clarr))
     return o, keys
 
 
@@ -1366,9 +1462,11 @@ def _build_element(b, el, where, superview, id_map, guides, parent=None, root=Fa
     """One element: (obj, [(obj, parent)] pairs for NSObjectsKeys/Values)."""
     if el.tag == "textField":
         return _field(b, el, where, superview, id_map, parent=parent)
-    if el.tag in ("view", "customView", "stackView"):
+    if el.tag in ("view", "customView", "stackView", "gridView"):
         return _view(b, el, where, superview=superview, id_map=id_map,
                      guides=guides, parent=parent, root=root)
+    if el.tag == "secureTextField":
+        return _field(b, el, where, superview, id_map, parent=parent)
     if el.tag == "button":
         return _button(b, el, where, superview, id_map, parent=parent)
     if el.tag == "popUpButton":
@@ -1584,6 +1682,13 @@ def _find_parent(root, ident):
         subs = el.find("subviews")
         if subs is not None and any(c.get("id") == ident for c in subs):
             return el
+    # gridCell contentView elements (probe AccountsFeedbin: the field's
+    # superview is the gridView, not the gridCell); the content carries
+    # key="contentView" (it may be the field element itself)
+    for gc in root.iter("gridCell"):
+        cv = gc.find("*[@key='contentView']")
+        if cv is not None and cv.get("id") == ident:
+            return gc
     return None
 
 
@@ -1730,10 +1835,17 @@ def compile_xib(path):
                     late_pending.append((sup, parent_el.get("id")))
                     late.obj = id_map[item_id]
             elif el.tag in ("window", "view", "customView", "textField",
+                            "secureTextField", "gridView",
                             "button", "popUpButton", "imageView", "box",
                             "scrollView", "textView", "tableView",
-                            "outlineView", "tableCellView"):
+                            "outlineView", "tableCellView", "progressIndicator"):
                 parent_el = _find_parent(objects, dest_id)
+                if parent_el is not None and parent_el.tag == "gridCell":
+                    # a gridCell content's superview is the gridView
+                    parent_el = next((gv for gv in objects.iter("gridView")
+                                      if any(gc.get("id") == parent_el.get("id")
+                                             for gc in gv.findall("gridCells/gridCell"))),
+                                     None)
                 is_cv = any(w.find("view[@key='contentView']") is not None
                             and w.find("view[@key='contentView']").get("id") == dest_id
                             for w in objects.findall("window"))
@@ -2192,9 +2304,9 @@ def _image_view(b, el, where, superview, id_map, parent=None):
     cell.add("NSCellFlags", *int_fit(0))
     cell.add("NSCellFlags2", N.INT32, 33554432)
     img = cell_el.get("image")
-    if img is None:
-        raise I.XibError(f"<imageCell> without image ({where})")
-    cell.add("NSContents", *b.ref(_image_ref(b, img, where)))
+    if img is not None:
+        # probe AccountsReaderAPI [146]: imageless cells drop NSContents
+        cell.add("NSContents", *b.ref(_image_ref(b, img, where)))
     cell.add("NSControlView", *b.ref(o))
     scale = cell_el.get("imageScaling", "proportionallyDown")
     if scale not in IMAGE_SCALE:
@@ -3143,6 +3255,12 @@ def _progress_indicator(b, el, where, superview, id_map, parent=None):
           and el.get("controlSize") == "small" and el.get("maxValue") == "100"
           and el.get("hidden") is None):
         spi = 28935
+    elif (style == "spinning" and el.get("indeterminate") == "YES"
+          and el.get("displayedWhenStopped") == "NO"
+          and el.get("controlSize") == "small" and el.get("bezeled") == "NO"
+          and el.get("hidden") == "YES"):
+        # probe AccountsFeedbin [76]: bezeled=NO clears one bit vs AccountStats
+        spi = 28934
     else:
         raise I.XibError(f"progressIndicator style {style!r} attr set not probed ({where})")
     o = b.new("NSProgressIndicator")
