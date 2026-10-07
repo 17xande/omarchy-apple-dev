@@ -193,7 +193,7 @@ def main():
             if any(k.startswith("com.apple.developer.icloud-") for k in wants):
                 enable_capability(bid, "ICLOUD", ident)
             if "com.apple.developer.aps-environment" in wants:
-                enable_capability(bid, "PUSH", ident)
+                enable_capability(bid, "PUSH_NOTIFICATIONS", ident)
         if plist_value(info, "AppGroup"):
             enable_capability(bid, "APP_GROUPS", ident)
         prov = make_profile(ident, cid, force)
