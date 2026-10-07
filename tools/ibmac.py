@@ -1048,7 +1048,10 @@ def _view(b, el, where, superview=None, id_map=None, guides=None, parent=None,
         if el.get("wantsLayer") == "YES":
             o.add("NSViewIsLayerTreeHost", *b.boolean(False))
     else:
-        o.add("NSFrame", *b.ref(b.string(_rect(el, "frame", where))))
+        r = el.find("rect[@key='frame']")
+        zero = r is not None and r.get("x", "0") in ("0", "0.0") and r.get("y", "0") in ("0", "0.0")
+        o.add("NSFrameSize" if zero else "NSFrame",
+              *b.ref(b.string(_size_str(el) if zero else _rect(el, "frame", where))))
         o.add("NSSuperview", *b.ref(superview))
         if el.get("wantsLayer") == "YES":
             o.add("NSViewIsLayerTreeHost", *b.boolean(False))
@@ -1071,8 +1074,11 @@ def _view(b, el, where, superview=None, id_map=None, guides=None, parent=None,
         carr.add("NSInlinedValue", *b.boolean(False))
         els = I._constraint_order(el, cons_el.findall("constraint"), where, mac=True)
         for c in els:
-            cons.append(_constraint(b, c, o, el.get("id"), id_map, guides,
-                                    guide_kinds, where))
+            # a constraint already built as an outlet destination (probe TCV:
+            # KCa allocated at connection time) is reused, not rebuilt
+            cons.append(id_map[c.get("id")] if c.get("id") in id_map
+                        else _constraint(b, c, o, el.get("id"), id_map, guides,
+                                         guide_kinds, where))
         b.cons_order[el.get("id")] = [c.get("id") for c in els]
         for c in cons:
             carr.add("UINibEncoderEmptyKey", *b.ref(c))
@@ -1319,6 +1325,8 @@ def _conn_blocks(objects_el):
         for tag in ("buttonCell", "popUpButtonCell"):
             for cell in el.findall(f"{tag}[@key='cell']"):
                 walk(cell)
+                for menu in cell.findall("menu[@key='menu']"):
+                    walk_menu(menu)
         cv = el.find("view[@key='contentView']")
         if cv is not None:
             walk(cv)
@@ -1486,8 +1494,26 @@ def compile_xib(path):
             elif el.tag == "customObject":
                 # probe MainMenu [8]: customObject with customModule -> swapper
                 id_map[dest_id] = _xib_swapper(b, el, where)
+            elif el.tag == "constraint":
+                # probe TimelineContainerView [17]: the constraint is allocated
+                # at connection time; its not-yet-built items build RIGHT HERE
+                # (golden box [18] + closure directly after constraint [17],
+                # before the connector's label string [36])
+                lates = []
+                id_map[dest_id] = _constraint(b, el, owner, "-2", id_map, {},
+                                              {}, where, lates=lates)
+                for late, item_id in lates:
+                    item_el = _find_id(objects, item_id)
+                    if item_el is None or item_el.get("id") in id_map:
+                        continue
+                    parent_el = _find_parent(objects, item_id)
+                    sup = _Late()
+                    _build_element(b, item_el, where, superview=sup,
+                                   id_map=id_map, guides={}, parent=sup)
+                    late_pending.append((sup, parent_el.get("id")))
+                    late.obj = id_map[item_id]
             elif el.tag in ("window", "view", "customView", "textField",
-                            "button", "popUpButton", "imageView",
+                            "button", "popUpButton", "imageView", "box",
                             "scrollView", "textView", "tableView",
                             "outlineView", "tableCellView"):
                 parent_el = _find_parent(objects, dest_id)
@@ -1757,12 +1783,30 @@ def _finalize(b, root):
 BUTTON_TYPE = {"push": 7, "check": 3, "switch": 3, "radio": 4, "bevel": 7,
                "roundRect": 7, "smallSquare": 7, "help": 7, "momentaryChange": 5}
 BEZEL_STYLE = {"rounded": 1, "regularSquare": 2, "helpButton": 9, "recessed": 6,
-               "roundedRect": 22, "smallSquare": 12, "texturedRounded": 12}
-# (behavior attribute set, button type) -> NSButtonFlags / NSButtonFlags2, as
-# compiled by ibtool for the corpus combinations (probe: golden-mac nibs).
+               "roundedRect": 12, "smallSquare": 10, "texturedRounded": 12}
+# (behavior attribute set, type, bezel, imagePosition, has image) ->
+# NSButtonFlags / NSButtonFlags2 (oracle: TimelineContainerView bevel,
+# AccountsReaderAPI roundRect, Dinosaurs help; push/check from golden-mac).
 BUTTON_BEHAVIOR = {
-    ("pushIn", "lightByBackground", "lightByGray"): (0x86804000, 129),
-    ("changeContents", "doesNotDimImage", "lightByContents"): (0x48385100, 2),
+    (("pushIn", "lightByBackground", "lightByGray"), "push", "rounded",
+     None, False): (-2038415360, 129),
+    (("pushIn", "lightByBackground", "lightByGray"), "help", "helpButton",
+     None, False): (-2038415360, 161),
+    (("pushIn", "lightByBackground", "lightByGray"), "bevel", "rounded",
+     "overlaps", True): (-2042085376, 129),
+    (("pushIn", "lightByBackground", "lightByGray"), "roundRect", "roundedRect",
+     None, False): (-2046803968, 164),
+    (("changeContents", "doesNotDimImage", "lightByContents"), "check",
+     "regularSquare", "left", False): (1211650304, 2),
+    (("changeContents", "doesNotDimImage", "lightByContents"), "radio",
+     "regularSquare", "left", False): (1211650304, 2),
+}
+# <popUpButtonCell type>: NSCellFlags, NSButtonFlags, NSButtonFlags2,
+# NSBezelStyle, NSAuxButtonType (probe ImportOPMLSheet push,
+# TimelineContainerView recessed).
+POPUP_CELL = {
+    "push": (-2076180416, 109068288, 129, 1, 0),
+    "recessed": (67108928, -1233108992, 173, 13, 1),
 }
 
 
@@ -2252,12 +2296,15 @@ def _button(b, el, where, superview, id_map, parent=None):
     if cell_el is None:
         raise I.XibError(f"<button> without buttonCell ({where})")
     btype = cell_el.get("type", "momentaryPushIn")
-    # probe FeedInspector/GP/Adv: check+radio always carry NSHuggingPriority
-    # (defaults filled); push only when a hugging attr differs from 250/750.
+    # probe FeedInspector/GP/Adv: check+radio (and bevel, probe
+    # TimelineContainerView) carry NSHuggingPriority whenever a hugging attr
+    # is present (defaults filled); push only when one differs from 250/750
+    # or both are present (probe ExportOPML eZ4 750/750 vs PPB v-only).
     # NSAntiCompressionPriority only when a resistance attr differs from 750.
     h, v2 = el.get("horizontalHuggingPriority"), el.get("verticalHuggingPriority")
     nondef = (h is not None and h != "250") or (v2 is not None and v2 != "750")
-    if nondef or (btype in ("check", "radio") and (h is not None or v2 is not None)):
+    if nondef or (h is not None and v2 is not None) or \
+            (btype in ("check", "radio", "bevel") and (h is not None or v2 is not None)):
         o.add("NSHuggingPriority",
               *b.ref(b.string("{%s, %s}" % (_fmt_g(h or 250), _fmt_g(v2 or 750)))))
     h, v2 = (el.get("horizontalCompressionResistancePriority"),
@@ -2276,6 +2323,12 @@ def _button(b, el, where, superview, id_map, parent=None):
     o.add("NSCell", *b.ref(cell))
     id_map[el.get("id") + "#cell"] = cell
     id_map[cell_el.get("id")] = cell
+    tint = el.find("color[@key='contentTintColor']")
+    if tint is not None:
+        # <color> is a child of <button> but archives on the CELL (probe TCV [42])
+        if tint.get("catalog") != "System":
+            raise I.XibError(f"contentTintColor {tint.get('catalog')!r} not probed ({where})")
+        cell.add("NSContentTintColor", *b.ref(b.catalog_color("System", tint.get("name"), where)))
     o.add("NSAllowsLogicalLayoutDirection", *b.boolean(not b.localize))
     o.add("NSControlSize", *b.int8(0))
     o.add("NSControlContinuous", *b.boolean(True))
@@ -2311,8 +2364,8 @@ def _button_cell(b, el, control, where):
     else:
         flags = 0x4000000
         flags2 = TEXT_ALIGN[el.get("alignment", "center")] << 26
-    o.add("NSCellFlags", N.INT32, _i32(flags))
-    o.add("NSCellFlags2", N.INT32, _i32(flags2))
+    o.add("NSCellFlags", *int_fit(_i32(flags)))
+    o.add("NSCellFlags2", *int_fit(_i32(flags2)))
     o.add("NSContents", *b.ref(_localizable(b, el.get("id") or "",
                                             el.get("title", ""), where)))
     fd = el.find("font[@key='font']")
@@ -2324,20 +2377,25 @@ def _button_cell(b, el, control, where):
         raise I.XibError(f"button type {btype!r} not probed ({where})")
     behavior = el.find("behavior[@key='behavior']")
     beh = behavior.attrib if behavior is not None else {}
-    key = tuple(k for k in beh if beh[k] == "YES" and k not in ("key",))
-    if key not in BUTTON_BEHAVIOR:
-        raise I.XibError(f"behavior {sorted(key)} not probed ({where})")
-    bflags, bflags2 = BUTTON_BEHAVIOR[key]
-    o.add("NSButtonFlags", N.INT64, _i32(bflags) if bflags > 0x7FFFFFFF else bflags)
-    o.add("NSButtonFlags2", N.INT16, bflags2)
+    beh_key = tuple(k for k in beh if beh[k] == "YES" and k not in ("key",))
     bezel = el.get("bezelStyle", "rounded")
     if bezel not in BEZEL_STYLE:
         raise I.XibError(f"bezelStyle {bezel!r} not probed ({where})")
+    image = el.get("image")
+    key = (beh_key, btype, bezel, el.get("imagePosition"), image is not None)
+    if key not in BUTTON_BEHAVIOR:
+        raise I.XibError(f"button {sorted(beh_key)}/{btype}/{bezel} "
+                         f"img={el.get('imagePosition')} not probed ({where})")
+    bflags, bflags2 = BUTTON_BEHAVIOR[key]
+    o.add("NSButtonFlags", *int_fit(_i32(bflags)))
+    o.add("NSButtonFlags2", *int_fit(bflags2))
     o.add("NSBezelStyle", *b.int8(BEZEL_STYLE[bezel]))
+    if image:
+        o.add("NSNormalImage", *b.ref(_image_ref(b, image, where)))
     if btype in ("check", "radio"):
         # probe FeedInspector [56] / GP [126]: check -> NSSwitch, radio ->
-        # NSRadioButton, between NSBezelStyle and NSAlternateContents; one
-        # object shared by every cell with the same name
+        # NSRadioButton, between NSBezelStyle/NSNormalImage and
+        # NSAlternateContents; one object shared by same-named cells
         name = "NSSwitch" if btype == "check" else "NSRadioButton"
         img = b.img_sources.get(name)
         if img is None:
@@ -2425,15 +2483,42 @@ def _xib_swapper(b, el, where):
     return o
 
 
-def _menu_item(b, item_el, menu, cell, where, localize_owner):
+def _menu_item(b, item_el, menu, cell, where, localize_owner=None):
     o = b.new("NSMenuItem")
     o.add("NSMenu", *b.ref(menu if menu is not None else _Late()))
+    sep = item_el.get("isSeparatorItem") == "YES"
+    if sep:
+        # bug-compatible: false flags on separators (probe TCV [103])
+        o.add("NSIsDisabled", *b.boolean(False))
+        o.add("NSIsSeparator", *b.boolean(False))
+    if item_el.get("hidden") == "YES":
+        # inverted: hidden archives bool false (probe TCV [64])
+        o.add("NSIsHidden", *b.boolean(False))
     o.add("NSAllowsKeyEquivalentLocalization", *b.boolean(False))
     o.add("NSAllowsKeyEquivalentMirroring", *b.boolean(False))
-    o.add("NSTitle", *b.ref(_localizable(b, localize_owner or item_el.get("id") or "",
-                                         item_el.get("title", ""), where)))
+    if sep:
+        o.add("NSTitle", *b.ref(b.string("")))
+    else:
+        o.add("NSTitle", *b.ref(_localizable(b, item_el.get("id") or "",
+                                             item_el.get("title", ""), where)))
+        if item_el.get("identifier"):
+            o.add("NSMenuItemIdentifier", *b.ref(b.string(item_el.get("identifier"))))
     o.add("NSKeyEquiv", *b.ref(b.string("")))
-    o.add("NSKeyEquivModMask", N.INT32, 1048576)
+    mod = item_el.find("modifierMask[@key='keyEquivalentModifierMask']")
+    if mod is None and not sep:
+        # the empty modifierMask element DROPS the key (probe TCV items vs
+        # ImportOPML/AddFeed items without the element); separators never
+        # carry it (probe TCV [103])
+        o.add("NSKeyEquivModMask", N.INT32, 1048576)
+    else:
+        mask = 1048576
+        extra = False
+        for name, bit in (MENU_MOD_BITS.items() if mod is not None else ()):
+            if mod.get(name) == "YES":
+                mask += bit
+                extra = True
+        if extra:
+            o.add("NSKeyEquivModMask", N.INT32, mask)
     o.add("NSMnemonicLoc", N.INT32, 2147483647)
     if item_el.get("state") == "on":
         o.add("NSState", *b.int8(1))
@@ -2441,7 +2526,13 @@ def _menu_item(b, item_el, menu, cell, where, localize_owner):
     o.add("NSOnImage", *b.ref(_custom_image_resource(b, on_name, on_size, where)))
     o.add("NSMixedImage", *b.ref(_custom_image_resource(b, MENU_MIXED[0], MENU_MIXED[1], where)))
     o.add("NSAction", *b.ref(b.string("_popUpItemAction:")))
+    if item_el.get("tag") is not None:
+        o.add("NSTag", *b.int_fit32(int(item_el.get("tag"))))
     o.add("NSTarget", *b.ref(cell))
+    if item_el.find("attributedString[@key='attributedTitle']") is not None:
+        at = b.new("NSAttributedString")
+        at.add("NSString", *b.ref(b.string("")))
+        o.add("NSAttributedTitle", *b.ref(at))
     o.add("NSHiddenInRepresentation", *b.boolean(True))
     return o
 
@@ -3035,6 +3126,18 @@ def _popup(b, el, where, superview, id_map, parent=None):
     o.add("NSViewWantsBestResolutionOpenGLSurface", *b.boolean(False))
     if _translates(el):
         o.add("NSDoNotTranslateAutoresizingMask", *b.boolean(False))
+    cons_el = el.find("constraints")
+    if cons_el is not None and cons_el.findall("constraint"):
+        carr = b.new("NSArray")
+        carr.add("NSInlinedValue", *b.boolean(False))
+        els = I._constraint_order(el, cons_el.findall("constraint"), where, mac=True)
+        cons = [_constraint(b, c, o, el.get("id"), id_map, {}, {}, where)
+                if not (c.get("id") and c.get("id") in id_map)
+                else id_map[c.get("id")] for c in els]
+        b.cons_order[el.get("id")] = [c.get("id") for c in els]
+        for con in cons:
+            carr.add("UINibEncoderEmptyKey", *b.ref(con))
+        o.add("NSViewConstraints", *b.ref(carr))
     h, v2 = el.get("horizontalHuggingPriority"), el.get("verticalHuggingPriority")
     if (h is not None and h != "750") or (v2 is not None and v2 != "750"):
         o.add("NSHuggingPriority",
@@ -3072,39 +3175,43 @@ def _popup(b, el, where, superview, id_map, parent=None):
 
 def _popup_cell(b, el, control, where, id_map):
     o = b.new("NSPopUpButtonCell")
-    o.add("NSCellFlags", N.INT64, -2076180416)
+    ptype = el.get("type", "push")
+    if ptype not in POPUP_CELL:
+        raise I.XibError(f"popUpButtonCell type {ptype!r} not probed ({where})")
+    cflags, bflags, bflags2, bezel, aux = POPUP_CELL[ptype]
+    o.add("NSCellFlags", N.INT32, _i32(cflags) if cflags > 0x7FFFFFFF else cflags)
     lb = el.get("lineBreakMode", "wordWrap")
     if lb not in LINE_BREAK:
         raise I.XibError(f"lineBreakMode {lb!r} not probed ({where})")
-    o.add("NSCellFlags2", N.INT16, LINE_BREAK_FLAGS2[lb])
+    align = el.get("alignment")
+    f2 = (TEXT_ALIGN[align] << 26 if align is not None else 0) | LINE_BREAK_FLAGS2[lb]
+    o.add("NSCellFlags2", *int_fit(f2))
     menu_el = el.find("menu[@key='menu']")
     if menu_el is None:
         raise I.XibError(f"<popUpButtonCell> without menu ({where})")
     items = menu_el.find("items")
-    if items is None:
+    if items is None or not len(items):
         raise I.XibError(f"<menu> without items ({where})")
     sel_id = el.get("selectedItem")
-    sel_el = next((m for m in items if m.get("id") == sel_id), items[0] if len(items) else None)
-    sel_title = sel_el.get("title", "") if sel_el is not None else ""
-    o.add("NSContents", *b.ref(_localizable(b, sel_el.get("id") if sel_el is not None else "",
-                                            sel_title, where)))
+    sel_el = next((m for m in items if m.get("id") == sel_id), items[0])
+    # NSContents is always a plain string, even in .lproj outputs (probe
+    # AddFeedSheet golden [25] vs item titles)
+    o.add("NSContents", *b.ref(b.string(sel_el.get("title", ""))))
     fd = el.find("font[@key='font']")
     if fd is None:
         raise I.XibError(f"<popUpButtonCell> without <font> ({where})")
     o.add("NSSupport", *b.ref(b.font(fd, where)))
     o.add("NSControlView", *b.ref(control))
-    o.add("NSButtonFlags", N.INT32, 109068288)
-    o.add("NSButtonFlags2", N.INT16, 129)
-    o.add("NSBezelStyle", *b.int8(1))
+    o.add("NSButtonFlags", *int_fit(_i32(bflags)))
+    o.add("NSButtonFlags2", *int_fit(bflags2))
+    o.add("NSBezelStyle", *b.int8(bezel))
     o.add("NSAlternateContents", *b.ref(b.string("")))
     o.add("NSKeyEquivalent", *b.ref(b.string("")))
     o.add("NSPeriodicDelay", N.INT16, 400)
     o.add("NSPeriodicInterval", *b.int8(75))
-    o.add("NSAuxButtonType", *b.int8(0))
-    if sel_el is None:
-        raise I.XibError(f"<popUpButtonCell> without items ({where})")
+    o.add("NSAuxButtonType", *b.int8(aux))
     late_menu = _Late()
-    sel = _menu_item(b, sel_el, late_menu, o, where, el.get("id"))
+    sel = _menu_item(b, sel_el, late_menu, o, where)
     o.add("NSMenuItem", *b.ref(sel))
     o.add("NSMenuItemRespectAlignment", *b.boolean(False))
     menu = b.new("NSMenu")
@@ -3112,6 +3219,11 @@ def _popup_cell(b, el, control, where, id_map):
     o.add("NSMenu", *b.ref(menu))
     id_map[menu_el.get("id")] = menu
     id_map[sel_el.get("id")] = sel
+    if el.get("pullsDown") is not None:
+        # probe TimelineContainerView [60]: pullsDown="YES" archives
+        # NSSelectedIndex=-1 + NSPullDown=false
+        o.add("NSSelectedIndex", *int_fit(-1))
+        o.add("NSPullDown", *b.boolean(False))
     o.add("NSPreferredEdge", *b.int8(1))
     o.add("NSUsesItemFromMenu", *b.boolean(False))
     o.add("NSAltersState", *b.boolean(False))
@@ -3126,7 +3238,7 @@ def _popup_cell(b, el, control, where, id_map):
         if m is sel_el:
             iarr.add("UINibEncoderEmptyKey", *b.ref(sel))
             continue
-        item = _menu_item(b, m, menu, o, where, el.get("id"))
+        item = _menu_item(b, m, menu, o, where)
         id_map[m.get("id")] = item
         iarr.add("UINibEncoderEmptyKey", *b.ref(item))
     return o
