@@ -1290,3 +1290,18 @@ App Store Connect API key and staples the ticket. On a Mac, `spctl` says
 "accepted, source=Notarized Developer ID". The Mach-O still says `sdk 14.0`
 (the deployment target), as iOS builds do before `asc.py stamp`. Receipt
 `receipts/2026-10-06-macos-notarized.md`.
+
+## NetNewsWire for Mac compiles and links on Linux, 2026-10-07
+
+**58. The generator now writes adapters for macOS app targets, and NetNewsWire's
+Mac app links on Linux.** `compat/nnw-mac/setup.sh DIR` clones NetNewsWire
+8c322c2 and makes four mechanical changes. ObjC category members from the
+bridging header become Swift shims, and Swift files that use AppKit types get
+`import Cocoa`: Xcode injects both through the bridging header, SwiftPM does
+not. Local package products become dynamic, because the project turns off the
+duplicate-module check that SwiftPM has no switch for. AppKit xibs stay out of
+the bundle with one `warning:` line each. The SwiftBuild release build for
+`arm64-apple-macosx` then writes a 3.7 MB arm64 Mach-O executable. The iOS
+adapter for NetNewsWire is byte-identical to the one from the old generator, and
+the full regression passes. The app cannot show its windows yet: its 34 AppKit
+xibs and MainMenu need a macOS nib compiler.
