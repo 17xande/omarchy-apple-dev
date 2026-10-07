@@ -462,13 +462,17 @@ class MacBuilder(I.Builder):
         self.custom_colors = {}
         self.cursors = {}
         self.blue = None
+        self.red = None
         self.image_decls = {}   # <image name=...> elements from <resources>
+        self.named_color_els = {}  # <namedColor name=...> inner <color>
+        self.named_colors = {}  # built namedColor wrappers by name
         self.colorspace = None  # shared Generic Gray space
         self.srgbspace = None   # shared sRGB space (custom colors)
         self.late = []          # unresolved _Late refs
         self.cons_order = {}    # view xib id -> constraint ids in Apple order
         self.localize = False   # .lproj xibs wrap user strings
         self.nums = {}          # NSNumber intern pool by numeric value
+        self.bool_nums = {}     # NSNumber bool pool for binding options (inverted)
         self.img_sources = {}   # NSButtonImageSource intern pool by name
 
     def number(self, typ, v):
@@ -642,6 +646,18 @@ class MacBuilder(I.Builder):
             return self._named_blue(name, where=where, inner_name="systemBlueColor")
         if name == "systemBlueColor":
             return self._named_blue(name)
+        if name == "systemRedColor":
+            # golden AccountsFeedbin [50..52]: wrapper around a space-1 sRGB
+            # red (components "1 0 0 1", ColorSync display conversion pinned)
+            if name in self.catalog_colors:
+                return self.catalog_colors[name]
+            o = self.new("NSColor")
+            o.add("NSColorSpace", *self.int8(6))
+            o.add("NSCatalogName", *self.ref(self.string(catalog)))
+            o.add("NSColorName", *self.ref(self.string(name)))
+            o.add("NSColor", *self.ref(self._red_color()))
+            self.catalog_colors[name] = o
+            return o
         if name == "_sourceListBackgroundColor":
             # golden SidebarView [49]: own wrapper whose inner color is the
             # controlBackgroundColor catalog WRAPPER object
@@ -710,6 +726,35 @@ class MacBuilder(I.Builder):
             o.add("NSLinearExposure", N.DATA, b"1")
             self.blue = o
         return self.blue
+
+    def _red_color(self):
+        """systemRedColor inner (probe AccountsFeedbin [52])."""
+        if self.red is None:
+            o = self.new("NSColor")
+            o.add("NSColorSpace", N.INT8, 1)
+            o.add("NSRGB", N.DATA, b"0.9859541655 0 0.02694000863\x00")
+            o.add("NSCustomColorSpace", *self.ref(self.srgb_space()))
+            o.add("NSComponents", N.DATA, b"1 0 0 1")
+            o.add("NSLinearExposure", N.DATA, b"1")
+            self.red = o
+        return self.red
+
+    def named_color(self, name, where):
+        """<namedColor> asset resource (probe AccountsFeedbin [31..35]):
+        catalog wrapper '#$assets-mainBundleID' around the inline sRGB color,
+        catalog name fixed regardless of the bundle."""
+        if name in self.named_colors:
+            return self.named_colors[name]
+        el = self.named_color_els.get(name)
+        if el is None:
+            raise I.XibError(f"namedColor {name!r} not declared in <resources> ({where})")
+        o = self.new("NSColor")
+        o.add("NSColorSpace", *self.int8(6))
+        o.add("NSCatalogName", *self.ref(self.string("#$assets-mainBundleID")))
+        o.add("NSColorName", *self.ref(self.string(name)))
+        o.add("NSColor", *self.ref(self.custom_color(el, where)))
+        self.named_colors[name] = o
+        return o
 
 
 def _classref(b, cls, module, provider):
@@ -1562,6 +1607,8 @@ def compile_xib(path):
     if res is not None:
         for img in res.findall("image"):
             b.image_decls[img.get("name")] = img
+        for nc in res.findall("namedColor"):
+            b.named_color_els[nc.get("name")] = nc.find("color")
 
     root = b.new("NSObject")
     ibd = b.new("NSIBObjectData")
@@ -1600,9 +1647,14 @@ def compile_xib(path):
     conns_arr = b.new("NSMutableArray")
     conns_arr.add("NSInlinedValue", *b.boolean(False))
 
-    outlets, actions = [], []
+    outlets, actions, bindings = [], [], []
     for src_el, conn_el in _conn_blocks(objects):
-        (actions if conn_el.tag == "action" else outlets).append((src_el, conn_el))
+        if conn_el.tag == "binding":
+            bindings.append((src_el, conn_el))
+        elif conn_el.tag == "action":
+            actions.append((src_el, conn_el))
+        else:
+            outlets.append((src_el, conn_el))
 
     # Outlets and actions both sort by SOURCE element id (ASCII), ties keep
     # document order (probe TimelineTableView: -2 < MjV < opA outlets); the
@@ -1703,6 +1755,62 @@ def compile_xib(path):
         c.add("NSDestination", *b.ref(id_map[dest_id]))
         c.add("NSLabel", *b.ref(b.string(conn_el.get("property"))))
         c.add("NSChildControllerCreationSelectorName", *(N.NIL, None))
+        conns_arr.add("UINibEncoderEmptyKey", *b.ref(c))
+        conn_objs.append(c)
+    # Bindings sort by SOURCE element id DESCENDING (probe GeneralPreferences:
+    # wtY, Yrc, Ubm, UI6, Jwn, 6pw); outlets/actions keep ascending order.
+    # Destination userDefaultsController lazily builds NSUserDefaultsController
+    # with NSSharedInstance False (representsSharedInstance=YES archives False,
+    # probe CrashReporter [131]); its keys pair is (controller, owner).
+    bind_key_pairs = []
+    for src_el, conn_el in sorted(
+            bindings, key=lambda p: (p[0].get("id") or "").encode(), reverse=True):
+        c = b.new("NSNibBindingConnector")
+        src = id_map.get(src_el.get("id"))
+        if src is None:
+            raise I.XibError(f"binding source {src_el.get('id')!r} not built ({where})")
+        c.add("NSSource", *b.ref(src))
+        dest_id = conn_el.get("destination")
+        if dest_id not in id_map:
+            el = _find_id(objects, dest_id)
+            if el is None or el.tag != "userDefaultsController":
+                raise I.XibError(f"binding destination {dest_id!r} not found ({where})")
+            udc = b.new("NSUserDefaultsController")
+            udc.add("NSSharedInstance", *b.boolean(False))
+            id_map[dest_id] = udc
+            bind_key_pairs.append((udc, owner))
+        c.add("NSDestination", *b.ref(id_map[dest_id]))
+        name, kp = conn_el.get("name"), conn_el.get("keyPath")
+        c.add("NSLabel", *b.ref(b.string(f"{name}: {kp}")))
+        c.add("NSBinding", *b.ref(b.string(name)))
+        c.add("NSKeyPath", *b.ref(b.string(kp)))
+        opts = conn_el.find("dictionary[@key='options']")
+        d = b.new("NSDictionary")
+        d.add("NSInlinedValue", *b.boolean(False))
+        c.add("NSOptions", *b.ref(d))
+        c.add("NSNibBindingConnectorVersion", *b.int8(2))
+        if opts is not None:
+            for o_el in opts:
+                d.add("UINibEncoderEmptyKey", *b.ref(b.string(o_el.get("key"))))
+                # bool values archive INVERTED (probe: value="NO" -> NS.boolval
+                # TRUE); integers int_fit; strings plain
+                if o_el.tag == "bool":
+                    key = ("boolval", o_el.get("value"))
+                    n = b.bool_nums.get(key)
+                    if n is None:
+                        n = b.new("NSNumber")
+                        n.add("NS.boolval",
+                              N.TRUE if o_el.get("value") != "YES" else N.FALSE, None)
+                        b.bool_nums[key] = n
+                    d.add("UINibEncoderEmptyKey", *b.ref(n))
+                elif o_el.tag == "integer":
+                    v = int(o_el.get("value"))
+                    n = b.number(N.INT8 if -128 <= v <= 127 else N.INT32, v)
+                    d.add("UINibEncoderEmptyKey", *b.ref(n))
+                elif o_el.tag == "string":
+                    d.add("UINibEncoderEmptyKey", *b.ref(b.string(o_el.text or "")))
+                else:
+                    raise I.XibError(f"binding option <{o_el.tag}> not probed ({where})")
         conns_arr.add("UINibEncoderEmptyKey", *b.ref(c))
         conn_objs.append(c)
     for late, parent_id in late_pending:
@@ -1833,6 +1941,7 @@ def compile_xib(path):
             collect_menu(el, owner)
         else:
             collect(el, owner)
+    keys.extend(bind_key_pairs)  # userDefaultsControllers (probe CrashReporter [131])
     for late, menu_id in late_menus:
         late.obj = id_map[menu_id]
     values = [(nsapp, owner)]
@@ -2297,8 +2406,12 @@ def _scroll_view(b, el, where, superview, id_map, parent=None):
         if hv_out is not None and doc_el.find("tableHeaderView[@key='headerView']") is None:
             doc_el.append(hv_out)
     if doc_el.tag == "textView":
-        doc = _text_view(b, doc_el, where, cv)
-        id_map[doc_el.get("id")] = doc
+        # the owner's textView outlet may have built it lazily before the
+        # scroll view (probe CrashReporter: one text stack, reused doc)
+        doc = id_map.get(doc_el.get("id"))
+        if doc is None:
+            doc = _text_view(b, doc_el, where, cv)
+            id_map[doc_el.get("id")] = doc
     elif is_table:
         # the owner's tableView outlet may have built it lazily before the
         # scroll view (probe TimelineTableView: one table, reused doc)
@@ -2521,10 +2634,17 @@ def _button(b, el, where, superview, id_map, parent=None):
     id_map[cell_el.get("id")] = cell
     tint = el.find("color[@key='contentTintColor']")
     if tint is not None:
-        # <color> is a child of <button> but archives on the CELL (probe TCV [42])
-        if tint.get("catalog") != "System":
+        # <color> is a child of <button> but archives on the CELL (probe TCV [42]);
+        # catalog=System -> catalog color, bare name -> <namedColor> resource
+        # (probe AccountsFeedbin AccentColor)
+        if tint.get("catalog") == "System":
+            cell.add("NSContentTintColor",
+                     *b.ref(b.catalog_color("System", tint.get("name"), where)))
+        elif tint.get("catalog") is None and tint.get("name") in b.named_color_els:
+            cell.add("NSContentTintColor",
+                     *b.ref(b.named_color(tint.get("name"), where)))
+        else:
             raise I.XibError(f"contentTintColor {tint.get('catalog')!r} not probed ({where})")
-        cell.add("NSContentTintColor", *b.ref(b.catalog_color("System", tint.get("name"), where)))
     o.add("NSAllowsLogicalLayoutDirection", *b.boolean(not b.localize))
     o.add("NSControlSize", *b.int8(0))
     o.add("NSControlContinuous", *b.boolean(True))
