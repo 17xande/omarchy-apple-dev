@@ -1440,3 +1440,28 @@ favicons — the sandboxed network path works), Sparkle's first-run sheet shows
 the actool-built app icon, pluginkit lists both appexes, and the Dock shows
 the running app's icon. Receipt
 `receipts/2026-10-07-nnw-mac-provision.md`.
+
+## Info.plist placeholders a Linux build must fill, 2026-10-07
+
+**62. Xcode bakes `$(AppIdentifierPrefix)` and `$(TeamIdentifierPrefix)`
+(both "<TeamID>.") into every processed Info.plist from the signing team;
+xtool expands no build settings, and xcodeproj2xtool.py dropped the
+unresolvable key — so the dev-signed NetNewsWire iOS install of 2026-10-07
+15:45Z trapped in `AppDelegate.application(_:didFinishLaunchingWithOptions:)`
+at `iOS/AppDefaults.swift:47`
+(`Bundle.main.object(forInfoDictionaryKey: "AppIdentifierPrefix") as! String`),
+and the TestFlight build shipped the same gap (`Secrets/CredentialsManager.swift:25`
+reads it too). The drop loop also only saw top-level string values, so
+placeholders nested in dictionaries sailed through: the IceCubes ASC build
+shipped `NSExtensionPrincipalClass = $(PRODUCT_MODULE_NAME).X` in the action,
+notification, and share appexes — principal-class lookups that can only fail.
+Fix: the generator resolves `PRODUCT_MODULE_NAME` (the c99extidentifier of the
+target name), keeps the two team-prefix placeholders at any depth, and still
+drops every other unresolvable value; the step that knows the team fills the
+placeholders — `ship.sh` runs `tools/fill-team-prefix.py` with the profile's
+`com.apple.developer.team-identifier` right after `asc.py identity` and before
+rcodesign seals the plists, and a device install runs it with
+`--from-xtool-auth` (or `--profile <development.mobileprovision>`) before
+`xtool install`; `asc.py validate` now FAILs an ipa whose Info.plists carry
+any surviving `$(...)`. Receipt
+`receipts/2026-10-07-app-identifier-prefix.md`.

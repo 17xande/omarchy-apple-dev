@@ -183,6 +183,9 @@ else
 fi
 team=$("$PY" -c 'import plistlib,sys; print(plistlib.load(open(sys.argv[1],"rb"))["com.apple.developer.team-identifier"])' \
   "$sign_dir/entitlements.plist")
+# $(AppIdentifierPrefix)/$(TeamIdentifierPrefix) stay placeholders until the
+# team is known; fill them before signing seals the Info.plists.
+"$PY" "$here/tools/fill-team-prefix.py" --team "$team" "$app"
 # Inside-out: every framework, then each PlugIns/*.appex with its own entitlements, is signed
 # BEFORE the app, so the app's _CodeSignature seals already-signed nested code. rcodesign's app
 # sign preserves the pre-signed nested signatures; the bare --entitlements-xml-file applies to

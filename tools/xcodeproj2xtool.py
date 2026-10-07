@@ -235,6 +235,13 @@ PLATFORMS = {
 }
 
 
+def c99_identifier(name):
+    """Xcode's $(PRODUCT_NAME:c99extidentifier): non-C99 chars become _,
+    a leading digit gets a _ prefix (PRODUCT_MODULE_NAME's default)."""
+    ident = re.sub(r"\W", "_", name, flags=re.A)
+    return "_" + ident if ident[:1].isdigit() else ident
+
+
 def ibtool_compiles(path):
     """Whether the repo's ibtool compiles one Interface Builder source.
 
@@ -1462,8 +1469,11 @@ class Generator:
         """Builds the adapter Info.plist for one target (app or extension):
         the project's INFOPLIST_FILE when present, plus INFOPLIST_KEY_* values
         when GENERATE_INFOPLIST_FILE = YES (file keys win, as in Xcode), with
-        $(BUILD_SETTING) placeholders resolved; unresolved values and the
-        executable/bundle-id keys xtool owns are dropped.
+        $(BUILD_SETTING) placeholders resolved in every string value; values
+        with $(AppIdentifierPrefix)/$(TeamIdentifierPrefix) keep those
+        placeholders (fill-team-prefix.py substitutes the signing team later),
+        values with other unresolvable settings and the executable/bundle-id
+        keys xtool owns are dropped.
 
         Returns (plist, dropped_keys); the caller writes it."""
         ipf = self.setting(layers, "INFOPLIST_FILE")
@@ -1540,21 +1550,40 @@ class Generator:
             "TARGET_NAME": target_name,
             "PRODUCT_NAME": "$(TARGET_NAME)",
             "EXECUTABLE_NAME": "$(PRODUCT_NAME)",
+            "PRODUCT_MODULE_NAME": c99_identifier(target_name),
             "DEVELOPMENT_LANGUAGE": dev_region or "en",
             "PRODUCT_BUNDLE_PACKAGE_TYPE": "XPC!" if extension else "APPL",
         })
 
+        kept_prefixes = []
+
+        def resolve(v, where):
+            """(value, kept) - expands placeholders; team-prefix ones stay
+            literal because only the signing step knows the team."""
+            if isinstance(v, str):
+                nv = self.expand(v, [flat])
+                left = set(re.findall(r"\$\(([^)]+)\)", nv))
+                if left and left <= {"AppIdentifierPrefix", "TeamIdentifierPrefix"}:
+                    kept_prefixes.append(where)
+                    return nv, True
+                return nv, "$(" not in nv
+            if isinstance(v, list):
+                items = [resolve(item, f"{where}[{i}]") for i, item in enumerate(v)]
+                return [item for item, _kept in items], all(k for _i, k in items)
+            if isinstance(v, dict):
+                pairs = [(k, resolve(item, f"{where}.{k}" if where else k))
+                         for k, item in v.items()]
+                return {k: item for k, (item, _kept) in pairs}, all(k for _i, k in pairs)
+            return v, True
+
         dropped = []
         for key in list(plist):
-            v = plist[key]
-            if not isinstance(v, str):
-                continue
-            nv = self.expand(v, [flat])
-            if "$(" in nv:
+            nv, kept = resolve(plist[key], key)
+            if kept:
+                plist[key] = nv
+            else:
                 dropped.append(key)
                 del plist[key]
-            elif nv != v:
-                plist[key] = nv
         xtool_owned = [k for k in ("CFBundleExecutable", "CFBundleIdentifier")
                        if k in plist]
         for k in xtool_owned:
@@ -1564,6 +1593,10 @@ class Generator:
                       "(the first two are set by xtool from the product name and "
                       "bundleID; the rest use build settings the generator cannot "
                       "resolve)")
+        if kept_prefixes:
+            self.warn(f"{target_name} Info.plist keeps {sorted(set(kept_prefixes))} with "
+                      "$(AppIdentifierPrefix)-style placeholders; fill-team-prefix.py "
+                      "fills them from the signing team before packaging")
         if extension and "NSExtension" not in plist:
             self.warn(f"{target_name} Info.plist has no NSExtension dictionary; "
                       "wrote an empty one - set NSExtensionPointIdentifier by hand")
@@ -2274,8 +2307,11 @@ def _self_test(root):
         plistlib.dump({
             "CFBundleExecutable": "$(EXECUTABLE_NAME)",
             "CFBundleShortVersionString": "$(MARKETING_VERSION)",
+            "AppIdentifierPrefix": "$(AppIdentifierPrefix)",
             "NSExtension": {"NSExtensionPointIdentifier":
-                            "com.apple.widgetkit-extension"},
+                            "com.apple.widgetkit-extension",
+                            "NSExtensionPrincipalClass":
+                            "$(PRODUCT_MODULE_NAME).Widget"},
         }, f)
     gen = Generator(proj, out_dir=out)
     # capture warnings from the first run (we check the Icon Composer
@@ -2326,6 +2362,11 @@ def _self_test(root):
         ("extension target in manifest", 'name: "DemoWidget"' in pkg),
         ("extension plist placeholder substituted",
          wpl.get("CFBundleShortVersionString") == "2026.10"),
+        ("team-prefix placeholder kept for the signing step",
+         wpl.get("AppIdentifierPrefix") == "$(AppIdentifierPrefix)"),
+        ("nested PRODUCT_MODULE_NAME resolved",
+         wpl.get("NSExtension", {}).get("NSExtensionPrincipalClass") ==
+         "DemoWidget.Widget"),
         ("extension NSExtension kept",
          wpl.get("NSExtension", {}).get("NSExtensionPointIdentifier") ==
          "com.apple.widgetkit-extension"),

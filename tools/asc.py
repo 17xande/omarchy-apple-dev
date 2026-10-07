@@ -559,6 +559,21 @@ def signature_blob(rcodesign, exe, magic):
     return raw[i + 8:i + length]
 
 
+def placeholder_hits(node, where=""):
+    """Paths of string values (at any depth) still carrying an unresolved
+    $(BUILD_SETTING) placeholder - Xcode bakes every one of these in, so a
+    surviving placeholder means the build pipeline dropped a key."""
+    if isinstance(node, str):
+        return [where] if "$(" in node else []
+    if isinstance(node, list):
+        return [hit for i, item in enumerate(node)
+                for hit in placeholder_hits(item, f"{where}[{i}]")]
+    if isinstance(node, dict):
+        return [hit for key, item in node.items()
+                for hit in placeholder_hits(item, f"{where}.{key}" if where else key)]
+    return []
+
+
 def validate(ipa):
     """Check an .ipa offline against what App Store Connect rejects at upload. Exit 1 on any FAIL."""
     results = []
@@ -595,6 +610,14 @@ def validate(ipa):
             info = plistlib.load(f)
         missing = [k for k in REQUIRED_INFO_KEYS if k not in info]
         check(not missing, f"Info.plist has the required keys{': missing ' + ', '.join(missing) if missing else ''}")
+        unresolved = []
+        for ipath in sorted(app.rglob("Info.plist")):
+            with ipath.open("rb") as f:
+                for where in placeholder_hits(plistlib.load(f)):
+                    unresolved.append(f"{ipath.relative_to(app)}:{where or '/'}")
+        check(not unresolved,
+              "Info.plists have no unresolved $(...) placeholders"
+              f"{': ' + '; '.join(unresolved) if unresolved else ''}")
         number = re.compile(r"^\d+(\.\d+){0,2}$")
         short, build = info.get("CFBundleShortVersionString", ""), info.get("CFBundleVersion", "")
         check(bool(number.match(short)), f"CFBundleShortVersionString '{short}' is up to three integers")
