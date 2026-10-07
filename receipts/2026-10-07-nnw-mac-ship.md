@@ -89,3 +89,33 @@ PreferencesWindow byte-identical (`cmp`) to Xcode 27 goldens; SidebarView differ
    features are absent in the signed build.
 5. Extensions (Share, Subscribe to Feed Safari) not packaged as PlugIns.
 6. PNG screenshot evidence needs Screen Recording TCC for ssh on the Mac.
+
+## Follow-up, same day (ibtool 46f7c97 + 51e4570)
+
+Rebuilt on rebased main: TimelineContainerView.xib and AccountStatsWindow.xib
+now compile (24/35 nibs; still failing: ActivityLogWindow, CrashReporterWindow,
+DinosaursWindow, ErrorLogWindow, AccountsFeedbin/NewsBlur/ReaderAPI,
+AccountsPreferencesView, AdvancedPreferencesView, GeneralPreferencesView,
+ShareViewController). Re-signed, re-notarized (Accepted), re-stapled, spctl
+accepted. Launch gets further:
+
+- PAST: MainMenu load, launch Apple Event, MainWindow controller, timeline nib
+  load, NSSplitViewController setup.
+- DIES AT: MainWindow toolbar layout. Crash (EXC_CRASH/SIGABRT, .ips
+  2026-10-07-044150): `-[NSImageSymbolRepProvider _bestRepresentationForImage:hints:]`
+  → `_os_crash_msg`; assertion "NSImage requested a variant from a symbol that
+  wasn't found in the asset catalog. Symbol Name: %@ …", reached via
+  `-[NSButtonCell _resolvedImage]` ← `NSButtonAppearanceBasedVisualProvider
+  contentMetricsInFrame:…`.
+- Cause: the toolbar's default `.markAllAsRead` item sets
+  `Assets.Images.markAllAsRead` (`RSImage(named:)` of a custom catalog symbol,
+  `Shared/Assets.swift:40`). assetutil on the shipped Assets.car: 225 entries,
+  AssetType counts {Color 29, Image 134, PackedImage 3, Vector 23,
+  "Vector Glyph" 36}; the 36 Vector Glyph entries are exactly the four
+  `.symbolset` names (markAboveAsRead, markAllAsRead, markBelowAsRead,
+  preferencesToolbarExtensions) at their scales — the Linux actool encodes
+  symbolsets as generic vector glyphs, not symbol assets, so AppKit's symbol
+  provider finds no symbol and macOS 26 aborts via os_crash.
+- cua-driver over ssh works for window evidence: it captured the macOS
+  "Problem Report for NetNewsWire" dialog (window_id 34076) during the crash
+  window; no app window exists yet at death (toolbar layout is pre-showWindow).

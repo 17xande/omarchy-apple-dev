@@ -1355,7 +1355,7 @@ xibs and MainMenu need a macOS nib compiler.
 
 ## A real Mac .app bundle from Linux, 2026-10-07
 
-**59. ship-mac.sh turns a generated Mac adapter into a notarized .app; NetNewsWire
+**60. ship-mac.sh turns a generated Mac adapter into a notarized .app; NetNewsWire
 launches and stops one nib short of a window.** The bundle assembles from SwiftPM
 products alone: the executable relinks with `-Xlinker -rpath
 @executable_path/../Frameworks`, the local `lib*.dylib` products and
@@ -1384,3 +1384,16 @@ containerViewTopToHeaderConstraint), which pins the missing-feature list exactly
 MainMenu.nib is byte-identical to Xcode's golden; the 14 missing nibs are the
 only gap between a launch and a window. Receipt
 `receipts/2026-10-07-nnw-mac-ship.md`.
+
+Follow-up, same day: ibtool main compiles TimelineContainerView and
+AccountStatsWindow (24/35) and the app gets past the timeline nib to MainWindow
+toolbar layout, where it aborts on the toolbar's Mark-All-As-Read button
+(`-[NSButtonCell _resolvedImage]` ← `NSImageSymbolRepProvider
+_bestRepresentationForImage`): its image is a custom catalog symbol
+(`Assets.Images.markAllAsRead`), and the Linux actool compiles `.symbolset`
+sources as generic "Vector Glyph" entries — assetutil shows the four symbolsets
+present under that type but no symbol asset type — so AppKit's symbol provider
+finds no symbol and macOS 26 turns the lookup into an `os_crash` abort
+("NSImage requested a variant from a symbol that wasn't found in the asset
+catalog"). Until actool writes real symbol assets, the four custom symbols
+cannot be rendered; every other catalog image is present (225 entries).
