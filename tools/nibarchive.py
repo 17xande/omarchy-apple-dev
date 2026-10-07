@@ -245,10 +245,11 @@ def _vint(v):
             return bytes(out)
 
 
-def encode(a):
+def encode(a, trailer=b"LNE\x00"):
     """Serialize an Archive exactly the way Apple's ibtool lays the file out:
     50-byte header, then the objects, keys, values and class-name tables
-    packed back to back. Round-trips every corpus nib byte-identically."""
+    packed back to back. Round-trips every corpus nib byte-identically.
+    iOS output ends in b'LNE\\x00'; macOS output has no trailer (oracle)."""
     objs = b"".join(_vint(o.class_idx) + _vint(o.value_start) + _vint(o.value_count)
                     for o in a.objects)
     keys = b"".join(_vint(len(k)) + k for k in a.keys)
@@ -283,7 +284,7 @@ def encode(a):
               + struct.pack("<II", len(a.keys), key_off)
               + struct.pack("<II", len(a.values), val_off)
               + struct.pack("<II", len(a.classes), cls_off))
-    return header + objs + keys + bytes(vals) + clss + b"LNE\x00"
+    return header + objs + keys + bytes(vals) + clss + trailer
 
 
 # ---------------------------------------------------------------- self-test

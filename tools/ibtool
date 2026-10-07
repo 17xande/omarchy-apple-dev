@@ -1087,9 +1087,11 @@ def _parse_color_resources(doc, path):
 
 
 def compile_xib(path):
-    """Compile one xib file to NIBArchive bytes. Raises XibError."""
-    tree = ET.parse(path)
-    doc = tree.getroot()
+    """Compile one xib to NIBArchive bytes. Mac files dispatch to ibmac."""
+    doc = ET.parse(path).getroot()
+    if doc.get("targetRuntime") == "MacOSX.Cocoa":
+        import ibmac
+        return ibmac.compile_xib(path)
     if doc.get("targetRuntime") != "iOS.CocoaTouch":
         raise XibError(f"{path}: targetRuntime {doc.get('targetRuntime')!r} is not iOS.CocoaTouch")
     objects = doc.find("objects")
@@ -1375,7 +1377,7 @@ OTHER_ORDER = ("centerX", "trailing", "leading", "centerY", "bottom", "top", "wi
 RELATION_ORDER = {"lessThanOrEqual": 0, "greaterThanOrEqual": 1, "equal": 2}
 
 
-def _constraint_order(view_el, cons, where):
+def _constraint_order(view_el, cons, where, mac=False):
     owner = view_el.get("id")
     guides = [g.get("id") for g in view_el.findall("viewLayoutGuide")]
     subs = view_el.find("subviews")
@@ -1391,14 +1393,24 @@ def _constraint_order(view_el, cons, where):
         fa, sa = c.get("firstAttribute"), c.get("secondAttribute")
         guide_item = first in guides and second is not None and second not in guides \
             and second != owner
-        if guide_item:
-            # Guide-firstItem constraints precede the origin-view group;
+        if guide_item and not mac:
+            # iOS: guide-firstItem constraints precede the origin-view group;
             # guide-secondItem constraints stay with their view item's group.
             # Ties inside the guide group use the item-side attribute and
             # document order (FeedCell bottom constraints).
             item, attr, other, oattr = first, sa, second, sa
             gkey = ((1, 0.0, 0.0) if origin.get(second) == (0.0, 0.0)
                     else (0, 0.0, 0.0))
+        elif guide_item:
+            # macOS (probe DetailView 5vz/pbD): the guide-firstItem constraint
+            # sorts inside its second item's group, after the other-branch
+            # constraints, by the second item's side attribute.
+            item, attr, other, oattr = second, sa, first, fa
+            x, y = origin.get(item, (0.0, 0.0))
+            gkey = (1, math.hypot(x, y), x)
+            rel = RELATION_ORDER[c.get("relation", "equal")]
+            return gkey + (2, OWNER_ORDER.index(MARGIN_BASE.get(attr, attr)),
+                           rel, index.get(item, -1))
         else:
             if second is None:
                 item, attr, other, oattr = first, fa, None, None
@@ -1422,6 +1434,11 @@ def _constraint_order(view_el, cons, where):
             if MARGIN_BASE.get(oattr, oattr) != attr or attr not in OWNER_ORDER:
                 raise XibError(f"constraint {c.get('id')}: {attr}/{oattr} to the owner view; "
                                f"Apple's order unknown ({where})")
+            if mac:
+                # macOS groups by the item view first, then the attribute
+                # (probe NothingInspector: all of one field's constraints, then
+                # the next field's).
+                return gkey + (0, index.get(item, -1), OWNER_ORDER.index(attr), 0)
             return gkey + (0, OWNER_ORDER.index(attr), 0, 0)
         if attr not in OTHER_ORDER or (oattr is not None and oattr not in OTHER_ORDER):
             raise XibError(f"constraint {c.get('id')}: attribute {attr}/{oattr}; "
@@ -4373,13 +4390,27 @@ def self_test():
     import tempfile
     global TARGET_MODULE
     failed = []
+    compiled = []
     nibs = sorted(p for p in glob.glob(os.path.join(GOLDEN, "**", "*.nib"), recursive=True)
                   if os.path.isfile(p))
     for p in nibs:
         raw = open(p, "rb").read()
         if N.encode(N.parse(raw)) != raw:
             failed.append(f"round-trip {os.path.basename(p)}")
-    compiled = []
+    for src in sorted(glob.glob(os.path.join(_TOOLS, "..", "tests", "ibtool",
+                                             "src-mac", "*.xib"))):
+        name = os.path.splitext(os.path.basename(src))[0]
+        global TARGET_MODULE
+        TARGET_MODULE = "NetNewsWire"
+        out = compile_xib(src)
+        want = open(os.path.join(_TOOLS, "..", "tests", "ibtool", "golden-mac",
+                                 f"{name}.nib"), "rb").read()
+        if out != want:
+            diff = next((i for i, (x, y) in enumerate(zip(out, want)) if x != y),
+                        min(len(out), len(want)))
+            failed.append(f"mac {name}.nib: {len(out)} vs {len(want)} bytes, "
+                          f"first diff at {diff}")
+        compiled.append(name)
     for name in SELF_TEST_NIBS:
         src = os.path.join(SRC, f"{name}.xib")
         if not os.path.isfile(src):
