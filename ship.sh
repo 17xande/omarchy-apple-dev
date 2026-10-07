@@ -8,6 +8,13 @@
 #                        ASC_KEY_PATH=/path/to/AuthKey_XXXXXXXXXX.p8
 #                        ASC_ISSUER_ID=<issuer uuid>  ASC_KEY_ID=XXXXXXXXXX
 #                      and the app record created once in App Store Connect.
+#   ship.sh --device [TEAMID]
+#                      build for a device install: steps 1-3, then every other
+#                      resource of the app and its extensions copied to the
+#                      bundle roots, as Xcode lays out an app. No signing,
+#                      validation or upload; `xtool install xtool/<App>.app`
+#                      signs and installs. With TEAMID, the team-prefix
+#                      placeholders are filled first (tools/fill-team-prefix.py).
 #
 # BUILD_NUMBER sets CFBundleVersion (default: UTC yyyymmddHHMM, always increasing).
 # XCODE_VERSION/XCODE_BUILD stamp DTXcode when the SDK came from a .xip.
@@ -27,11 +34,13 @@ ACTOOL="${ACTOOL:-$HOME/.swiftpm/swift-sdks/darwin.artifactbundle/Developer/Plat
 PATH="$(dirname "$(readlink -f "$(command -v swift)")"):$HOME/.local/bin:$PATH"
 export PATH
 
-upload=0
+upload=0; device=0; team=
 case "${1:-}" in
   --upload) upload=1 ;;
+  --device) device=1; team=${2:-}
+    [ $# -le 2 ] || { echo "usage: ship.sh --device [TEAMID]" >&2; exit 2; } ;;
   "") ;;
-  *) echo "usage: ship.sh [--upload]" >&2; exit 2 ;;
+  *) echo "usage: ship.sh [--upload] | [--device [TEAMID]]" >&2; exit 2 ;;
 esac
 if [ "$upload" = 1 ]; then
   : "${ASC_KEY_ID:?--upload needs ASC_KEY_ID}" "${ASC_ISSUER_ID:?--upload needs ASC_ISSUER_ID}"
@@ -145,6 +154,51 @@ for appex in "$app"/PlugIns/*.appex; do
   "$PY" -c 'import plistlib,sys; p=sys.argv[1]; d=plistlib.load(open(p,"rb")); d.update(plistlib.load(open(sys.argv[2],"rb")))
 plistlib.dump(d, open(p,"wb"), fmt=plistlib.FMT_BINARY)' "$appex/Info.plist" "$stage/$exname-icon.plist"
 done
+
+if [ "$device" = 1 ]; then
+  echo "== 4. Root-level resources =="
+  # Xcode copies every resource of a target to the root of its bundle except
+  # what it processes separately: asset catalogs become the root Assets.car
+  # (step 3) and the target's Info.plist is merged into the built one. SwiftPM
+  # leaves the rest in the resource bundle, where only Bundle.module finds it;
+  # code reading Bundle.main (themes, RTF, JSON) traps. Copy what is left of
+  # each target's resource bundle to its root, the layout of the proven manual
+  # device fix; -n keeps what steps 2-3 placed and the built Info.plist.
+  # App Store uploads keep the bundle layout: flattening everything into an
+  # upload once stalled App Store processing.
+  for target in "$app" "$app"/PlugIns/*.appex; do
+    [ -d "$target" ] || continue
+    name=$(basename "${target%.*}")
+    resbundle=$(find "$target" -maxdepth 1 -type d -name "*_$name.bundle" -print -quit)
+    [ -n "$resbundle" ] || continue
+    cp -an "$resbundle/." "$target/"
+  done
+  if [ -n "$team" ]; then
+    echo "== 5. Team prefix =="
+    [[ "$team" =~ ^[A-Z0-9]{10}$ ]] || { echo "team id '$team' is not a bare 10-character team id" >&2; exit 1; }
+    "$PY" "$here/tools/fill-team-prefix.py" --team "$team" "$app"
+  fi
+  echo "== 6. Placeholder check =="
+  # The device path skips asc.py validate; run its surviving-placeholder FAIL
+  # on the .app the same way.
+  "$PY" - "$app" "$here/tools" <<'PYEOF'
+import plistlib, sys
+from pathlib import Path
+sys.path.insert(0, sys.argv[2])
+from asc import placeholder_hits
+app = Path(sys.argv[1])
+bad = []
+for p in sorted(app.rglob("Info.plist")):
+    for w in placeholder_hits(plistlib.load(p.open("rb"))):
+        bad.append(f"{p.relative_to(app)}:{w or '/'}")
+if bad:
+    sys.exit("unresolved $(...) placeholders: " + ", ".join(bad))
+print(f"no unresolved $(...) placeholders in {app}")
+PYEOF
+  echo "device app ready: $app"
+  echo "install with: xtool install $PWD/$app"
+  exit 0
+fi
 
 echo "== 4. App Store Info.plist keys and frameworks =="
 "$PY" "$ASC" stamp "$app" "${BUILD_NUMBER:-$(date -u +%Y%m%d%H%M)}"

@@ -1465,3 +1465,39 @@ rcodesign seals the plists, and a device install runs it with
 `xtool install`; `asc.py validate` now FAILs an ipa whose Info.plists carry
 any surviving `$(...)`. Receipt
 `receipts/2026-10-07-app-identifier-prefix.md`.
+
+## A device mode for ship.sh: Xcode's root-level resources, 2026-10-07
+
+**63. `ship.sh --device [TEAMID]` builds the app that the 2026-10-07
+NetNewsWire device session had to fix by hand.** A release `xtool dev build`
+leaves the target's resources inside the SwiftPM resource bundle
+(`<App>_<Target>.bundle`), where only `Bundle.module` finds them — the two
+launch traps of that session were exactly this: `Assets.Images.faviconTemplate`
+(`RSImage(named:)!`, catalog image not at the app root) and ArticleTheme's
+`*.nnwtheme` lookups through `Bundle.main`. Device mode runs the TestFlight
+steps 1-3 unchanged, then copies every other entry of each target's resource
+bundle to that target's root — the app and every extension — with `cp -an`, the
+no-clobber form of the manual fix's `rsync --ignore-existing --exclude
+Assets.car --exclude Info.plist`. Step 3's root Assets.car is what the catalogs
+become (NNW's app car came out the same 7,116,032 bytes as the ship build's;
+IceCubes's 70,251,424), so a car never collides; the one exception proves the
+rule — IceCubes's widget had no `EXTENSION_APP_ICONS` entry, step 3 compiled
+nothing for it, and its 18 KB bundle car reached the widget root, where Xcode
+puts a widget's compiled catalog. Everything App Store-only is skipped (stamp,
+framework wrapping, App Intents metadata, signing, package, validate, upload),
+because flattening whole bundles into an App Store upload once stalled
+processing — the App Store path is untouched. With a team id the mode fills the
+team prefix first; without one it fails closed: the device path runs asc.py's
+surviving-placeholder FAIL on the .app as its final step, and on the un-teamed
+NNW run it exited 1 naming `Info.plist:AppIdentifierPrefix` in the app and both
+appexes, then passed after `--device 9LX44YXXVX` filled them. Layout proof
+against the TestFlight builds: NNW's root gained 28 entries (eight themes, four
+RTF, four keyboard-shortcut plists, ContentRules.json, DefaultFeeds.opml,
+PrivacyInfo.xcprivacy, the article js/css/html, en.lproj) and IceCubes's 141
+files (fonts and sounds under Embeds, 19 lproj trees, per-appex lproj strings
+and xib cells); in both apps every bundle entry sits at a root, and the only
+files the TestFlight build has that the device app lacks are the skipped App
+Store artifacts — `_CodeSignature`, `embedded.mobileprovision`,
+`Metadata.appintents`, and NNW's dylibs still loose in Frameworks/ instead of
+wrapped `.framework` bundles. Receipt
+`receipts/2026-10-07-device-layout.md`.
