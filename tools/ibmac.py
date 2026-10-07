@@ -171,6 +171,14 @@ def _load_ibtool():
 
 
 I = _load_ibtool()  # Builder primitives, constraint ordering, mangling
+
+
+def set_target_module(module):
+    """The running ibtool's --module (SwiftPM maps <pkg>_<target>); the script
+    run and this import are separate module instances, so hand it over."""
+    import sys
+    print(f"set_target_module({module!r})", file=sys.stderr)
+    I.TARGET_MODULE = module
 import keyorder  # noqa: E402
 import nibarchive as N  # noqa: E402
 
@@ -248,6 +256,22 @@ def _fmt_g(v):
     return f"{float(v):g}"
 
 
+def _i32(v):
+    return v - 0x100000000 if v > 0x7FFFFFFF else v
+
+
+def _localizable(b, owner_id, text, where, suffix=".title"):
+    """User string in a .lproj output: NSLocalizableString{bytes, NSKey=ownerId.title,
+    NSDev}; a pooled plain string elsewhere or for the empty string."""
+    if text == "" or not b.localize:
+        return b.string(text)
+    o = b.new("NSLocalizableString")
+    o.add("NS.bytes", N.DATA, text.encode("utf-8"))
+    o.add("NSKey", *b.ref(b.string(owner_id + suffix)))
+    o.add("NSDev", *b.ref(b.string(text)))
+    return o
+
+
 def _rect(el, key, where):
     r = el.find(f"rect[@key='{key}']")
     if r is None:
@@ -281,6 +305,8 @@ class MacBuilder(I.Builder):
         self.colorspace = None  # shared Generic Gray space
         self.late = []          # unresolved _Late refs
         self.cons_order = {}    # view xib id -> constraint ids in Apple order
+        self.localize = False   # oneShot="NO" windows localize user strings
+
 
     def ref(self, obj):
         if isinstance(obj, _Late):
@@ -341,6 +367,8 @@ class MacBuilder(I.Builder):
     def catalog_color(self, catalog, name, where):
         if catalog != "System":
             raise I.XibError(f"color catalog {catalog!r} not probed ({where})")
+        if name == "textColor":
+            name = "controlTextColor"  # alias archived under its definition
         if name not in CATALOG_COLORS:
             raise I.XibError(f"System color {name!r} not probed ({where})")
         if name in self.catalog_colors:
@@ -355,6 +383,8 @@ class MacBuilder(I.Builder):
 
 
 def _classref(b, cls, module, provider):
+    if provider == "target" and I.TARGET_MODULE:
+        module = I.TARGET_MODULE  # customModuleProvider=target: --module wins
     o = b.new("IBClassReference")
     o.add("IBClassName", *b.ref(b.string(cls)))
     o.add("IBModuleName", *(b.ref(b.string(module)) if module else (N.NIL, None)))
@@ -461,9 +491,9 @@ def _constraint(b, el, owner_obj, owner_id, id_map, guides, guide_kinds, where):
     return o
 
 
-def _cell(b, el, control, where):
+def _cell(b, el, control, where, owner_id=None, cell_cls="NSTextFieldCell"):
     """<textFieldCell>: NSCellFlags/Flags2 from the probe matrix."""
-    o = b.new("NSTextFieldCell")
+    o = b.new(cell_cls)
     flags = 0x4000000
     flags2 = TEXT_ALIGN[el.get("alignment", "natural")] << 26
     lb = el.get("lineBreakMode", "wordWrap")
@@ -482,9 +512,17 @@ def _cell(b, el, control, where):
         flags2 |= 0x400000
     if el.get("usesSingleLineMode") == "YES":
         flags2 |= 0x40
-    o.add("NSCellFlags", N.INT32, flags)
-    o.add("NSCellFlags2", N.INT32, flags2)
-    o.add("NSContents", *b.ref(b.string(el.get("title", ""))))
+    if el.get("editable") == "YES":
+        flags |= 0x90000000 | 0x400000
+        flags2 |= 0x400
+    elif el.get("editable") is not None:
+        flags |= 0x400000
+    if flags > 0x7FFFFFFF or flags < -0x80000000:
+        o.add("NSCellFlags", N.INT64, flags - 0x100000000 if flags > 0x7FFFFFFF else flags)
+    else:
+        o.add("NSCellFlags", N.INT32, flags)
+    o.add("NSCellFlags2", N.INT32, _i32(flags2))
+    o.add("NSContents", *b.ref(_localizable(b, owner_id or "", el.get("title", ""), where)))
     fd = el.find("font[@key='font']")
     if fd is None:
         raise I.XibError(f"<textFieldCell> without <font> ({where})")
@@ -496,6 +534,8 @@ def _cell(b, el, control, where):
             raise I.XibError(f"<textFieldCell> without {key} color ({where})")
         if c.get("catalog") != "System":
             raise I.XibError(f"{key} color without catalog=System ({where})")
+        if key == "backgroundColor" and el.get("drawsBackground") is not None:
+            o.add("NSDrawsBackground", *b.boolean(el.get("drawsBackground") != "YES"))
         o.add("NSBackgroundColor" if key == "backgroundColor" else "NSTextColor",
               *b.ref(b.catalog_color(c.get("catalog"), c.get("name"), where)))
     return o
@@ -503,6 +543,7 @@ def _cell(b, el, control, where):
 
 def _field(b, el, where, superview, id_map, parent=None):
     """<textField>: NSTextField with its cell; returns (obj, [(obj, parent)])."""
+    guides = {}
     o = b.new("NSTextField")
     o.add("NSNextResponder", *(b.ref(superview) if superview is not None else (N.NIL, None)))
     o.add("NSNibTouchBar", *(N.NIL, None))
@@ -514,14 +555,24 @@ def _field(b, el, where, superview, id_map, parent=None):
     if el.get("translatesAutoresizingMaskIntoConstraints") == "NO":
         o.add("NSDoNotTranslateAutoresizingMask", *b.boolean(False))
     h, v2 = el.get("horizontalHuggingPriority"), el.get("verticalHuggingPriority")
-    if h is not None or v2 is not None:
+    if (h is not None and h != "250") or (v2 is not None and v2 != "750"):
         o.add("NSHuggingPriority",
               *b.ref(b.string("{%s, %s}" % (_fmt_g(h or 250), _fmt_g(v2 or 250)))))
     h, v2 = (el.get("horizontalCompressionResistancePriority"),
              el.get("verticalCompressionResistancePriority"))
-    if h is not None or v2 is not None:
+    if (h is not None and h != "750") or (v2 is not None and v2 != "750"):
         o.add("NSAntiCompressionPriority",
               *b.ref(b.string("{%s, %s}" % (_fmt_g(h or 750), _fmt_g(v2 or 750)))))
+    cons_el = el.find("constraints")
+    if cons_el is not None and cons_el.findall("constraint"):
+        carr = b.new("NSArray")
+        carr.add("NSInlinedValue", *b.boolean(False))
+        els = I._constraint_order(el, cons_el.findall("constraint"), where, mac=True)
+        for c in els:
+            con = _constraint(b, c, o, el.get("id"), id_map, guides, {}, where)
+            carr.add("UINibEncoderEmptyKey", *b.ref(con))
+        b.cons_order[el.get("id")] = [c.get("id") for c in els]
+        o.add("NSViewConstraints", *b.ref(carr))
     o.add("IBNSSafeAreaLayoutGuide", *(N.NIL, None))
     o.add("IBNSLayoutMarginsGuide", *(N.NIL, None))
     o.add("IBNSClipsToBounds", *b.int8(0))
@@ -529,10 +580,11 @@ def _field(b, el, where, superview, id_map, parent=None):
     cell_el = el.find("textFieldCell[@key='cell']")
     if cell_el is None:
         raise I.XibError(f"<textField> without textFieldCell ({where})")
-    cell = _cell(b, cell_el, o, where)
+    cell = _cell(b, cell_el, o, where, owner_id=cell_el.get("id"))
     o.add("NSCell", *b.ref(cell))
     id_map[el.get("id") + "#cell"] = cell
-    o.add("NSAllowsLogicalLayoutDirection", *b.boolean(True))
+    o.add("NSAllowsLogicalLayoutDirection",
+          *b.boolean(el.get("horizontalHuggingPriority") is not None))
     o.add("NSControlSize", *b.int8(0))
     o.add("NSControlContinuous", *b.boolean(True))
     o.add("NSControlRefusesFirstResponder", *b.boolean(True))
@@ -593,7 +645,22 @@ def _view(b, el, where, superview=None, id_map=None, guides=None, parent=None):
             arr.add("UINibEncoderEmptyKey", *b.ref(sub))
             keys.extend(sub_pairs)
     if superview is None:
-        o.add("NSFrameSize", *b.ref(b.string(_size_str(el))))
+        # ibtool archives the constraint-SOLVED canvas frame here; xibs whose
+        # saved frames match the solved layout reproduce byte-for-byte, stale
+        # ones differ in the frame strings only (loads identically: Auto Layout
+        # re-fits at runtime).
+        r = getattr(b, "cv_rect", None)
+        if r is not None:
+            cr = getattr(b, "cv_content_rect", None)
+            if cr and (float(r.get("width")), float(r.get("height"))) == cr:
+                o.add("NSFrameSize", *b.ref(b.string(_size_str(el))))
+            else:
+                # constraint-solved canvas frame: stale xib rects differ here
+                o.add("NSFrame", *b.ref(b.string(_rect(el, "frame", where))))
+            if getattr(b, "cv_wants_layer", False):
+                o.add("NSViewIsLayerTreeHost", *b.boolean(False))
+        else:
+            o.add("NSFrameSize", *b.ref(b.string(_size_str(el))))
     else:
         o.add("NSFrame", *b.ref(b.string(_rect(el, "frame", where))))
         o.add("NSSuperview", *b.ref(superview))
@@ -663,6 +730,8 @@ def _build_element(b, el, where, superview, id_map, guides, parent=None):
     if el.tag in ("view", "customView", "stackView"):
         return _view(b, el, where, superview=superview, id_map=id_map,
                      guides=guides, parent=parent)
+    if el.tag == "button":
+        return _button(b, el, where, superview, id_map, parent=parent)
     if el.tag == "window":
         return _window(b, el, where, id_map, parent=parent)
     raise I.XibError(f"unsupported element <{el.tag}> ({where})")
@@ -696,7 +765,8 @@ def _window(b, el, where, id_map, parent=None):
         o.add("NSWTFlags", N.INT64, flags - 0x100000000)
     else:
         o.add("NSWTFlags", N.INT32, flags)
-    o.add("NSWindowTitle", *b.ref(b.string(el.get("title", ""))))
+    o.add("NSWindowTitle", *b.ref(_localizable(b, el.get("id") or "",
+                                               el.get("title", ""), where)))
     o.add("NSWindowSubtitle", *b.ref(b.string(el.get("subtitle", ""))))
     o.add("NSWindowClass", *b.ref(b.string(el.get("customClass", "NSWindow"))))
     o.add("NSViewClass", *(N.NIL, None))
@@ -715,10 +785,15 @@ def _window(b, el, where, id_map, parent=None):
         o.add("NSWindowContentMinSize", *b.ref(b.string(min_sz)))
     cv = el.find("view[@key='contentView']")
     if cv is not None:
+        b.cv_rect = cv.find("rect[@key='frame']")
+        cr = el.find("rect[@key='contentRect']")
+        b.cv_content_rect = (float(cr.get("width")), float(cr.get("height"))) if cr is not None else None
+        b.cv_wants_layer = cv.get("wantsLayer") == "YES"
         _cv, cv_pairs = _build_element(b, cv, where, superview=None,
                                        id_map=id_map, guides={}, parent=o)
         o.add("NSWindowView", *b.ref(_cv))
     else:
+        b.cv_rect = None
         cv_pairs = []
         o.add("NSWindowView", *(N.NIL, None))
     o.add("NSScreenRect", *b.ref(b.string(_rect(el, "screenRect", where))))
@@ -730,7 +805,8 @@ def _window(b, el, where, id_map, parent=None):
         max_sz and "{%s, %s}" % (max_sz.strip("{}").split(", ")[0],
                                  _fmt_g(float(max_sz.strip("{}").split(", ")[1]) + 24))
         or "{10000000000000, 10000000000000}")))
-    o.add("NSFrameAutosaveName", *b.ref(b.string(el.get("frameAutosaveName", ""))))
+    if el.get("frameAutosaveName") is not None:
+        o.add("NSFrameAutosaveName", *b.ref(b.string(el.get("frameAutosaveName"))))
     coll = el.find("windowCollectionBehavior[@key='collectionBehavior']")
     if coll is not None:
         bits = 0
@@ -801,6 +877,10 @@ def compile_xib(path):
         raise I.XibError(f"{path}: no <objects> element")
     where = os.path.basename(path)
     b = MacBuilder()
+    # Probe: a window with oneShot="NO" localizes every user string
+    # (NSLocalizableString); all other xibs keep plain pooled strings.
+    b.localize = any(w.get("oneShot") == "NO" for w in objects.findall("window"))
+
     root = b.new("NSObject")
     ibd = b.new("NSIBObjectData")
     root.add("IB.objectdata", *b.ref(ibd))
@@ -824,6 +904,21 @@ def compile_xib(path):
     conns_arr.add("NSInlinedValue", *b.boolean(False))
 
     for src_el, conn_el in _conn_blocks(objects):
+        if conn_el.tag == "action":
+            c = b.new("NSNibControlConnector")
+            src = id_map.get(src_el.get("id"))
+            if src is None:
+                raise I.XibError(f"action source {src_el.get('id')!r} not built ({where})")
+            c.add("NSSource", *b.ref(src))
+            tgt = conn_el.get("target")
+            if tgt is not None and tgt != "-1":
+                if tgt not in id_map:
+                    raise I.XibError(f"action target {tgt!r} not built ({where})")
+                c.add("NSDestination", *b.ref(id_map[tgt]))
+            c.add("NSLabel", *b.ref(b.string(conn_el.get("selector"))))
+            conns_arr.add("UINibEncoderEmptyKey", *b.ref(c))
+            conn_objs.append(c)
+            continue
         if conn_el.tag != "outlet":
             raise I.XibError(f"unsupported connection <{conn_el.tag}> ({where})")
         c = b.new("NSNibOutletConnector")
@@ -834,7 +929,7 @@ def compile_xib(path):
         dest_id = conn_el.get("destination")
         if dest_id not in id_map:
             el = _find_id(objects, dest_id)
-            if el is None or el.tag not in ("window", "view", "customView", "textField"):
+            if el is None or el.tag not in ("window", "view", "customView", "textField", "button"):
                 raise I.XibError(f"connection destination {dest_id!r} not found ({where})")
             parent_el = _find_parent(objects, dest_id)
             if parent_el is not None:
@@ -873,7 +968,7 @@ def compile_xib(path):
         if obj is None:
             return
         keys.append((obj, parent))
-        if el.tag == "textField":
+        if el.tag in ("textField", "button"):
             keys.append((id_map[el.get("id") + "#cell"], obj))
         cv = el.find("view[@key='contentView']")
         if cv is not None:
@@ -984,3 +1079,117 @@ def _finalize(b, root):
         v.key_idx = remap[creation_keys[v.key_idx]]
     arch.keys = [k.encode("ascii") for k in key_bytes]
     return N.encode(arch, b"")  # macOS nibs have no LNE trailer
+
+
+BUTTON_TYPE = {"push": 7, "check": 3, "switch": 3, "radio": 4, "bevel": 7,
+               "roundRect": 7, "smallSquare": 7, "help": 7, "momentaryChange": 5}
+BEZEL_STYLE = {"rounded": 1, "regularSquare": 2, "helpButton": 9, "recessed": 6,
+               "roundedRect": 22, "smallSquare": 12, "texturedRounded": 12}
+# (behavior attribute set, button type) -> NSButtonFlags / NSButtonFlags2, as
+# compiled by ibtool for the corpus combinations (probe: golden-mac nibs).
+BUTTON_BEHAVIOR = {
+    ("pushIn", "lightByBackground", "lightByGray"): (0x86804000, 129),
+    ("changeContents", "doesNotDimImage", "lightByContents"): (0x48385100, 2),
+}
+
+
+def _key_equivalent(b, cell_el, where):
+    s = cell_el.find("string[@key='keyEquivalent']")
+    if s is None or not (s.text or "").strip():
+        return b.string("")
+    import base64
+    raw = base64.b64decode(s.text.strip() + "=" * (-len(s.text.strip()) % 4))
+    o = b.new("NSString")
+    o.add("NS.bytes", N.DATA, raw)
+    return o
+
+
+def _button(b, el, where, superview, id_map, parent=None):
+    """<button> -> NSButton with its NSButtonCell."""
+    o = b.new("NSButton")
+    o.add("NSNextResponder", *(b.ref(superview) if superview is not None else (N.NIL, None)))
+    o.add("NSNibTouchBar", *(N.NIL, None))
+    v, vt = _vflags(el, where)
+    o.add("NSvFlags", vt, v)
+    id_map[el.get("id")] = o
+    if el.find("subviews") is not None:
+        raise I.XibError(f"<button> with subviews not probed ({where})")
+    o.add("NSFrame", *b.ref(b.string(_rect(el, "frame", where))))
+    if superview is not None:
+        o.add("NSSuperview", *b.ref(superview))
+    o.add("NSViewWantsBestResolutionOpenGLSurface", *b.boolean(False))
+    if el.get("translatesAutoresizingMaskIntoConstraints") == "NO":
+        o.add("NSDoNotTranslateAutoresizingMask", *b.boolean(False))
+    h, v2 = el.get("horizontalHuggingPriority"), el.get("verticalHuggingPriority")
+    if (h is not None and h != "750") or (v2 is not None and v2 != "750"):
+        o.add("NSHuggingPriority",
+              *b.ref(b.string("{%s, %s}" % (_fmt_g(h or 750), _fmt_g(v2 or 750)))))
+    h, v2 = (el.get("horizontalCompressionResistancePriority"),
+             el.get("verticalCompressionResistancePriority"))
+    if (h is not None and h != "750") or (v2 is not None and v2 != "750"):
+        o.add("NSAntiCompressionPriority",
+              *b.ref(b.string("{%s, %s}" % (_fmt_g(h or 750), _fmt_g(v2 or 750)))))
+    o.add("IBNSSafeAreaLayoutGuide", *(N.NIL, None))
+    o.add("IBNSLayoutMarginsGuide", *(N.NIL, None))
+    o.add("IBNSClipsToBounds", *b.int8(0))
+    o.add("NSEnabled", *b.boolean(False))
+    cell_el = el.find("buttonCell[@key='cell']")
+    if cell_el is None:
+        raise I.XibError(f"<button> without buttonCell ({where})")
+    cell = _button_cell(b, cell_el, o, where)
+    o.add("NSCell", *b.ref(cell))
+    id_map[el.get("id") + "#cell"] = cell
+    o.add("NSAllowsLogicalLayoutDirection", *b.boolean(False))
+    o.add("NSControlSize", *b.int8(0))
+    o.add("NSControlContinuous", *b.boolean(True))
+    o.add("NSControlRefusesFirstResponder", *b.boolean(True))
+    o.add("NSControlUsesSingleLineMode",
+          *b.boolean(cell_el.get("usesSingleLineMode") != "YES"))
+    align = cell_el.get("alignment", "center")
+    if align not in CONTROL_ALIGN:
+        raise I.XibError(f"alignment {align!r} not probed ({where})")
+    o.add("NSControlTextAlignment", *b.int8(CONTROL_ALIGN[align]))
+    lb = cell_el.get("lineBreakMode", "wordWrap")
+    if lb not in LINE_BREAK:
+        raise I.XibError(f"lineBreakMode {lb!r} not probed ({where})")
+    o.add("NSControlLineBreakMode", *b.int8(LINE_BREAK[lb]))
+    o.add("NSControlWritingDirection", N.INT64, -1)
+    o.add("NSControlSendActionMask", *b.int8(4))
+    o.add("IBNSShadowedSymbolConfiguration", *(N.NIL, None))
+    return o, [(o, parent), (cell, o)]
+
+
+def _button_cell(b, el, control, where):
+    o = b.new("NSButtonCell")
+    flags = 0x4000000
+    flags2 = TEXT_ALIGN[el.get("alignment", "center")] << 26
+    o.add("NSCellFlags", N.INT32, flags)
+    o.add("NSCellFlags2", N.INT32, flags2)
+    o.add("NSContents", *b.ref(_localizable(b, el.get("id") or "",
+                                            el.get("title", ""), where)))
+    fd = el.find("font[@key='font']")
+    if fd is None:
+        raise I.XibError(f"<buttonCell> without <font> ({where})")
+    o.add("NSSupport", *b.ref(b.font(fd, where)))
+    o.add("NSControlView", *b.ref(control))
+    btype = el.get("type", "momentaryPushIn")
+    if btype not in BUTTON_TYPE:
+        raise I.XibError(f"button type {btype!r} not probed ({where})")
+    behavior = el.find("behavior[@key='behavior']")
+    beh = behavior.attrib if behavior is not None else {}
+    key = tuple(k for k in beh if beh[k] == "YES" and k not in ("key",))
+    if key not in BUTTON_BEHAVIOR:
+        raise I.XibError(f"behavior {sorted(key)} not probed ({where})")
+    bflags, bflags2 = BUTTON_BEHAVIOR[key]
+    o.add("NSButtonFlags", N.INT64, _i32(bflags) if bflags > 0x7FFFFFFF else bflags)
+    o.add("NSButtonFlags2", N.INT16, bflags2)
+    bezel = el.get("bezelStyle", "rounded")
+    if bezel not in BEZEL_STYLE:
+        raise I.XibError(f"bezelStyle {bezel!r} not probed ({where})")
+    o.add("NSBezelStyle", *b.int8(BEZEL_STYLE[bezel]))
+    o.add("NSAlternateContents", *b.ref(b.string("")))
+    o.add("NSKeyEquivalent", *b.ref(_key_equivalent(b, el, where)))
+    o.add("NSPeriodicDelay", N.INT16, 400)
+    o.add("NSPeriodicInterval", *b.int8(75))
+    o.add("NSAuxButtonType", *b.int8(BUTTON_TYPE[btype]))
+    return o

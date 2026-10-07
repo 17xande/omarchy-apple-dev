@@ -1091,6 +1091,7 @@ def compile_xib(path):
     doc = ET.parse(path).getroot()
     if doc.get("targetRuntime") == "MacOSX.Cocoa":
         import ibmac
+        ibmac.set_target_module(TARGET_MODULE)
         return ibmac.compile_xib(path)
     if doc.get("targetRuntime") != "iOS.CocoaTouch":
         raise XibError(f"{path}: targetRuntime {doc.get('targetRuntime')!r} is not iOS.CocoaTouch")
@@ -1374,6 +1375,10 @@ def build_constraint(b, el, owner, id_map, where):
 # ties by relation (<=, >=, =), then by the other item's subview index.
 OWNER_ORDER = ("width", "height", "centerX", "centerY", "trailing", "leading", "bottom", "top")
 OTHER_ORDER = ("centerX", "trailing", "leading", "centerY", "bottom", "top", "width", "height")
+# macOS groups by the item's subview index (not frame distance), orders
+# owner-branch ties by relation, and knows baseline (probe RenameSheet).
+MAC_OTHER_ORDER = ("centerX", "trailing", "leading", "centerY", "bottom", "top",
+                   "baseline", "width", "height")
 RELATION_ORDER = {"lessThanOrEqual": 0, "greaterThanOrEqual": 1, "equal": 2}
 
 
@@ -1393,6 +1398,11 @@ def _constraint_order(view_el, cons, where, mac=False):
         fa, sa = c.get("firstAttribute"), c.get("secondAttribute")
         guide_item = first in guides and second is not None and second not in guides \
             and second != owner
+        if guide_item and mac:
+            item, attr = second, MARGIN_BASE.get(sa, sa)
+            rel = RELATION_ORDER[c.get("relation", "equal")]
+            return (index.get(item, -1), 2, OWNER_ORDER.index(attr), rel,
+                    index.get(item, -1))
         if guide_item and not mac:
             # iOS: guide-firstItem constraints precede the origin-view group;
             # guide-secondItem constraints stay with their view item's group.
@@ -1424,27 +1434,29 @@ def _constraint_order(view_el, cons, where, mac=False):
                 gkey = (1, 0.0, 0.0)
             elif item in origin:
                 x, y = origin[item]
-                gkey = (1, math.hypot(x, y), x)
+                gkey = (1, math.hypot(x, y), x) if not mac else (1, index.get(item, -1))
             elif item == owner and other is None:
-                gkey = (1, 0.0, 0.0)
+                gkey = (1, 0.0, 0.0) if not mac else (1, -1)
             else:
                 raise XibError(f"constraint {c.get('id')}: no frame for item {item!r}; "
                                f"Apple's order unknown ({where})")
+        rel = RELATION_ORDER[c.get("relation", "equal")]
         if other == owner:
             if MARGIN_BASE.get(oattr, oattr) != attr or attr not in OWNER_ORDER:
                 raise XibError(f"constraint {c.get('id')}: {attr}/{oattr} to the owner view; "
                                f"Apple's order unknown ({where})")
             if mac:
-                # macOS groups by the item view first, then the attribute
-                # (probe NothingInspector: all of one field's constraints, then
-                # the next field's).
-                return gkey + (0, index.get(item, -1), OWNER_ORDER.index(attr), 0)
+                # relation ties break before the attribute (probe RenameSheet:
+                # the >= leading constraint precedes the equal trailing one)
+                return (index.get(item, -1), 0, rel, OWNER_ORDER.index(attr), 0)
             return gkey + (0, OWNER_ORDER.index(attr), 0, 0)
-        if attr not in OTHER_ORDER or (oattr is not None and oattr not in OTHER_ORDER):
+        order = MAC_OTHER_ORDER if mac else OTHER_ORDER
+        if attr not in order or (oattr is not None and oattr not in order):
             raise XibError(f"constraint {c.get('id')}: attribute {attr}/{oattr}; "
                            f"Apple's order unknown ({where})")
-        rel = RELATION_ORDER[c.get("relation", "equal")]
         other_idx = 0 if guide_item else index.get(other, -1)
+        if mac:
+            return (index.get(item, -1), 1, order.index(attr), rel, other_idx)
         return gkey + (1, OTHER_ORDER.index(attr), rel, other_idx)
 
     return sorted(cons, key=key)
