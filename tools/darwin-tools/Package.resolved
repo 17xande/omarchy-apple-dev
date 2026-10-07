@@ -1,12 +1,12 @@
 {
-  "originHash" : "36e19ebda4a34932a234fef7f2bbeb6dfa6eff835710bdd7e6ba0992c7dd4b11",
+  "originHash" : "068569ded4ffa58c8f69e5c4c119f603356c088cc50981d5e994d30c51829c85",
   "pins" : [
     {
       "identity" : "assetkit",
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/joshuaswarren/AssetKit",
       "state" : {
-        "revision" : "9f509feb0b2a08d870b3146d41f2fdc243e6d5b5"
+        "revision" : "83dccf7a47ad8257a8dddd8b0750db592628f67a"
       }
     },
     {
