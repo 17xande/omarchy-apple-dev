@@ -12,7 +12,7 @@ let package = Package(
         // alternate app icons, gray and opacity encoding, Display P3 wide-gamut renditions, and actool's
         // BITMAPKEYS descriptors. The macosx platform compiles with macOS 26's 13-attribute
         // rendition-key schema so AppKit resolves symbols and images (60).
-        .package(url: "https://github.com/joshuaswarren/AssetKit", revision: "83dccf7a47ad8257a8dddd8b0750db592628f67a"),
+        .package(url: "https://github.com/joshuaswarren/AssetKit", revision: "705ce2f2b797835cf4bac65e0dff1e9ca37ba0bf"),
         .package(url: "https://github.com/tayloraswift/swift-png", from: "4.5.0"),
     ],
     targets: [
