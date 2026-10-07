@@ -190,7 +190,7 @@ for rel, fixes in (
     lines = open(p).read().split("\n")
     for setting, value in fixes:
         for i, line in enumerate(lines):
-            if f'Name = "{setting}";' in line:
+            if f'Name = "{setting}";' in line or f'Name = {setting};' in line:
                 for j in range(i + 1, min(i + 12, len(lines))):
                     if "DefaultValue =" in lines[j]:
                         lines[j] = re.sub(r'"[^"]*"\s*;', f'"{value}";', lines[j])
