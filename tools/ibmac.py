@@ -536,7 +536,9 @@ def _cell(b, el, control, where, owner_id=None, cell_cls="NSTextFieldCell"):
     else:
         o.add("NSCellFlags", N.INT32, flags)
     o.add("NSCellFlags2", N.INT32, _i32(flags2))
-    o.add("NSContents", *b.ref(_localizable(b, owner_id or "", el.get("title", ""), where)))
+    title_el = el.find("string[@key='title']")
+    title = el.get("title", title_el.text if title_el is not None and title_el.text else "")
+    o.add("NSContents", *b.ref(_localizable(b, owner_id or "", title, where)))
     fd = el.find("font[@key='font']")
     if fd is None:
         raise I.XibError(f"<textFieldCell> without <font> ({where})")
