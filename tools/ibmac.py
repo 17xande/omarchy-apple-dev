@@ -149,6 +149,124 @@ ef40efccf058f0e5f172f1fff28cf319f3a7f434f4c2f550f5def66df6fbf78af819f8a8f938
 f9c7fa57fae7fb77fc07fc98fd29fdbafe4bfedcff6dffff
 """.replace("\n", ""))
 
+SRGB_ICC_DATA = bytes.fromhex("""\
+00000c484c696e6f021000006d6e74725247422058595a2007ce000200090006
+00310000616373704d5346540000000049454320735247420000000000000000
+000000000000f6d6000100000000d32d48502020000000000000000000000000
+0000000000000000000000000000000000000000000000000000000000000000
+0000001163707274000001500000003364657363000001840000006c77747074
+000001f000000014626b707400000204000000147258595a0000021800000014
+6758595a0000022c000000146258595a0000024000000014646d6e6400000254
+00000070646d6464000002c400000088767565640000034c0000008676696577
+000003d4000000246c756d69000003f8000000146d6561730000040c00000024
+74656368000004300000000c725452430000043c0000080c675452430000043c
+0000080c625452430000043c0000080c7465787400000000436f707972696768
+74202863292031393938204865776c6574742d5061636b61726420436f6d7061
+6e790000646573630000000000000012735247422049454336313936362d322e
+31000000000000000000000012735247422049454336313936362d322e310000
+0000000000000000000000000000000000000000000000000000000000000000
+0000000000000000000000000000000058595a20000000000000f35100010000
+000116cc58595a200000000000000000000000000000000058595a2000000000
+00006fa2000038f50000039058595a2000000000000062990000b785000018da
+58595a2000000000000024a000000f840000b6cf646573630000000000000016
+49454320687474703a2f2f7777772e6965632e63680000000000000000000000
+1649454320687474703a2f2f7777772e6965632e636800000000000000000000
+0000000000000000000000000000000000000000000000000000000000000000
+0000000064657363000000000000002e4945432036313936362d322e31204465
+6661756c742052474220636f6c6f7572207370616365202d2073524742000000
+00000000000000002e4945432036313936362d322e312044656661756c742052
+474220636f6c6f7572207370616365202d207352474200000000000000000000
+00000000000000000000000064657363000000000000002c5265666572656e63
+652056696577696e6720436f6e646974696f6e20696e2049454336313936362d
+322e3100000000000000000000002c5265666572656e63652056696577696e67
+20436f6e646974696f6e20696e2049454336313936362d322e31000000000000
+000000000000000000000000000000000000000076696577000000000013a4fe
+00145f2e0010cf140003edcc0004130b00035c9e0000000158595a2000000000
+004c09560050000000571fe76d65617300000000000000010000000000000000
+00000000000000000000028f0000000273696720000000004352542063757276
+000000000000040000000005000a000f00140019001e00230028002d00320037
+003b00400045004a004f00540059005e00630068006d00720077007c00810086
+008b00900095009a009f00a400a900ae00b200b700bc00c100c600cb00d000d5
+00db00e000e500eb00f000f600fb01010107010d01130119011f0125012b0132
+0138013e0145014c0152015901600167016e0175017c0183018b0192019a01a1
+01a901b101b901c101c901d101d901e101e901f201fa0203020c0214021d0226
+022f02380241024b0254025d02670271027a0284028e029802a202ac02b602c1
+02cb02d502e002eb02f50300030b03160321032d03380343034f035a03660372
+037e038a039603a203ae03ba03c703d303e003ec03f9040604130420042d043b
+0448045504630471047e048c049a04a804b604c404d304e104f004fe050d051c
+052b053a05490558056705770586059605a605b505c505d505e505f606060616
+0627063706480659066a067b068c069d06af06c006d106e306f507070719072b
+073d074f076107740786079907ac07bf07d207e507f8080b081f08320846085a
+086e0882089608aa08be08d208e708fb09100925093a094f09640979098f09a4
+09ba09cf09e509fb0a110a270a3d0a540a6a0a810a980aae0ac50adc0af30b0b
+0b220b390b510b690b800b980bb00bc80be10bf90c120c2a0c430c5c0c750c8e
+0ca70cc00cd90cf30d0d0d260d400d5a0d740d8e0da90dc30dde0df80e130e2e
+0e490e640e7f0e9b0eb60ed20eee0f090f250f410f5e0f7a0f960fb30fcf0fec
+1009102610431061107e109b10b910d710f511131131114f116d118c11aa11c9
+11e81207122612451264128412a312c312e31303132313431363138313a413c5
+13e5140614271449146a148b14ad14ce14f01512153415561578159b15bd15e0
+160316261649166c168f16b216d616fa171d17411765178917ae17d217f7181b
+18401865188a18af18d518fa19201945196b199119b719dd1a041a2a1a511a77
+1a9e1ac51aec1b141b3b1b631b8a1bb21bda1c021c2a1c521c7b1ca31ccc1cf5
+1d1e1d471d701d991dc31dec1e161e401e6a1e941ebe1ee91f131f3e1f691f94
+1fbf1fea20152041206c209820c420f0211c2148217521a121ce21fb22272255
+228222af22dd230a23382366239423c223f0241f244d247c24ab24da25092538
+2568259725c725f726272657268726b726e827182749277a27ab27dc280d283f
+287128a228d429062938296b299d29d02a022a352a682a9b2acf2b022b362b69
+2b9d2bd12c052c392c6e2ca22cd72d0c2d412d762dab2de12e162e4c2e822eb7
+2eee2f242f5a2f912fc72ffe3035306c30a430db3112314a318231ba31f2322a
+3263329b32d4330d3346337f33b833f1342b3465349e34d83513354d358735c2
+35fd3637367236ae36e937243760379c37d738143850388c38c839053942397f
+39bc39f93a363a743ab23aef3b2d3b6b3baa3be83c273c653ca43ce33d223d61
+3da13de03e203e603ea03ee03f213f613fa23fe24023406440a640e74129416a
+41ac41ee4230427242b542f7433a437d43c044034447448a44ce45124555459a
+45de4622466746ab46f04735477b47c04805484b489148d7491d496349a949f0
+4a374a7d4ac44b0c4b534b9a4be24c2a4c724cba4d024d4a4d934ddc4e254e6e
+4eb74f004f494f934fdd5027507150bb51065150519b51e65231527c52c75313
+535f53aa53f65442548f54db5528557555c2560f565c56a956f75744579257e0
+582f587d58cb591a596959b85a075a565aa65af55b455b955be55c355c865cd6
+5d275d785dc95e1a5e6c5ebd5f0f5f615fb36005605760aa60fc614f61a261f5
+6249629c62f06343639763eb6440649464e9653d659265e7663d669266e8673d
+679367e9683f689668ec6943699a69f16a486a9f6af76b4f6ba76bff6c576caf
+6d086d606db96e126e6b6ec46f1e6f786fd1702b708670e0713a719571f0724b
+72a67301735d73b87414747074cc7528758575e1763e769b76f8775677b37811
+786e78cc792a798979e77a467aa57b047b637bc27c217c817ce17d417da17e01
+7e627ec27f237f847fe5804780a8810a816b81cd8230829282f4835783ba841d
+848084e3854785ab860e867286d7873b879f8804886988ce8933899989fe8a64
+8aca8b308b968bfc8c638cca8d318d988dff8e668ece8f368f9e9006906e90d6
+913f91a89211927a92e3934d93b69420948a94f4955f95c99634969f970a9775
+97e0984c98b89924999099fc9a689ad59b429baf9c1c9c899cf79d649dd29e40
+9eae9f1d9f8b9ffaa069a0d8a147a1b6a226a296a306a376a3e6a456a4c7a538
+a5a9a61aa68ba6fda76ea7e0a852a8c4a937a9a9aa1caa8fab02ab75abe9ac5c
+acd0ad44adb8ae2daea1af16af8bb000b075b0eab160b1d6b24bb2c2b338b3ae
+b425b49cb513b58ab601b679b6f0b768b7e0b859b8d1b94ab9c2ba3bbab5bb2e
+bba7bc21bc9bbd15bd8fbe0abe84beffbf7abff5c070c0ecc167c1e3c25fc2db
+c358c3d4c451c4cec54bc5c8c646c6c3c741c7bfc83dc8bcc93ac9b9ca38cab7
+cb36cbb6cc35ccb5cd35cdb5ce36ceb6cf37cfb8d039d0bad13cd1bed23fd2c1
+d344d3c6d449d4cbd54ed5d1d655d6d8d75cd7e0d864d8e8d96cd9f1da76dafb
+db80dc05dc8add10dd96de1cdea2df29dfafe036e0bde144e1cce253e2dbe363
+e3ebe473e4fce584e60de696e71fe7a9e832e8bce946e9d0ea5beae5eb70ebfb
+ec86ed11ed9cee28eeb4ef40efccf058f0e5f172f1fff28cf319f3a7f434f4c2
+f550f5def66df6fbf78af819f8a8f938f9c7fa57fae7fb77fc07fc98fd29fdba
+fe4bfedcff6dffff
+""".replace("\n", ""))
+
+# colorSpace="custom" colors: attrs -> (NSRGB/NSWhite payload, space).
+# NSRGB is ColorSync's own display conversion of the linear components
+# (oracle values; identity only for white/gray).
+CUSTOM_COLORS = {
+    ("srgb", None, "1", "1", "1", "0.0"):
+        (b"1 1 1 0\x00", "srgb"),
+    ("gray", "0.0", None, None, None, "0.0"):
+        (b"0 0\x00", "gray"),
+    ("srgb", None, "0.030999999493360519", "0.41600000858306885",
+     "0.93300002813339233", "1"):
+        (b"0.0493131876 0.3120345175 0.9147195816\x00", "srgb"),
+    ("srgb", None, "1", "0", "0", "1"):
+        (b"0.9859541655 0 0.02694000863\x00", "srgb"),
+}
+
+
 import math
 import os
 import struct
@@ -264,6 +382,19 @@ def _fmt_g(v):
     return f"{float(v):g}"
 
 
+def _fmt10(v):
+    return f"{float(v):.10g}"
+
+
+# textStyle -> (NSSize, UICTFontTextStyle usage, bold); oracle probes
+TEXT_STYLES = {
+    "callout": (12.0, "Callout", False),
+    "headline": (13.0, "Headline", True),
+    "subheadline": (11.0, "Subhead", False),
+    "title3": (15.0, "Title3", False),
+}
+
+
 def _i32(v):
     return v - 0x100000000 if v > 0x7FFFFFFF else v
 
@@ -310,10 +441,16 @@ class MacBuilder(I.Builder):
         self.fonts = {}
         self.catalog_colors = {}
         self.white_colors = {}
+        self.custom_colors = {}
+        self.cursors = {}
+        self.underline = None
+        self.blue = None
+        self.image_decls = {}   # <image name=...> elements from <resources>
         self.colorspace = None  # shared Generic Gray space
+        self.srgbspace = None   # shared sRGB space (custom colors)
         self.late = []          # unresolved _Late refs
         self.cons_order = {}    # view xib id -> constraint ids in Apple order
-        self.localize = False   # oneShot="NO" windows localize user strings
+        self.localize = False   # .lproj xibs wrap user strings
 
 
     def ref(self, obj):
@@ -330,6 +467,43 @@ class MacBuilder(I.Builder):
         return (N.INT32, v)
 
     def font(self, fd_el, where):
+        text_style = fd_el.get("textStyle")
+        if text_style is not None:
+            key = ("style", text_style)
+            if key in self.fonts:
+                return self.fonts[key]
+            size, usage, bold = TEXT_STYLES[text_style]
+            o = self.new("NSFont")
+            o.add("NSName", *self.ref(self.string(
+                ".AppleSystemUIFontBold" if bold else ".AppleSystemUIFont")))
+            o.add("NSSize", *self.float64(size))
+            o.add("NSfFlags", N.INT16, 16)
+            o.add("NSTextStyleDescriptor", *self.ref(self._style_descriptor(usage, size)))
+            o.add("NSHasWidth", *self.boolean(True))
+            self.fonts[key] = o
+            return o
+        if fd_el.get("usesAppearanceFont") == "YES":
+            key = ("appearance",)
+            if key in self.fonts:
+                return self.fonts[key]
+            o = self.new("NSFont")
+            o.add("NSName", *self.ref(self.string(".AppleSystemUIFont")))
+            o.add("NSFontUsesAppearanceFontSize", *self.boolean(False))
+            o.add("NSSize", *self.float64(13.0))
+            o.add("NSfFlags", N.INT16, 1044)
+            self.fonts[key] = o
+            return o
+        name = fd_el.get("name")
+        if name is not None and fd_el.get("metaFont") is None:
+            key = ("name", name, fd_el.get("size"))
+            if key in self.fonts:
+                return self.fonts[key]
+            o = self.new("NSFont")
+            o.add("NSName", *self.ref(self.string(name)))
+            o.add("NSSize", *self.float64(float(fd_el.get("size", 13))))
+            o.add("NSfFlags", N.INT16, 16)
+            self.fonts[key] = o
+            return o
         meta = fd_el.get("metaFont")
         if meta is None:
             raise I.XibError(f"<font> without metaFont ({where})")
@@ -348,6 +522,67 @@ class MacBuilder(I.Builder):
         o.add("NSSize", *self.float64(size))
         o.add("NSfFlags", N.INT16, flags)
         self.fonts[key] = o
+        return o
+
+    def _style_descriptor(self, usage, size):
+        key = ("desc", usage)
+        if key in self.fonts:
+            return self.fonts[key]
+        attrs = self.new("NSDictionary")
+        attrs.add("NSInlinedValue", *self.boolean(False))
+        attrs.add("UINibEncoderEmptyKey", *self.ref(self.string("NSCTFontSizeCategoryAttribute")))
+        num = self.new("NSNumber")
+        num.add("NS.intval", N.INT8, 3)
+        attrs.add("UINibEncoderEmptyKey", *self.ref(num))
+        attrs.add("UINibEncoderEmptyKey", *self.ref(self.string("NSCTFontUIUsageAttribute")))
+        attrs.add("UINibEncoderEmptyKey", *self.ref(self.string("UICTFontTextStyle" + usage)))
+        attrs.add("UINibEncoderEmptyKey", *self.ref(self.string("NSFontSizeAttribute")))
+        sznum = self.new("NSNumber")
+        sznum.add("NS.dblval", N.DOUBLE, size)
+        attrs.add("UINibEncoderEmptyKey", *self.ref(sznum))
+        o = self.new("NSFontDescriptor")
+        o.add("NSFontDescriptorAttributes", *self.ref(attrs))
+        o.add("NSFontDescriptorOptions", N.INT64, 2147517444)
+        self.fonts[key] = o
+        return o
+
+    def srgb_space(self):
+        if self.srgbspace is None:
+            cs = self.new("NSColorSpace")
+            cs.add("NSID", *self.int8(7))
+            data = self.new("NSData")
+            data.add("NS.bytes", N.DATA, SRGB_ICC_DATA)
+            cs.add("NSICC", *self.ref(data))
+            self.srgbspace = cs
+        return self.srgbspace
+
+    def custom_color(self, el, where):
+        """colorSpace="custom": ColorSync archives the linear components plus its
+        own display conversion (NSRGB). Only the corpus colors are probed."""
+        shape = "gray" if el.get("white") is not None else "srgb"
+        keys = ("white", "alpha") if shape == "gray" else ("red", "green", "blue", "alpha")
+        comps = " ".join(_fmt10(el.get(k, "1")) for k in keys)
+        probe = CUSTOM_COLORS.get((shape, el.get("white"), el.get("red"),
+                                   el.get("green"), el.get("blue"),
+                                   el.get("alpha")))
+        if probe is None:
+            raise I.XibError(f"custom color {sorted(el.attrib.items())} not probed ({where})")
+        payload, space = probe
+        key = (payload, space)
+        if key in self.custom_colors:
+            return self.custom_colors[key]
+        o = self.new("NSColor")
+        if space == "gray":
+            o.add("NSColorSpace", N.INT8, 3)
+            o.add("NSWhite", N.DATA, payload)
+            o.add("NSCustomColorSpace", *self.ref(self.color_space()))
+        else:
+            o.add("NSColorSpace", N.INT8, 1)
+            o.add("NSRGB", N.DATA, payload)
+            o.add("NSCustomColorSpace", *self.ref(self.srgb_space()))
+        o.add("NSComponents", N.DATA, comps.encode())
+        o.add("NSLinearExposure", N.DATA, b"1")
+        self.custom_colors[key] = o
         return o
 
     def color_space(self):
@@ -379,6 +614,10 @@ class MacBuilder(I.Builder):
             raise I.XibError(f"color catalog {catalog!r} not probed ({where})")
         if name == "textColor":
             name = "controlTextColor"  # alias archived under its definition
+        if name == "textInsertionPointColor":
+            name = "systemBlueColor"
+        if name == "systemBlueColor":
+            return self._blue_color()
         if name not in CATALOG_COLORS:
             raise I.XibError(f"System color {name!r} not probed ({where})")
         if name in self.catalog_colors:
@@ -387,9 +626,24 @@ class MacBuilder(I.Builder):
         o.add("NSColorSpace", *self.int8(6))
         o.add("NSCatalogName", *self.ref(self.string(catalog)))
         o.add("NSColorName", *self.ref(self.string(name)))
-        o.add("NSColor", *self.ref(self.white_color(*CATALOG_COLORS[name])))
+        if name == "linkColor":
+            o.add("NSColor", *self.ref(self._blue_color()))
+        else:
+            o.add("NSColor", *self.ref(self.white_color(*CATALOG_COLORS[name])))
         self.catalog_colors[name] = o
         return o
+
+    def _blue_color(self):
+        """systemBlueColor archives as a space-1 sRGB color (oracle About)."""
+        if self.blue is None:
+            o = self.new("NSColor")
+            o.add("NSColorSpace", N.INT8, 1)
+            o.add("NSRGB", N.DATA, b"0 0 0.9981992245\x00")
+            o.add("NSCustomColorSpace", *self.ref(self.srgb_space()))
+            o.add("NSComponents", N.DATA, b"0 0 1 1")
+            o.add("NSLinearExposure", N.DATA, b"1")
+            self.blue = o
+        return self.blue
 
 
 def _classref(b, cls, module, provider):
@@ -577,7 +831,7 @@ def _field(b, el, where, superview, id_map, parent=None):
     h, v2 = el.get("horizontalHuggingPriority"), el.get("verticalHuggingPriority")
     if (h is not None and h != "250") or (v2 is not None and v2 != "750"):
         o.add("NSHuggingPriority",
-              *b.ref(b.string("{%s, %s}" % (_fmt_g(h or 250), _fmt_g(v2 or 250)))))
+              *b.ref(b.string("{%s, %s}" % (_fmt_g(h or 250), _fmt_g(v2 or 750)))))
     h, v2 = (el.get("horizontalCompressionResistancePriority"),
              el.get("verticalCompressionResistancePriority"))
     if (h is not None and h != "750") or (v2 is not None and v2 != "750"):
@@ -637,7 +891,8 @@ def lb_of(cell_el):
 
 
 
-def _view(b, el, where, superview=None, id_map=None, guides=None, parent=None):
+def _view(b, el, where, superview=None, id_map=None, guides=None, parent=None,
+          root=False):
     """<view>/<customView> -> NSView or NSClassSwapper; returns (obj, pairs).
 
     Allocation order is Apple's: the object, then subviews depth-first (each
@@ -760,17 +1015,25 @@ def _size_str(el):
     return "{%s, %s}" % (_fmt_g(r.get("width")), _fmt_g(r.get("height")))
 
 
-def _build_element(b, el, where, superview, id_map, guides, parent=None):
+def _build_element(b, el, where, superview, id_map, guides, parent=None, root=False):
     """One element: (obj, [(obj, parent)] pairs for NSObjectsKeys/Values)."""
     if el.tag == "textField":
         return _field(b, el, where, superview, id_map, parent=parent)
     if el.tag in ("view", "customView", "stackView"):
         return _view(b, el, where, superview=superview, id_map=id_map,
-                     guides=guides, parent=parent)
+                     guides=guides, parent=parent, root=root)
     if el.tag == "button":
         return _button(b, el, where, superview, id_map, parent=parent)
     if el.tag == "popUpButton":
         return _popup(b, el, where, superview, id_map, parent=parent)
+    if el.tag == "imageView":
+        return _image_view(b, el, where, superview, id_map, parent=parent)
+    if el.tag == "scrollView":
+        return _scroll_view(b, el, where, superview, id_map, parent=parent)
+    if el.tag == "textView":
+        o = _text_view(b, el, where, superview)
+        id_map[el.get("id")] = o
+        return o, [(o, parent)]
     if el.tag == "window":
         return _window(b, el, where, id_map, parent=parent)
     raise I.XibError(f"unsupported element <{el.tag}> ({where})")
@@ -928,6 +1191,10 @@ def compile_xib(path):
     # strings in NSLocalizableString and clears NSAllowsLogicalLayoutDirection;
     # xibs outside any .lproj keep plain strings and the default-target flags.
     b.localize = ".lproj" in path
+    res = doc.find("resources")
+    if res is not None:
+        for img in res.findall("image"):
+            b.image_decls[img.get("name")] = img
 
     root = b.new("NSObject")
     ibd = b.new("NSIBObjectData")
@@ -977,9 +1244,14 @@ def compile_xib(path):
         dest_id = conn_el.get("destination")
         if dest_id not in id_map:
             el = _find_id(objects, dest_id)
-            if el is None or el.tag not in ("window", "view", "customView", "textField", "button", "popUpButton"):
+            if el is None or el.tag not in ("window", "view", "customView", "textField",
+                                            "button", "popUpButton", "imageView",
+                                            "scrollView", "textView"):
                 raise I.XibError(f"connection destination {dest_id!r} not found ({where})")
             parent_el = _find_parent(objects, dest_id)
+            is_cv = any(w.find("view[@key='contentView']") is not None
+                        and w.find("view[@key='contentView']").get("id") == dest_id
+                        for w in objects.findall("window"))
             if parent_el is not None:
                 # A subview built by an outlet before its superview: Apple keeps
                 # the superview as a forward reference (probe NothingInspector).
@@ -987,9 +1259,12 @@ def compile_xib(path):
                 _build_element(b, el, where, superview=late,
                                id_map=id_map, guides={}, parent=late)
                 late_pending.append((late, parent_el.get("id")))
-            else:
+            elif is_cv:
                 _build_element(b, el, where, superview=None,
                                id_map=id_map, guides={}, parent=owner)
+            else:
+                _build_element(b, el, where, superview=None,
+                               id_map=id_map, guides={}, parent=owner, root=True)
         c.add("NSDestination", *b.ref(id_map[dest_id]))
         c.add("NSLabel", *b.ref(b.string(conn_el.get("property"))))
         c.add("NSChildControllerCreationSelectorName", *(N.NIL, None))
@@ -1029,10 +1304,27 @@ def compile_xib(path):
         cv = el.find("view[@key='contentView']")
         if cv is not None:
             collect(cv, obj)
+        if el.tag == "scrollView":
+            clip = el.find("clipView[@key='contentView']")
+            if clip is not None:
+                cobj = id_map.get(clip.get("id"))
+                if cobj is not None:
+                    keys.append((cobj, obj))
+                    subs2 = clip.find("subviews")
+                    if subs2 is not None:
+                        for child in subs2:
+                            collect(child, cobj)
+            for k2 in ("horizontalScroller", "verticalScroller"):
+                s_el = el.find(f"scroller[@key='{k2}']")
+                if s_el is not None and s_el.get("id") in id_map:
+                    keys.append((id_map[s_el.get("id")], obj))
         subs = el.find("subviews")
         if subs is not None:
             for child in subs:
                 collect(child, obj)
+        if el.tag in ("imageView",):
+            if el.get("id") + "#cell" in id_map:
+                keys.append((id_map[el.get("id") + "#cell"], obj))
         for cid in b.cons_order.get(el.get("id"), []):
             if cid in id_map:
                 keys.append((id_map[cid], obj))
@@ -1158,6 +1450,374 @@ def _key_equivalent(b, cell_el, where):
     o = b.new("NSString")
     o.add("NS.bytes", N.DATA, raw)
     return o
+
+
+DRAG_TYPES = ("Apple PDF pasteboard type", "Apple PICT pasteboard type",
+              "Apple PNG pasteboard type", "NSFilenamesPboardType",
+              "NeXT TIFF v4.0 pasteboard type",
+              "com.apple.NSFilePromiseItemMetaData",
+              "com.apple.pasteboard.promised-file-content-type",
+              "dyn.ah62d4rv4gu8yc6durvwwa3xmrvw1gkdusm1044pxqyuha2pxsvw0e55bsmwca7d3sbwu")
+
+IMAGE_SCALE = {"proportionallyDown": 0, "proportionallyUpOrDown": 3}
+
+# (borderType, autohides, predominant, hScrollElasticity, hasHScroller attr)
+# -> NSsFlags (oracle probes)
+SCROLL_SFLAGS = {
+    ("none", False, None, None, True): 198672,
+    ("line", False, None, None, True): 198673,
+    ("none", True, None, None, True): 199184,
+    ("none", True, None, "none", True): 215568,
+    ("none", True, "NO", None, False): 133680,
+}
+
+
+def _image_ref(b, name, where):
+    """NSCustomResource for an <image name=...>; system-catalog names carry the
+    system IBNamespaceID (probe: NSActionTemplate/NSFolder/circle vs app icons)."""
+    el = b.image_decls.get(name)
+    system = el is not None and (name.startswith("NS") or el.get("catalog") == "system")
+    key = (name, system)
+    if key in b.images:
+        return b.images[key]
+    o = b.new("NSCustomResource")
+    o.add("NSClassName", *b.ref(b.string("NSImage")))
+    o.add("NSResourceName", *b.ref(b.string(name)))
+    o.add("IBNamespaceID", *b.ref(b.string("system")) if system else (N.NIL, None))
+    size = "{%s, %s}" % (el.get("width", "0"), el.get("height", "0")) if el is not None else None
+    if size is not None:
+        val = b.new("NSValue")
+        val.add("NS.special", *b.int8(2))
+        val.add("NS.sizeval", *b.ref(b.string(size)))
+        o.add("IBDesignSize", *b.ref(val))
+    else:
+        o.add("IBDesignSize", *(N.NIL, None))
+    o.add("IBDesignImageConfiguration", *(N.NIL, None))
+    b.images[key] = o
+    return o
+
+
+def _image_view(b, el, where, superview, id_map, parent=None):
+    """<imageView> -> NSImageView + NSImageCell (oracle BuiltinSmartFeedInspector)."""
+    o = b.new("NSImageView")
+    o.add("NSNextResponder", *(b.ref(superview) if superview is not None else (N.NIL, None)))
+    o.add("NSNibTouchBar", *(N.NIL, None))
+    v, vt = _vflags(el, where)
+    o.add("NSvFlags", vt, v)
+    id_map[el.get("id")] = o
+    arr = b.new("NSMutableArray")
+    arr.add("NSInlinedValue", *b.boolean(False))
+    o.add("NSSubviews", *b.ref(arr))
+    dt = b.new("NSMutableSet")
+    dt.add("NSInlinedValue", *b.boolean(False))
+    for t in DRAG_TYPES:
+        dt.add("UINibEncoderEmptyKey", *b.ref(b.string(t)))
+    o.add("NSDragTypes", *b.ref(dt))
+    o.add("NSFrame", *b.ref(b.string(_rect(el, "frame", where))))
+    if superview is not None:
+        o.add("NSSuperview", *b.ref(superview))
+    o.add("NSViewWantsBestResolutionOpenGLSurface", *b.boolean(False))
+    if el.get("translatesAutoresizingMaskIntoConstraints") == "NO":
+        o.add("NSDoNotTranslateAutoresizingMask", *b.boolean(False))
+    cons_el = el.find("constraints")
+    if cons_el is not None and cons_el.findall("constraint"):
+        carr = b.new("NSArray")
+        carr.add("NSInlinedValue", *b.boolean(False))
+        els = I._constraint_order(el, cons_el.findall("constraint"), where, mac=True)
+        for c in els:
+            con = _constraint(b, c, o, el.get("id"), id_map, {}, {}, where)
+            carr.add("UINibEncoderEmptyKey", *b.ref(con))
+        b.cons_order[el.get("id")] = [c.get("id") for c in els]
+        o.add("NSViewConstraints", *b.ref(carr))
+    h, v2 = el.get("horizontalHuggingPriority"), el.get("verticalHuggingPriority")
+    if (h is not None and h != "250") or (v2 is not None and v2 != "750"):
+        o.add("NSHuggingPriority",
+              *b.ref(b.string("{%s, %s}" % (_fmt_g(h or 250), _fmt_g(v2 or 750)))))
+    o.add("IBNSSafeAreaLayoutGuide", *(N.NIL, None))
+    o.add("IBNSLayoutMarginsGuide", *(N.NIL, None))
+    o.add("IBNSClipsToBounds", *b.int8(0))
+    o.add("NSEnabled", *b.boolean(False))
+    cell_el = el.find("imageCell[@key='cell']")
+    if cell_el is None:
+        raise I.XibError(f"<imageView> without imageCell ({where})")
+    cell = b.new("NSImageCell")
+    cell.add("NSCellFlags", N.INT32, 0)
+    cell.add("NSCellFlags2", N.INT32, 33554432)
+    img = cell_el.get("image")
+    if img is None:
+        raise I.XibError(f"<imageCell> without image ({where})")
+    cell.add("NSContents", *b.ref(_image_ref(b, img, where)))
+    cell.add("NSControlView", *b.ref(o))
+    scale = cell_el.get("imageScaling", "proportionallyDown")
+    if scale not in IMAGE_SCALE:
+        raise I.XibError(f"imageScaling {scale!r} not probed ({where})")
+    cell.add("NSAlign", *b.int8(0))
+    cell.add("NSScale", *b.int8(IMAGE_SCALE[scale]))
+    cell.add("NSStyle", *b.int8(0))
+    cell.add("NSAnimates", *b.boolean(True))
+    cell.add("NSImageAnimation", N.INT32, -1)
+    o.add("NSCell", *b.ref(cell))
+    id_map[el.get("id") + "#cell"] = cell
+    id_map[cell_el.get("id")] = cell
+    o.add("NSAllowsLogicalLayoutDirection", *b.boolean(not b.localize))
+    o.add("NSControlSize", *b.int8(0))
+    o.add("NSControlContinuous", *b.boolean(True))
+    o.add("NSControlRefusesFirstResponder", *b.boolean(False))
+    o.add("NSControlUsesSingleLineMode", *b.boolean(True))
+    o.add("NSControlTextAlignment", *b.int8(0))
+    o.add("NSControlLineBreakMode", *b.int8(0))
+    o.add("NSControlWritingDirection", N.INT64, -1)
+    o.add("NSControlSendActionMask", *b.int8(4))
+    o.add("NSEditable", *b.boolean(cell_el.get("editable") == "YES"))
+    o.add("NSImageViewPlaceholderPrecedence", *b.int8(0))
+    o.add("IBNSShadowedSymbolConfiguration", *(N.NIL, None))
+    return o, [(o, parent), (cell, o)]
+
+
+def _cursor(b, hotspot, kind):
+    key = (hotspot, kind)
+    if key in b.cursors:
+        return b.cursors[key]
+    o = b.new("NSCursor")
+    o.add("NSHotSpot", *b.ref(b.string(hotspot)))
+    o.add("NSCursorType", N.INT32, kind)
+    b.cursors[key] = o
+    return o
+
+
+def _underline(b):
+    if b.underline is None:
+        o = b.new("NSNumber")
+        o.add("NS.intval", N.INT8, 1)
+        b.underline = o
+    return b.underline
+
+
+def _text_view(b, el, where, superview):
+    """<textView> (+ custom class) -> swapper with the text stack (oracle About)."""
+    o = b.new("NSClassSwapper" if el.get("customClass") else "NSTextView")
+    if el.get("customClass"):
+        o.add("NSClassName", *b.ref(b.string(I._swift_class(el))))
+        o.add("NSOriginalClassName", *b.ref(b.string("NSTextView")))
+    o.add("NSNextResponder", *(b.ref(superview) if superview is not None else (N.NIL, None)))
+    o.add("NSNibTouchBar", *(N.NIL, None))
+    v, vt = _vflags(el, where)
+    o.add("NSvFlags", vt, v)
+    r = el.find("rect[@key='frame']")
+    o.add("NSFrameSize", *b.ref(b.string("{%s, %s}" % (_fmt_g(r.get("width")),
+                                                       _fmt_g(r.get("height"))))))
+    max_sz = el.find("size[@key='maxSize']")
+    max_s = "{%s, %s}" % (_fmt_g(max_sz.get("width")), _fmt_g(max_sz.get("height"))) \
+        if max_sz is not None else "{0, 0}"
+
+    tc = b.new("NSTextContainer")
+    lm = b.new("NSLayoutManager")
+    tc.add("NSLayoutManager", *b.ref(lm))
+    tc.add("NSTextLayoutManager", *(N.NIL, None))
+    tc.add("NSTextView", *b.ref(o))
+    tc.add("NSWidth", N.DOUBLE, float(r.get("width")))
+    tc.add("NSMinWidth", N.DOUBLE, 15.0)
+    tc.add("NSTCFlags", *b.int8(1))
+    ts = b.new("NSTextStorage")
+    ms = b.new("NSMutableString")
+    ms.add("NS.bytes", N.DATA, b"")
+    ts.add("NSString", *b.ref(ms))
+    ts.add("NSDelegate", *(N.NIL, None))
+    lm.add("NSTextStorage", *b.ref(ts))
+    tcs = b.new("NSMutableArray")
+    tcs.add("NSInlinedValue", *b.boolean(False))
+    tcs.add("UINibEncoderEmptyKey", *b.ref(tc))
+    lm.add("NSTextContainers", *b.ref(tcs))
+    lm.add("NSLMFlags", *b.int8(102))
+    lm.add("NSDelegate", *(N.NIL, None))
+
+    sd = b.new("NSTextViewSharedData")
+    sd.add("NSAutomaticTextCompletionDisabled", *b.boolean(False))
+    sd.add("NSFlags", N.INT32, 67111429)
+    sd.add("NSMoreFlags", *b.int8(3))
+    sd.add("NSTextCheckingTypes", N.INT64, 0)
+    sd.add("NSMarkedAttributes", *(N.NIL, None))
+    bg = el.find("color[@key='backgroundColor']")
+    sd.add("NSBackgroundColor", *b.ref(_color_ref(b, bg, where)))
+    sel = b.new("NSDictionary")
+    sel.add("NSInlinedValue", *b.boolean(False))
+    sel.add("UINibEncoderEmptyKey", *b.ref(b.string("NSBackgroundColor")))
+    sel.add("UINibEncoderEmptyKey",
+            *b.ref(b.catalog_color("System", "selectedTextBackgroundColor", where)))
+    sel.add("UINibEncoderEmptyKey", *b.ref(b.string("NSColor")))
+    sel.add("UINibEncoderEmptyKey",
+            *b.ref(b.catalog_color("System", "selectedTextColor", where)))
+    sd.add("NSSelectedAttributes", *b.ref(sel))
+    sd.add("NSInsertionColor",
+           *b.ref(b.catalog_color("System", "textInsertionPointColor", where)))
+    link = b.new("NSDictionary")
+    link.add("NSInlinedValue", *b.boolean(False))
+    link.add("UINibEncoderEmptyKey", *b.ref(b.string("NSColor")))
+    link.add("UINibEncoderEmptyKey", *b.ref(b.catalog_color("System", "linkColor", where)))
+    link.add("UINibEncoderEmptyKey", *b.ref(b.string("NSCursor")))
+    link.add("UINibEncoderEmptyKey", *b.ref(_cursor(b, "{8, -8}", 13)))
+    link.add("UINibEncoderEmptyKey", *b.ref(b.string("NSUnderline")))
+    link.add("UINibEncoderEmptyKey", *b.ref(_underline(b)))
+    sd.add("NSLinkAttributes", *b.ref(link))
+    sd.add("NSDefaultParagraphStyle", *(N.NIL, None))
+    sd.add("NSTextFinder", *(N.NIL, None))
+    sd.add("NSPreferredTextFinderStyle", *b.int8(0))
+    sd.add("NSTextHighlightAttributes", *(N.NIL, None))
+    sd.add("NSWritingToolsFlags", N.INT32, 256)
+
+    o.add("NSSuperview", *(b.ref(superview) if superview is not None else (N.NIL, None)))
+    o.add("NSViewIsLayerTreeHost", *b.boolean(False))
+    o.add("NSViewWantsBestResolutionOpenGLSurface", *b.boolean(False))
+    o.add("IBNSSafeAreaLayoutGuide", *(N.NIL, None))
+    o.add("IBNSLayoutMarginsGuide", *(N.NIL, None))
+    o.add("IBNSClipsToBounds", *b.int8(0))
+    o.add("NSTextContainer", *b.ref(tc))
+    o.add("NSSharedData", *b.ref(sd))
+    o.add("NSTVFlags", N.INT16, 134)
+    o.add("NSMaxSize", *b.ref(b.string(max_s)))
+    o.add("NSDelegate", *(N.NIL, None))
+    tc_el = el.find("color[@key='textColor']")
+    if tc_el is not None:
+        o.add("NSTextViewTextColor", *b.ref(_color_ref(b, tc_el, where)))
+    return o
+
+
+def _scroller(b, el, where, scroll):
+    o = b.new("NSScroller")
+    o.add("NSNextResponder", *b.ref(scroll))
+    o.add("NSNibTouchBar", *(N.NIL, None))
+    v, vt = _vflags(el, where)
+    o.add("NSvFlags", vt, v)
+    o.add("NSFrame", *b.ref(b.string(_rect(el, "frame", where))))
+    o.add("NSSuperview", *b.ref(scroll))
+    o.add("NSViewIsLayerTreeHost", *b.boolean(False))
+    o.add("NSViewWantsBestResolutionOpenGLSurface", *b.boolean(False))
+    o.add("IBNSSafeAreaLayoutGuide", *(N.NIL, None))
+    o.add("IBNSLayoutMarginsGuide", *(N.NIL, None))
+    o.add("IBNSClipsToBounds", *b.int8(0))
+    o.add("NSAllowsLogicalLayoutDirection", *b.boolean(not b.localize))
+    o.add("NSControlAction", *b.ref(b.string("_doScroller:")))
+    o.add("NSControlTarget", *b.ref(scroll))
+    o.add("NSControlSize", *b.int8(0))
+    o.add("NSControlContinuous", *b.boolean(True))
+    o.add("NSControlRefusesFirstResponder", *b.boolean(True))
+    o.add("NSControlUsesSingleLineMode", *b.boolean(True))
+    o.add("NSControlTextAlignment", *b.int8(0))
+    o.add("NSControlLineBreakMode", *b.int8(0))
+    o.add("NSControlWritingDirection", N.INT64, 0)
+    o.add("NSControlSendActionMask", *b.int8(4))
+    if el.get("hidden") == "YES":
+        o.add("NSsFlags", *b.int8(1))
+    o.add("NSTarget", *b.ref(scroll))
+    o.add("NSAction", *b.ref(b.string("_doScroller:")))
+    return o
+
+
+def _scroll_view(b, el, where, superview, id_map, parent=None):
+    """<scrollView> -> NSScrollView + NSClipView + scrollers + pan gesture."""
+    key = (el.get("borderType", "bezel"), el.get("autohidesScrollers") == "YES",
+           el.get("usesPredominantAxisScrolling"),
+           el.get("horizontalScrollElasticity"),
+           el.find("scroller[@key='horizontalScroller']") is not None
+           or el.get("hasHorizontalScroller") is not None)
+    if key not in SCROLL_SFLAGS:
+        raise I.XibError(f"scrollView attr set {key} not probed ({where})")
+    o = b.new("NSScrollView")
+    o.add("NSNextResponder", *(b.ref(superview) if superview is not None else (N.NIL, None)))
+    o.add("NSNibTouchBar", *(N.NIL, None))
+    v, vt = _vflags(el, where)
+    o.add("NSvFlags", vt, v)
+    id_map[el.get("id")] = o
+    arr = b.new("NSMutableArray")
+    arr.add("NSInlinedValue", *b.boolean(False))
+    o.add("NSSubviews", *b.ref(arr))
+    cv_el = el.find("clipView[@key='contentView']")
+    if cv_el is None:
+        raise I.XibError(f"<scrollView> without clipView ({where})")
+    cv = b.new("NSClipView")
+    cv.add("NSNextResponder", *b.ref(o))
+    cv.add("NSNibTouchBar", *(N.NIL, None))
+    cv.add("NSvFlags", N.INT16, 256)
+    cv_id = cv_el.get("id")
+    id_map[cv_id] = cv
+    carr = b.new("NSMutableArray")
+    carr.add("NSInlinedValue", *b.boolean(False))
+    cv.add("NSSubviews", *b.ref(carr))
+    doc = None
+    subs = cv_el.find("subviews")
+    doc_els = list(subs) if subs is not None else []
+    if len(doc_els) != 1:
+        raise I.XibError(f"<clipView> without exactly one subview ({where})")
+    doc_el = doc_els[0]
+    if doc_el.tag == "textView":
+        doc = _text_view(b, doc_el, where, cv)
+        id_map[doc_el.get("id")] = doc
+    else:
+        raise I.XibError(f"clipView subview <{doc_el.tag}> not probed ({where})")
+    arr.add("UINibEncoderEmptyKey", *b.ref(cv))
+    carr.add("UINibEncoderEmptyKey", *b.ref(doc))
+    r = cv_el.find("rect[@key='frame']")
+    cv.add("NSFrameSize", *b.ref(b.string("{%s, %s}" % (_fmt_g(r.get("width")),
+                                                        _fmt_g(r.get("height"))))))
+    cv.add("NSSuperview", *b.ref(o))
+    cv.add("NSNextKeyView", *b.ref(doc))
+    cv.add("NSViewWantsBestResolutionOpenGLSurface", *b.boolean(False))
+    cv.add("IBNSSafeAreaLayoutGuide", *(N.NIL, None))
+    cv.add("IBNSLayoutMarginsGuide", *(N.NIL, None))
+    cv.add("IBNSClipsToBounds", *b.int8(0))
+    cv.add("NSDocView", *b.ref(doc))
+    cv.add("NSBGColor", *b.ref(_color_ref(b, cv_el.find("color[@key='backgroundColor']"),
+                                          where)))
+    cv.add("NSCursor", *b.ref(_cursor(b, "{1, -1}", 0)))
+    cv.add("NSAutomaticallyAdjustsContentInsets", *b.boolean(False))
+    h_el = el.find("scroller[@key='horizontalScroller']")
+    v_el = el.find("scroller[@key='verticalScroller']")
+    hs = _scroller(b, h_el, where, o) if h_el is not None else None
+    vs = _scroller(b, v_el, where, o) if v_el is not None else None
+    o.add("NSFrame", *b.ref(b.string(_rect(el, "frame", where))))
+    if superview is not None:
+        o.add("NSSuperview", *b.ref(superview))
+    o.add("NSNextKeyView", *b.ref(cv))
+    o.add("NSViewWantsBestResolutionOpenGLSurface", *b.boolean(False))
+    gest = b.new("NSArray")
+    gest.add("NSInlinedValue", *b.boolean(False))
+    pan = b.new("NSPanGestureRecognizer")
+    pan.add("NSGestureRecognizer.allowedTouchTypes", *b.int8(1))
+    pan.add("NSGestureRecognizer.action", *b.ref(b.string("_panWithGestureRecognizer:")))
+    pan.add("NSGestureRecognizer.target", *b.ref(o))
+    pan.add("NSGestureRecognizer.delegate", *b.ref(o))
+    pan.add("NSPanGestureRecognizer.buttonMask", *b.int8(0))
+    pan.add("NSPanGestureRecognizer.numberOfTouchesRequired", *b.int8(1))
+    gest.add("UINibEncoderEmptyKey", *b.ref(pan))
+    o.add("NSGestureRecognizers", *b.ref(gest))
+    o.add("IBNSSafeAreaLayoutGuide", *(N.NIL, None))
+    o.add("IBNSLayoutMarginsGuide", *(N.NIL, None))
+    o.add("IBNSClipsToBounds", *b.int8(0))
+    o.add("NSsFlags", N.INT32, SCROLL_SFLAGS[key])
+    if vs is not None:
+        o.add("NSVScroller", *b.ref(vs))
+        id_map[v_el.get("id")] = vs
+    if hs is not None:
+        o.add("NSHScroller", *b.ref(hs))
+        id_map[h_el.get("id")] = hs
+    o.add("NSContentView", *b.ref(cv))
+    o.add("NSMinMagnification", N.DOUBLE, 0.25)
+    o.add("NSMaxMagnification", N.DOUBLE, 4.0)
+    o.add("NSMagnification", N.DOUBLE, 1.0)
+    pairs = [(o, parent), (cv, o)]
+    if hs is not None:
+        pairs.append((hs, o))
+    if vs is not None:
+        pairs.append((vs, o))
+    return o, pairs
+
+
+def _color_ref(b, c_el, where):
+    if c_el is None:
+        raise I.XibError(f"missing color ({where})")
+    if c_el.get("colorSpace") == "custom":
+        return b.custom_color(c_el, where)
+    return b.catalog_color(c_el.get("catalog"), c_el.get("name"), where)
 
 
 def _button(b, el, where, superview, id_map, parent=None):
