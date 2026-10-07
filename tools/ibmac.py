@@ -2590,9 +2590,37 @@ def _text_view(b, el, where, superview):
     lm.add("NSDelegate", *(N.NIL, None))
 
     sd = b.new("NSTextViewSharedData")
-    sd.add("NSAutomaticTextCompletionDisabled", *b.boolean(False))
-    sd.add("NSFlags", *int_fit(67111429 if vert else 2049))
-    sd.add("NSMoreFlags", *b.int8(3))
+    # NSFlags/NSMoreFlags/completion: probe series t0-t21 (macstudio
+    # /tmp/mnprobe11, xibs in macnib-work/probe11) + corpus points
+    # About direct/scroll, Crash, AL — fully orthogonal bits:
+    #   0x1|0x800 base; 0x2 editable (default YES); 0x4 richText != NO;
+    #   0x100 backgroundColor element present and drawsBackground != "NO";
+    #   0x200 smartInsertDelete; 0x4000000 spellingCorrection;
+    #   0x40000000 incrementalSearchingEnabled.
+    # NSMoreFlags 0x2 follows the charPicker attr; the completion key is
+    # TRUE unless a textCompletion attr archives false.
+    rich = el.get("richText") != "NO"
+    spell = el.get("spellingCorrection") == "YES"
+    smart = el.get("smartInsertDelete") == "YES"
+    bg_el = el.find("color[@key='backgroundColor']")
+    flags = 0x1 | 0x800
+    if rich:
+        flags |= 0x4
+    if el.get("editable") != "NO":
+        flags |= 0x2
+    if bg_el is not None and el.get("drawsBackground") != "NO":
+        flags |= 0x100
+    if smart:
+        flags |= 0x200
+    if spell:
+        flags |= 0x4000000
+    if el.get("incrementalSearchingEnabled") == "YES":
+        flags |= 0x40000000
+    sd.add("NSAutomaticTextCompletionDisabled",
+           *b.boolean(el.get("textCompletion") is None))
+    sd.add("NSFlags", *int_fit(flags))
+    sd.add("NSMoreFlags", *b.int8(3 if el.get("allowsCharacterPickerTouchBarItem")
+                                  is not None else 1))
     sd.add("NSTextCheckingTypes", *int_fit(0))
     sd.add("NSMarkedAttributes", *(N.NIL, None))
     bg = el.find("color[@key='backgroundColor']")
@@ -2736,8 +2764,16 @@ def _scroll_view(b, el, where, superview, id_map, parent=None):
     arr.add("UINibEncoderEmptyKey", *b.ref(cv))
     carr.add("UINibEncoderEmptyKey", *b.ref(doc))
     r = cv_el.find("rect[@key='frame']")
-    cv.add("NSFrameSize", *b.ref(b.string("{%s, %s}" % (_fmt_g(r.get("width")),
-                                                        _fmt_g(r.get("height"))))))
+    # probe CrashReporter golden [88]: a clipView with a non-zero xib origin
+    # (borderType=line 1px inset) archives NSFrame, zero-origin keeps
+    # NSFrameSize
+    zero = r.get("x") in ("0", "0.0") and r.get("y") in ("0", "0.0")
+    if zero:
+        cv.add("NSFrameSize", *b.ref(b.string("{%s, %s}" % (_fmt_g(r.get("width")),
+                                                            _fmt_g(r.get("height"))))))
+    else:
+        cv.add("NSFrame", *b.ref(b.string("{{%s, %s}, {%s, %s}}" % (
+            r.get("x"), r.get("y"), _fmt_g(r.get("width")), _fmt_g(r.get("height"))))))
     hv_el0 = doc_el.find("tableHeaderView[@key='headerView']") if is_table else None
     if hv_el0 is not None:
         cv.add("NSBounds", *b.ref(b.string(
