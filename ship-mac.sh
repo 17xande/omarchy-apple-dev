@@ -11,8 +11,13 @@
 # resource bundle contents also laid flat in Contents/Resources (Xcode puts app
 # resources there; Bundle.module still resolves into the kept bundle), every
 # target .xib that tools/ibtool compiles as a .nib (failures listed, not fatal),
-# and Info.plist from the package root when the generator wrote one there
-# (build settings already expanded), else a minimal generated one.
+# the app icon recompiled with tools/darwin-tools' actool (AppIcon.icns + car
+# renditions + CFBundleIconFile/CFBundleIconName), and Info.plist from the
+# package root when the generator wrote one there (build settings already
+# expanded), else a minimal generated one. Each xtool.yml extension is built
+# (stub executable + Foundation`_NSExtensionMain) into PlugIns/<name>.appex and
+# signed inside-out before the app; profiles from build/provision/ embed as
+# embedded.provisionprofile.
 #
 # PRODUCT: the executable product (default: the package's only executable).
 # BUNDLE_ID (default: xtool.yml bundleID, else com.example.<PRODUCT>), VERSION
@@ -115,7 +120,35 @@ for xib in $(find -L "$app_target_path" -name '*.xib' | sort); do
 done
 [ -z "$nib_failed" ] || echo "nibs not compiled:${nib_failed// /$'\n'  }"
 
-echo "== 4. Info.plist =="
+echo "== 4. App icon =="
+# `swift build` passes no --app-icon, so the app target's catalogs compile
+# again here, the way Xcode's asset step runs actool: Apple's macosx actool
+# emits AppIcon.icns + icon renditions in Assets.car + CFBundleIconFile and
+# CFBundleIconName in the partial plist (FINDINGS.md 61, actool 27.0 oracle).
+actool=${ACTOOL:-$repo/tools/darwin-tools/.build/release/actool}
+if [ ! -x "$actool" ] && [ -z "${ACTOOL:-}" ]; then
+  (cd "$repo/tools/darwin-tools" && swift build -c release --product actool >&2)
+fi
+icon_dir=$(mktemp -d)
+catalogs=$(find -L "$app_target_path" -name '*.xcassets' | sort)
+if [ -z "$catalogs" ]; then
+  echo "no asset catalogs under $app_target_path"
+elif "$actool" $catalogs --compile "$icon_dir" --platform macosx \
+    --target-device mac --minimum-deployment-target "$min" \
+    --app-icon "${APPICON:-AppIcon}" \
+    --output-partial-info-plist "$icon_dir/partial.plist" >/dev/null 2>&1; then
+  [ ! -f "$icon_dir/Assets.car" ] || cp "$icon_dir/Assets.car" "$app/Contents/Resources/Assets.car"
+  for icns in "$icon_dir"/*.icns; do
+    [ -f "$icns" ] && cp "$icns" "$app/Contents/Resources/"
+  done
+  mkdir -p build
+  cp "$icon_dir/partial.plist" build/icon-partial.plist
+  echo "app icon: $(cd "$icon_dir" && ls | tr '\n' ' ')"
+else
+  echo "warning: actool could not compile the ${APPICON:-AppIcon} icon set; bundle keeps the build's Assets.car"
+fi
+
+echo "== 5. Info.plist =="
 python3 - "$app/Contents/Info.plist" "$product" "$bundle_id" "${VERSION:-${project_version:-1.0}}" \
   "${BUILD_NUMBER:-$(date -u +%Y%m%d%H%M)}" "$min" <<'PY'
 import os, plistlib, sys
@@ -131,10 +164,159 @@ plist.update({
     "CFBundleVersion": build, "CFBundleSupportedPlatforms": ["MacOSX"],
     "LSMinimumSystemVersion": minos,
 })
+try:  # Xcode merges actool's partial plist into the app Info.plist
+    for key, value in plistlib.load(open("build/icon-partial.plist", "rb")).items():
+        plist.setdefault(key, value)
+except Exception:
+    pass
 plistlib.dump(plist, open(path, "wb"))
 PY
 
-echo "== 5. Sign =="
+echo "== 6. Extensions =="
+# Each xtool.yml extension becomes a PlugIns/<name>.appex: a stub executable
+# linked against the extension product with Foundation`_NSExtensionMain as the
+# entry point (xtool's iOS recipe; macOS Foundation exports the same symbol),
+# the generator's Info.plist with $(PRODUCT_MODULE_NAME) expanded, the
+# target's resource bundle plus a flat copy, per-extension entitlements and
+# provisioning profile, signed inside-out with Developer ID.
+mkdir -p build
+python3 - xtool.yml > build/extensions.tsv <<'PY'
+import re, sys
+cur, rows = None, []
+for line in open(sys.argv[1], encoding="utf-8"):
+    m = re.match(r"\s*-\s*product:\s*(.+?)\s*$", line)
+    if m:
+        cur = [m.group(1), "", ""]
+        rows.append(cur)
+        continue
+    m = re.match(r"\s*(bundleID|infoPath):\s*(.+?)\s*$", line)
+    if m and cur is not None:
+        cur[1 if m.group(1) == "bundleID" else 2] = m.group(2)
+for row in rows:
+    print("\t".join(row))
+PY
+
+pkg_json=$(swift package describe --type json)
+while IFS=$'\t' read -r ext ext_bundle ext_info; do
+  [ -n "$ext" ] || continue
+  echo "-- extension $ext ($ext_bundle)"
+  ext_path=$(printf '%s' "$pkg_json" | EXTN="$ext" python3 -c '
+import json, os, sys
+pkg = json.load(sys.stdin)
+t = next(t for t in pkg["targets"] if t["name"] == os.environ["EXTN"])
+print(t.get("path", "Sources/" + os.environ["EXTN"]))')
+  ext_dir="build/ext/$ext"
+  mkdir -p "$ext_dir/Sources/$ext-Extension"
+  : > "$ext_dir/Sources/$ext-Extension/stub.c"
+  EXTN="$ext" MINV="$min" python3 - "$ext_dir/Package.swift" <<'PY'
+import json, os, sys
+ext, minos = os.environ["EXTN"], os.environ["MINV"]
+open(sys.argv[1], "w").write(f'''// swift-tools-version: 6.0
+import PackageDescription
+let package = Package(
+    name: {json.dumps(ext + "-Builder")},
+    platforms: [.macOS({json.dumps(minos)})],
+    dependencies: [.package(name: "Adapter", path: "../../..")],
+    targets: [
+        .executableTarget(
+            name: {json.dumps(ext + "-Extension")},
+            dependencies: [.product(name: {json.dumps(ext)}, package: "Adapter")],
+            linkerSettings: [
+                .linkedFramework("Foundation"),
+                .unsafeFlags([
+                    "-Xlinker", "-e", "-Xlinker", "_NSExtensionMain",
+                    "-Xlinker", "-rpath", "-Xlinker", "@executable_path/../Frameworks",
+                    "-Xlinker", "-rpath", "-Xlinker", "@executable_path/../../Frameworks",
+                ]),
+            ]
+        )
+    ]
+)
+''')
+PY
+  ext_build() {
+    (cd "$ext_dir" && XCODE_EXTRA_PLATFORM_FOLDERS="$sdk/Developer/Platforms" \
+      PATH="$sdk/toolset/bin:$PATH" swift build -c release --build-system swiftbuild \
+      --toolset "$sdk/toolset-swb.json" --triple "arm64-apple-macosx$min" "$@")
+  }
+  ext_build 2>&1 | tail -1
+  ext_bin=$(ext_build --show-bin-path | tail -1)
+  appex="$app/Contents/PlugIns/$ext.appex"
+  mkdir -p "$appex/Contents/MacOS" "$appex/Contents/Resources"
+  cp "$ext_bin/$ext-Extension" "$appex/Contents/MacOS/$ext"
+  for b in "$ext_bin"/*.bundle; do
+    [ -d "$b" ] || continue
+    cp -R "$b" "$appex/Contents/Resources/"
+    cp -R "$b/Contents/Resources/." "$appex/Contents/Resources/" 2>/dev/null || true
+  done
+  python3 - "$appex/Contents/Info.plist" "$ext" "$ext_bundle" "$ext_info" \
+    "${VERSION:-${project_version:-1.0}}" "${BUILD_NUMBER:-$(date -u +%Y%m%d%H%M)}" "$min" <<'PY'
+import plistlib, re, sys
+path, name, ident, info_path, version, build, minos = sys.argv[1:]
+try:
+    plist = plistlib.load(open(info_path, "rb"))
+except Exception:
+    plist = {"NSExtension": {}}
+module = re.sub(r"[^A-Za-z0-9_]", "_", name)
+vals = {"PRODUCT_MODULE_NAME": module, "PRODUCT_NAME": name, "EXECUTABLE_NAME": name,
+        "PRODUCT_BUNDLE_IDENTIFIER": ident}
+def expand(v):
+    if isinstance(v, str):
+        for key, val in vals.items():
+            v = v.replace("$(%s)" % key, val)
+        return re.sub(r"\$\((\w+)\)", "", v)
+    if isinstance(v, list):
+        return [expand(x) for x in v]
+    if isinstance(v, dict):
+        return {k: expand(x) for k, x in v.items()}
+    return v
+plist = expand(plist)
+plist.update({
+    "CFBundleExecutable": name, "CFBundleIdentifier": ident,
+    "CFBundlePackageType": "XPC!", "CFBundleShortVersionString": version,
+    "CFBundleVersion": build, "CFBundleSupportedPlatforms": ["MacOSX"],
+    "LSMinimumSystemVersion": minos,
+})
+plistlib.dump(plist, open(path, "wb"))
+PY
+  ent_args=()
+  ext_ent=$(find -L "$ext_path" -name '*.entitlements' ! -name '*-dev*' -print -quit)
+  if [ -n "$ext_ent" ]; then
+    team=$(openssl x509 -in "$idir/cert.pem" -noout -subject 2>/dev/null |
+           sed -n 's/.*OU *= *\([A-Z0-9]*\).*/\1/p' | head -1)
+    python3 - "$ext_ent" "build/$ext-entitlements.plist" "$ext" "$ext_info" "${team}." <<'PY'
+import plistlib, re, sys
+src, dst, name, info_path, team_prefix = sys.argv[1:]
+try:
+    custom = plistlib.load(open(info_path, "rb"))
+except Exception:
+    custom = {}
+vals = {"PRODUCT_NAME": name, "EXECUTABLE_NAME": name,
+        "PRODUCT_MODULE_NAME": re.sub(r"[^A-Za-z0-9_]", "_", name),
+        "APP_GROUP_ID": custom.get("AppGroup", ""),
+        "TeamIdentifierPrefix": team_prefix if team_prefix != "." else ""}
+text = open(src, encoding="utf-8").read()
+open(dst, "w", encoding="utf-8").write(
+    re.sub(r"\$\((\w+)\)", lambda m: vals.get(m.group(1), ""), text))
+PY
+    ent_args=(--entitlements-xml-file "build/$ext-entitlements.plist")
+    echo "signing $ext with entitlements from $ext_ent"
+  fi
+  [ ! -f "build/provision/$ext.provisionprofile" ] || \
+    cp "build/provision/$ext.provisionprofile" "$appex/Contents/embedded.provisionprofile"
+  if [ -f "$idir/key.pem" ] && [ -f "$idir/cert.pem" ]; then
+    rcodesign sign --pem-file "$idir/key.pem" --pem-file "$idir/cert.pem" \
+      --binary-identifier "$ext" "${ent_args[@]}" --for-notarization "$appex" 2>&1 | tail -1
+  else
+    rcodesign sign "${ent_args[@]}" "$appex" 2>&1 | tail -1
+  fi
+done < build/extensions.tsv
+
+echo "== 7. Sign =="
+# Developer ID restricted entitlements run only with the profile embedded
+# before the bundle is sealed (tools/provision-mac.py writes build/provision/).
+[ ! -f "build/provision/app.provisionprofile" ] || \
+  cp "build/provision/app.provisionprofile" "$app/Contents/embedded.provisionprofile"
 ent=${ENTITLEMENTS:-}
 if [ -z "$ent" ]; then
   ent=$(find -L "$app_target_path" -name "$product.entitlements" -print -quit)
@@ -193,7 +375,7 @@ else
 fi
 
 if [ "$notarize" = 1 ]; then
-  echo "== 6. Notarize =="
+  echo "== 8. Notarize =="
   key_json=${ASC_API_KEY_FILE:-}
   if [ -z "$key_json" ]; then
     : "${ASC_KEY_ID:?--notarize needs ASC_KEY_ID}" "${ASC_ISSUER_ID:?--notarize needs ASC_ISSUER_ID}"
