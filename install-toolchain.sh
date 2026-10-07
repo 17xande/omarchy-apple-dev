@@ -172,8 +172,10 @@ import re, shutil
 swift_bin = shutil.which("swift")
 if not swift_bin:
     sys.exit("install_darwin_tools: swift not on PATH")
-toolchain_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(
-    os.path.dirname(os.path.realpath(swift_bin))))))
+# realpath ends in usr/bin/<driver>; the toolchain root is everything before
+# that usr/bin (may be a plain prefix, not exactly four levels up).
+toolchain_root = re.sub(r"/usr/bin/[^/]+$", "",
+                        os.path.realpath(swift_bin))
 for rel, fixes in (
     ("usr/share/pm/SwiftBuild_SWBUniversalPlatform.bundle/CopyStringsFile.xcspec",
      [("STRINGS_FILE_INPUT_ENCODING", "utf-8")]),
