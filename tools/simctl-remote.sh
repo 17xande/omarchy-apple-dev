@@ -9,7 +9,7 @@
 #
 # Environment:
 #   ARCHRUN       chroot runner        (default ~/tmp/apple-dev/archrun.sh)
-#   SIM_MAC       Mac ssh alias        (default joshuawarren@macstudio)
+#   SIM_MAC       Mac ssh target, required (user@host of a Mac with Xcode)
 #   SIM_DEVICE    simulator name       (default "iPhone 17 Pro")
 #   SIM_BUNDLE_ID bundle identifier    (default: the app's xtool.yml bundleID)
 #   SIM_OUT       screenshot path      (default /tmp/<name>-sim.png)
@@ -23,7 +23,7 @@
 set -euo pipefail
 here=$(dirname "$(readlink -f "$0")")
 ARCHRUN=${ARCHRUN:-$HOME/tmp/apple-dev/archrun.sh}
-SIM_MAC=${SIM_MAC:-joshuawarren@macstudio}
+SIM_MAC=${SIM_MAC:?set SIM_MAC to the ssh target of a Mac with Xcode, for example user@mac}
 SIM_DEVICE=${SIM_DEVICE:-iPhone 17 Pro}
 dir=${1:-apps/HelloOmarchy}
 name=$(basename "$dir")

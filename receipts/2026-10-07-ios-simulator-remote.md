@@ -5,7 +5,7 @@ iOS **simulator** in the Linux chroot, installs and launches it in the
 Simulator on a Mac over ssh, and returns a screenshot to the Linux host.
 
 Verified end to end 2026-10-07 with `apps/HelloOmarchy` (SwiftUI) and
-macstudio (M1 Max, macOS 26.6.2, Xcode 27.0, iOS 26.5 simulator runtime,
+a Mac (M1 Max, macOS 26.6.2, Xcode 27.0, iOS 26.5 simulator runtime,
 iPhone 17 Pro booted headless):
 
 - Build (chroot, `swift build --swift-sdk arm64-apple-ios-simulator`):
@@ -26,6 +26,3 @@ iPhone 17 Pro booted headless):
 License: all Apple software (Xcode, simulator runtime) executes on Apple
 hardware under the Xcode and Apple SDKs Agreement; Linux only compiles the
 app and drives `simctl` over ssh (one operator, one Mac).
-
-Study with approach comparison and license citations:
-private repo `docs/lanes/apple-dev/notes/2026-10-07-ios-simulator-study.md`.
