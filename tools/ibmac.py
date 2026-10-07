@@ -254,16 +254,16 @@ fe4bfedcff6dffff
 # colorSpace="custom" colors: attrs -> (NSRGB/NSWhite payload, space).
 # NSRGB is ColorSync's own display conversion of the linear components
 # (oracle values; identity only for white/gray).
-CUSTOM_COLORS = {
+CUSTOM_COLORS = {  # -> (NSRGB display conversion, space, NSLinearExposure)
     ("srgb", None, "1", "1", "1", "0.0"):
-        (b"1 1 1 0\x00", "srgb"),
+        (b"1 1 1 0\x00", "srgb", b"1"),
     ("gray", "0.0", None, None, None, "0.0"):
-        (b"0 0\x00", "gray"),
+        (b"0 0\x00", "gray", b"1"),
     ("srgb", None, "0.030999999493360519", "0.41600000858306885",
      "0.93300002813339233", "1"):
-        (b"0.0493131876 0.3120345175 0.9147195816\x00", "srgb"),
+        (b"0.0493131876 0.3120345175 0.9147195816\x00", "srgb", b"0"),
     ("srgb", None, "1", "0", "0", "1"):
-        (b"0.9859541655 0 0.02694000863\x00", "srgb"),
+        (b"0.9859541655 0 0.02694000863\x00", "srgb", b"1"),
 }
 
 
@@ -329,16 +329,16 @@ META_FONTS = {  # metaFont -> (NSSize, NSfFlags); probed names and flags
     "system": (13.0, 1044), "smallSystem": (11.0, 3100),
     "miniSystem": (9.0, 3100), "boldSystem": (13.0, 2072),
     "smallBoldSystem": (11.0, 6204), "smallSystemBold": (11.0, 3357), "label": (10.0, 3100),
-    "toolTips": (11.0, 3100), "menu": (13.0, 1558), "message": (13.0, 1044),
+    "toolTips": (11.0, 3100), "menu": (13.0, 1558), "message": (13.0, 1558),
     "palette": (11.0, 3100), "titleBar": (13.0, 1044),
-    "systemDetail": (11.0, 3100), "cellTitle": (11.0, 3100),
+    "systemDetail": (11.0, 3100), "cellTitle": (12.0, 4883),
     "systemBold": (13.0, 2072),
 }
 FONT_NAMES = {"system": ".AppleSystemUIFont", "smallSystem": ".AppleSystemUIFont",
               "miniSystem": ".AppleSystemUIFont", "boldSystem": ".AppleSystemUIFontBold",
               "smallBoldSystem": ".AppleSystemUIFontBold", "systemBold": ".AppleSystemUIFontBold",
               "smallSystemBold": ".AppleSystemUIFontBold",
-              "cellTitle": ".AppleSystemUIFontMedium", "menu": ".AppleSystemUIFont",
+              "cellTitle": ".AppleSystemUIFont", "menu": ".AppleSystemUIFont",
               "message": ".AppleSystemUIFont", "palette": ".AppleSystemUIFont",
               "label": ".AppleSystemUIFont", "toolTips": ".AppleSystemUIFont",
               "titleBar": ".AppleSystemUIFont", "systemDetail": ".AppleSystemUIFont"}
@@ -506,7 +506,7 @@ class MacBuilder(I.Builder):
             return (N.INT16, v)
         return (N.INT32, v)
 
-    def font(self, fd_el, where):
+    def font(self, fd_el, where, appearance_key=True):
         text_style = fd_el.get("textStyle")
         if text_style is not None:
             key = ("style", text_style)
@@ -523,12 +523,13 @@ class MacBuilder(I.Builder):
             self.fonts[key] = o
             return o
         if fd_el.get("usesAppearanceFont") == "YES":
-            key = ("appearance",)
+            key = ("appearance", appearance_key)
             if key in self.fonts:
                 return self.fonts[key]
             o = self.new("NSFont")
             o.add("NSName", *self.ref(self.string(".AppleSystemUIFont")))
-            o.add("NSFontUsesAppearanceFontSize", *self.boolean(False))
+            if appearance_key:
+                o.add("NSFontUsesAppearanceFontSize", *self.boolean(False))
             o.add("NSSize", *self.float64(13.0))
             o.add("NSfFlags", *int_fit(1044))
             self.fonts[key] = o
@@ -603,7 +604,7 @@ class MacBuilder(I.Builder):
                                    el.get("alpha")))
         if probe is None:
             raise I.XibError(f"custom color {sorted(el.attrib.items())} not probed ({where})")
-        payload, space = probe
+        payload, space, exposure = probe
         key = (payload, space)
         if key in self.custom_colors:
             return self.custom_colors[key]
@@ -617,7 +618,7 @@ class MacBuilder(I.Builder):
             o.add("NSRGB", N.DATA, payload)
             o.add("NSCustomColorSpace", *self.ref(self.srgb_space()))
         o.add("NSComponents", N.DATA, comps.encode())
-        o.add("NSLinearExposure", N.DATA, b"1")
+        o.add("NSLinearExposure", N.DATA, exposure)
         self.custom_colors[key] = o
         return o
 
@@ -791,7 +792,7 @@ def _translates(el):
             and el.get("fixedFrame") != "YES")
 
 
-def _vflags(el, where, solved=False):
+def _vflags(el, where):
     translates = _translates(el)
     if translates:
         v = 268
@@ -802,10 +803,6 @@ def _vflags(el, where, solved=False):
             for flag, bit in I.RESIZE_FLAGS.items():
                 if m.get(flag) == "YES":
                     v |= bit
-    if solved:
-        # the canvas solves the content view to fill the window (probe
-        # ImportOPMLSheet: width/height stretch bits despite the stale rect)
-        v = 256 | I.RESIZE_FLAGS["widthSizable"] | I.RESIZE_FLAGS["heightSizable"]
     hidden = el.get("hidden") == "YES"
     if hidden:
         v |= 0x80000000
@@ -1078,6 +1075,9 @@ def _field(b, el, where, superview, id_map, parent=None):
     o.add("NSvFlags", vt, v)
     o.add("NSFrame", *b.ref(b.string(_rect(el, "frame", where))))
     o.add("NSSuperview", *b.ref(superview))
+    if el.get("wantsLayer") == "YES":
+        # probe ActivityLog label [98]: any view-kind element with wantsLayer
+        o.add("NSViewIsLayerTreeHost", *b.boolean(False))
     o.add("NSViewWantsBestResolutionOpenGLSurface", *b.boolean(False))
     if _translates(el):
         o.add("NSDoNotTranslateAutoresizingMask", *b.boolean(False))
@@ -1198,7 +1198,7 @@ def _view(b, el, where, superview=None, id_map=None, guides=None, parent=None,
         o.add("NSOriginalClassName", *b.ref(b.string("NSView")))
     o.add("NSNextResponder", *(b.ref(superview) if superview is not None else (N.NIL, None)))
     o.add("NSNibTouchBar", *(N.NIL, None))
-    v, vt = _vflags(el, where, solved=getattr(b, "cv_solved", False))
+    v, vt = _vflags(el, where)
     o.add("NSvFlags", vt, v)
     id_map[el.get("id")] = o
     keys = [(o, parent)]
@@ -1302,6 +1302,18 @@ def _view(b, el, where, superview=None, id_map=None, guides=None, parent=None,
             carr.add("UINibEncoderEmptyKey", *b.ref(c))
         o.add("NSViewConstraints", *b.ref(carr))
         keys.extend((c, o) for c in cons)
+    h = el.get("horizontalHuggingPriority")
+    v2 = el.get("verticalHuggingPriority")
+    if (h is not None and h != "250") or (v2 is not None and v2 != "750"):
+        # probe GeneralPreferencesView root swapper: {1000, 1000} both keys,
+        # between NSViewConstraints and the guide keys
+        o.add("NSHuggingPriority",
+              *b.ref(b.string("{%s, %s}" % (_fmt_g(h or 250), _fmt_g(v2 or 750)))))
+    h = el.get("horizontalCompressionResistancePriority")
+    v2 = el.get("verticalCompressionResistancePriority")
+    if (h is not None and h != "750") or (v2 is not None and v2 != "750"):
+        o.add("NSAntiCompressionPriority",
+              *b.ref(b.string("{%s, %s}" % (_fmt_g(h or 750), _fmt_g(v2 or 750)))))
     if gl:
         larr = b.new("NSArray")
         larr.add("NSInlinedValue", *b.boolean(False))
@@ -1739,13 +1751,10 @@ def _window_content(b, el, cv, o, where, id_map):
     b.cv_rect = cv.find("rect[@key='frame']")
     cr = el.find("rect[@key='contentRect']")
     b.cv_content_rect = (float(cr.get("width")), float(cr.get("height"))) if cr is not None else None
-    r0 = cv.find("rect[@key='frame']")
-    b.cv_solved = (cr is not None and r0 is not None
-                   and (float(r0.get("width")), float(r0.get("height"))) != b.cv_content_rect)
     b.cv_wants_layer = cv.get("wantsLayer") == "YES"
     cv_obj, pairs = _build_element(b, cv, where, superview=None,
                                    id_map=id_map, guides={}, parent=o)
-    b.cv_solved = False
+    b.cv_rect = None
     return cv_obj, pairs
 
 
@@ -1878,6 +1887,25 @@ def compile_xib(path):
 
     conns_arr = b.new("NSMutableArray")
     conns_arr.add("NSInlinedValue", *b.boolean(False))
+
+    # A stackView with arranged subviews emits an early-decode NSNibConnector
+    # as the FIRST connection; its source (the stack view, with its whole
+    # subtree) allocates right after the connector, before everything else
+    # (probe ShareViewController [10]/[11]).
+    sv_el = next((e for e in objects.iter("stackView")
+                  if (s := e.find("subviews")) is not None and len(s)), None)
+    if sv_el is not None:
+        early = b.new("NSNibConnector")
+        sup = _Late()
+        sv = _build_element(b, sv_el, where, superview=sup, id_map=id_map,
+                            guides={}, parent=sup)[0]
+        early.add("NSSource", *b.ref(sv))
+        early.add("NSLabel", *b.ref(b.string(
+            "Encoding NSStackView requires being decoded before other "
+            "connections with an early decoding order priority of 999990.")))
+        conns_arr.add("UINibEncoderEmptyKey", *b.ref(early))
+        conn_objs.append(early)
+        late_pending.append((sup, _find_parent(objects, sv_el.get("id")).get("id")))
 
     outlets, actions, bindings = [], [], []
     for src_el, conn_el in _conn_blocks(objects):
@@ -2369,9 +2397,11 @@ SCROLL_SFLAGS = {
 
 def _image_ref(b, name, where):
     """NSCustomResource for an <image name=...>; system-catalog names carry the
-    system IBNamespaceID (probe: NSActionTemplate/NSFolder/circle vs app icons)."""
+    system IBNamespaceID (probe: NSActionTemplate/NSFolder/circle vs app icons;
+    probe AccountsPreferencesView proto: NS-prefixed names carry it even when
+    not declared in <resources>)."""
     el = b.image_decls.get(name)
-    system = el is not None and (name.startswith("NS") or el.get("catalog") == "system")
+    system = name.startswith("NS") or (el is not None and el.get("catalog") == "system")
     key = (name, system)
     if key in b.images:
         return b.images[key]
@@ -2559,8 +2589,10 @@ def _text_view(b, el, where, superview):
     sel.add("UINibEncoderEmptyKey",
             *b.ref(b.catalog_color("System", "selectedTextColor", where)))
     sd.add("NSSelectedAttributes", *b.ref(sel))
+    ins_el = el.find("color[@key='insertionPointColor']")
     sd.add("NSInsertionColor",
-           *b.ref(b.catalog_color("System", "textInsertionPointColor", where)))
+           *b.ref(_color_ref(b, ins_el, where) if ins_el is not None
+                  else b.catalog_color("System", "textInsertionPointColor", where)))
     link = b.new("NSDictionary")
     link.add("NSInlinedValue", *b.boolean(False))
     link.add("UINibEncoderEmptyKey", *b.ref(b.string("NSColor")))
@@ -2577,7 +2609,8 @@ def _text_view(b, el, where, superview):
     sd.add("NSWritingToolsFlags", *int_fit(256))
 
     o.add("NSSuperview", *(b.ref(superview) if superview is not None else (N.NIL, None)))
-    o.add("NSViewIsLayerTreeHost", *b.boolean(False))
+    if el.get("wantsLayer") == "YES":
+        o.add("NSViewIsLayerTreeHost", *b.boolean(False))
     o.add("NSViewWantsBestResolutionOpenGLSurface", *b.boolean(False))
     o.add("IBNSSafeAreaLayoutGuide", *(N.NIL, None))
     o.add("IBNSLayoutMarginsGuide", *(N.NIL, None))
@@ -3021,7 +3054,7 @@ def _button_cell(b, el, control, where):
             raise I.XibError(f"button state {el.get('state')!r} not probed ({where})")
         flags2 = TEXT_ALIGN[el.get("alignment", "natural")] << 26
     else:
-        flags = 0x4000000
+        flags = 0x84000000 if el.get("state") == "on" else 0x4000000
         if btype == "smallSquare" and el.get("image"):
             # probe AccountsPreferencesView [14] remove/-106 add: pinned
             # words (enabled=NO is confounded with imagePosition; corpus
@@ -3033,12 +3066,18 @@ def _button_cell(b, el, control, where):
             flags2 = TEXT_ALIGN[el.get("alignment", "center")] << 26
     o.add("NSCellFlags", *int_fit(_i32(flags)))
     o.add("NSCellFlags2", *int_fit(_i32(flags2)))
+    if el.get("controlSize") == "large":
+        # probe ActivityLog copy button [109]: after NSCellFlags2
+        o.add("NSControlSize2", *b.int8(3))
+        o.add("NSControlSizeExtraLarge", *b.boolean(True))
     o.add("NSContents", *b.ref(_localizable(b, el.get("id") or "",
                                             el.get("title", ""), where)))
     fd = el.find("font[@key='font']")
     # probe AccountsPreferencesView [16]: font-less buttonCells archive the
-    # plain system font .AppleSystemUIFont 13/1044
-    o.add("NSSupport", *b.ref(b.font(fd, where) if fd is not None
+    # plain system font .AppleSystemUIFont 13/1044; the appearance font drops
+    # NSFontUsesAppearanceFontSize (probe AccountsFeedbin [31])
+    o.add("NSSupport", *b.ref(b.font(fd, where, appearance_key=False)
+                              if fd is not None
                               else _plain_system_font(b, 13, 1044)))
     o.add("NSControlView", *b.ref(control))
     if btype not in BUTTON_TYPE:
@@ -3824,13 +3863,13 @@ def _table_view(b, el, where, superview, id_map, parent=None):
             ident = pv.get("identifier") or col_el.get("identifier")
             if ident is None:
                 raise I.XibError(f"prototypeCellView without identifier ({where})")
-            protos.append((ident, pv))
+            protos.append((ident, pv, col_el))
     if rss is not None or protos:
         # golden SidebarView [54]: identifier -> NSNib(embedded cell archive),
         # entries sorted by identifier
         reusables = b.new("NSMutableDictionary")
         reusables.add("NSInlinedValue", *b.boolean(False))
-        for ident, pv in sorted(protos, key=lambda t: t[0].encode()):
+        for ident, pv, col in sorted(protos, key=lambda t: t[0].encode()):
             reusables.add("UINibEncoderEmptyKey", *b.ref(b.string(ident)))
             nib = b.new("NSNib")
             reusables.add("UINibEncoderEmptyKey", *b.ref(nib))
@@ -3842,7 +3881,7 @@ def _table_view(b, el, where, superview, id_map, parent=None):
             nib.add("NSNibFileSounds", *(N.NIL, None))
             data.add("NS.bytes", N.DATA,
                      _compile_cell_nib(pv, where, b.localize,
-                                       ident=col_el.get("identifier")))
+                                       ident=col.get("identifier")))
         o.add("NSTableViewArchivedReusableViewsKey", *b.ref(reusables))
     if el.get("floatsGroupRows") is not None:
         # bug-compat: floatsGroupRows="NO" archives true
