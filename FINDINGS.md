@@ -1228,10 +1228,10 @@ did not help (ac2393f3). Apple writes one atlas per scale
 collide. The pin stays on AssetKit 9f509fe, whose walk order happens to put
 the larger atlas first; a byte-stable car needs Apple's one-atlas-per-scale
 layout, and four cars with merged atlases built so far still did not finish
-processing. **See item 59 (2026-10-07, in progress)**: per-scale atlases
-went VALID for NetNewsWire and Mastodon; IceCubes' merged car still stalls
-and the remaining differences are being separated (shelf width 4454 px,
-atlas-after-cached order) with same-night 9f509fe controls.
+processing. **Final outcome 2026-10-07 (see item 59)**: the per-scale merge
+stalls App Store processing for IceCubes (10+ h on three variants — single
+shelf, wrapped, wrapped + atlas-first) while the same-night 9f509fe per-set
+control goes COMPLETE in minutes; the pin stays at 9f509fe (main 6f9116f).
 
 ## Editor support with SourceKit-LSP, 2026-10-06
 
@@ -1313,23 +1313,30 @@ shelves, 62x44) — its atlases stay tiny because its cached sprites are tiny
 into one shelf-wrapped atlas per scale (wrap at 2048 px: widest first, index
 tie-break, max-row-width atlas) and orders atlas-first per scale.
 
-Evidence so far, all TestFlight:
+Evidence, all TestFlight. Every merged-atlas variant stalled; the per-set
+9f509fe control went COMPLETE in minutes.
 
 | upload | AssetKit | IceCubes atlas layout | result |
 |---|---|---|---|
-| eb830d06 (202610062021) | bece8b6 | merged, single shelf 1496x150/2976x296/**4454x442** | PROCESSING >12 h |
-| 065dc987 (202610070209) | 9f509fe (control) | per-set, larger first, 2078 max | COMPLETE in minutes |
-| fb2771bf (202610070230) | 6b10c19 (wrap) | merged, wrapped 1496x150/1664x546/1713x1187 | PROCESSING >90 min |
-| d9a83f77 (order variant) | d9a83f77 (wrap + atlas-first) | as fb2771bf, atlas first per scale | uploading |
+| eb830d06 (202610062021) | bece8b6 | merged, single shelf 1496x150/2976x296/**4454x442** | PROCESSING 10+ h |
+| 065dc987 (202610070209) | 9f509fe (control) | per-set, larger first, max dim 2078 | COMPLETE in minutes |
+| fb2771bf (202610070230) | 6b10c19 (wrap) | merged, wrapped 1496x150/1664x546/1713x1187 | PROCESSING ~3 h |
+| 0062c26c (202610070533) | d9a83f77 (wrap + atlas-first) | as fb2771bf, atlas first per scale | PROCESSING ~70 min |
 
-NetNewsWire 202610070306 (c06a0480) and Mastodon 202610070316 (1216a4f5)
-are VALID on 6b10c19; neither wraps (334 px and no symbol sets), so they
-prove the per-scale merge does not reject processing outright. Every car
-that ever processed had max atlas dimension 2078; the 4454 px single shelf
-is the one measured outlier of the first merged car. The pin is NOT bumped
-while IceCubes is unresolved. Interim VALIDs on bece8b6: NetNewsWire
-8443f8d0, Mastodon c598be6d. Receipt:
-`receipts/2026-10-06-atlas-per-scale-testflight.md`.
+NNW 202610070306 (c06a0480) and Mastodon 202610070316 (1216a4f5) are VALID
+on 6b10c19; neither exercises the merged multi-set atlas (NNW does not
+wrap, Mastodon has no symbol sets). Every car that ever processed had max
+atlas dimension 2078; the 4454 px single shelf of eb830d06 was the one
+measured outlier, but the wrapped (1713) and atlas-first variants still
+stall past every historical VALID window, isolating the per-scale merge
+as the remaining difference against the per-set 9f509fe control. Apple's
+oracle for the same catalog emits per-scale too — so processing accepts
+the layout in theory, but the catalog in this program passes App Store
+processing only with per-set atlases. Pin stays at 9f509fe (main 6f9116f
+reverted c13e459's mixed-commit bump to bece8b6); receipt
+`receipts/2026-10-06-atlas-per-scale-testflight.md` records every upload
+and verdict. Interim VALIDs on bece8b6: NetNewsWire 8443f8d0, Mastodon
+c598be6d.
 
 ## NetNewsWire for Mac compiles and links on Linux, 2026-10-07
 

@@ -70,20 +70,36 @@ outlier of the stalled car was the 4454 px shelf. Conclusion: shelves wrap at
 Ship checks: NNW 86/86, Mastodon 118/118, IceCubes 102/102. NNW's shipped car
 carries Apple-identical atlas dims; Mastodon has no symbol sets (no atlases).
 
-## Open branch: the stall is not yet explained
+## Final outcome: pin stays at 9f509fe
 
-While fb2771bf sat in PROCESSING, commit `d9a83f77` removed the last
-oracle-visible structural difference (each scale's atlas is now emitted
-BEFORE the renditions that link it, matching Apple's car order) and upload
-of that variant was started. Interim upload inventory:
+Three merged-atlas variants of the same IceCubes catalog all stalled; the
+9f509fe per-set control went COMPLETE in minutes. Per acceptance, the pin
+is not bumped; main 6f9116f holds it on 9f509fe.
 
 | upload | AssetKit | IceCubes atlas layout | result |
 |---|---|---|---|
-| eb830d06 | bece8b6 | merged, single shelf → 4454x442 max | PROCESSING >12 h |
-| 065dc987 | 9f509fe control | per-set, larger first, 2078 max | COMPLETE in minutes |
-| fb2771bf | 6b10c19 | merged, wrapped 1496x150/1664x546/1713x1187 | PROCESSING >90 min |
-| (order variant) | d9a83f77 | as fb2771bf, atlas first per scale | uploading |
+| eb830d06 (202610062021) | bece8b6 | merged, single shelf 1496x150/2976x296/**4454x442** | PROCESSING 10+ h |
+| 065dc987 (202610070209) | 9f509fe (control) | per-set, larger first, max dim 2078 | COMPLETE in minutes |
+| fb2771bf (202610070230) | 6b10c19 (wrap) | merged, wrapped 1496x150/1664x546/1713x1187 | PROCESSING ~3 h |
+| 0062c26c (202610070533) | d9a83f77 (wrap + atlas-first) | as fb2771bf, atlas first per scale | PROCESSING ~70 min |
 
-Interim VALIDs on bece8b6 (pre-wrap): NetNewsWire 8443f8d0, Mastodon
-c598be6d. The pin is NOT bumped while IceCubes is unresolved; the worktree
-pin file edits are uncommitted and can be reverted with git checkout.
+NetNewsWire 202610070306 (c06a0480) and Mastodon 202610070316 (1216a4f5)
+are VALID on 6b10c19; neither exercises the merged multi-set atlas (NNW
+does not wrap, Mastodon has no symbol sets). Every car that ever processed
+had max atlas dimension 2078; the 4454 px single shelf of eb830d06 was
+the one measured outlier — but the wrapped (1713) and atlas-first
+variants still stall past every historical VALID window, isolating the
+per-scale merge as the remaining difference against the per-set 9f509fe
+control. Apple's own oracle emits per-scale, so the layout is in
+principle processable; the catalog in this program passes only with
+per-set atlases.
+
+## Final test inventory
+
+- 9f509fe: control VALID (065dc987), interim VALIDs (NetNewsWire 8443f8d0
+  on 6b10c19 variant, Mastodon c598be6d on 6b10c19 variant), plus prior
+  history (54834467, dbad43f2). Shipped the `d9a83f77` order variant
+  (0062c26c) from the in-chroot actool that is left installed.
+- NNW 202610070306 VALID (6b10c19). Mastodon 202610070316 VALID (6b10c19).
+- All three background watcher jobs and the order-variant ship have
+  settled; no further action from this agent — handoff in the final yield.
