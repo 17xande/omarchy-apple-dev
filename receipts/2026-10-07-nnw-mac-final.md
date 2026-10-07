@@ -120,70 +120,29 @@ requested windows/menus. Per-window table:
 | Account Stats | Window → Account Stats | AccountStatsWindow.xib: "On My Mac" header, table of feed rows with article counts. | nnw-account-stats.png |
 | Subscribe (Safari ext) | N/A (Safari-only) | The Subscribe to Feed appex is a Safari App Extension; pluginkit lists it; cannot be opened standalone from a non-Safari host. The Linux-built Share and Subscribe extensions both show up in `pluginkit -m -i <id>`. | (no shot — extension is context-bound) |
 
-### Wrongness observed, with cause (not fixed)
+### Observations, checked against an Xcode-built NetNewsWire
 
-1. **Settings toolbar selection indicator does not move off "General"** when
-   the user switches to the Accounts or Advanced tab. Tab content, window
-   title, and AX all change; the dark rounded-rect "selected" highlight
-   stays on the General toolbar item. Cause candidate: the generator /
-   ship-mac.sh leave the PreferencesWindow.xib toolbar with
-   `selectableIdentifiers` empty or unset, so AppKit does not move the
-   `selectedItemIdentifier` to the active pane's toolbar item. The button
-   actions still work, so this is purely cosmetic.
-2. **Secondary windows render without a traffic-light title bar** (the
-   "thin grey bar with title only" look in many shots). The
-   `titled: NO` / `closable: YES only` style mask is set somewhere —
-   candidate files: `tools/xcodeproj2xtool.py` (window-style attribute
-   mapping for the Mac xib compiler's NIB output) and the SDK ibtool's
-   ibmac module's `NSWindow` style handling. The main window DOES show
-   traffic lights, so the per-window style mask coming out of the xib
-   compile is wrong for child/inspector/sheet windows.
-3. **No macOS alert sound / Sparkle first-run sheet** appeared on launch
-   in this run (the previous NnwMacBundle2 run captured a "Check for
-   updates automatically?" sheet on first launch). The new build may
-   have already saved a prior answer in `~/Library/Preferences/com.joshuaswarren.omarchyappledev.netnewswire.plist`.
-4. **Sheets present as separate borderless windows in the AX tree** (so
-   `cua-driver list_windows` returns extra empty-titled windows while
-   sheets are open) rather than attaching to the parent's window group.
-   The new AX behaviour tracks the actual NSWindow created; the app
-   uses `presentAsSheet(...)` so AppKit should attach — this is a
-   visual/animation difference only.
+The same source commit (8c322c2) was built with Xcode 27 on the Mac and
+exercised the same way. All three observations come out the same, so none
+is a Linux toolchain difference:
 
-These are all in the app / nib pipeline, not in the generator or
-ship-mac.sh, so they are reported (not fixed). The exact files to look
-at for the toolbar-selection glitch: `Mac/Preferences/Base.lproj/PreferencesWindow.xib`
-(the `NSToolbar` with items General/Accounts/Advanced) and the
-`NSWindowToolbarStyle` / `selectableIdentifiers` key handling in the
-Linux nib compiler (likely `tools/ibmac.py` or `tools/ibtool`'s NIB
-output writer). For the missing traffic lights on secondary windows:
-the same nib compiler's window-style handling, and per-window
-`NSWindowStyleMask` settings on the xib windows (MainMenu/MainWindow
-carry a different mask than AboutWindowController/InspectorWindow/
-ActivityLogWindow/ErrorLogWindow/CurrentActivityWindow/AccountStatsWindow).
+1. **Settings toolbar highlight stays on "General".** The same on the
+   Xcode build. `PreferencesWindow.nib` is byte-identical in both
+   bundles. The app never sets `toolbar.selectedItemIdentifier` when a tab
+   is clicked, and macOS 26.6.2 no longer moves the highlight by itself.
+2. **Missing traffic lights.** The Activity and Error log windows have them
+   on both builds; the Linux captures were of an inactive window (grey
+   dots). The About window has no traffic lights on both builds: the app's
+   `configureWindow()` hides the title bar on purpose.
+3. **Sheets show as separate windows to cua-driver.** The same on the
+   Xcode build (an extra empty-titled window with no AX elements).
+4. No Sparkle first-run prompt this run: the answer from the earlier run
+   was saved in the app's preferences.
 
-### Issues to fix in `tools/ibmac.py` / `tools/ibtool` (REPORTED, not edited)
-
-- `ibmac.py` does not write a `selectableIdentifiers` /
-  `setSelectedItemIdentifier` path for the PreferencesWindow toolbar,
-  so the General/Accounts/Advanced selection does not move on click.
-- `ibmac.py` writes `NSWindowStyleMask` for non-MainMenu windows without
-  the `titled` bit, so About / Inspector / Account / Activity / Error
-  Log / iCloud Storage / Account Stats / Current Activity windows
-  appear without traffic lights.
-- `ibmac.py` does not wire the `presentAsSheet`'s expected
-  `parentWindow` relationship into the archived nib, so AppKit exposes
-  the sheet as a separate top-level window in AX (it still renders
-  visually on top of the parent).
-
-### ibtool/ibmac issues to report, with exact file
-
-- `tools/ibmac.py` — the three items above (toolbar selection, window
-  style mask on secondary windows, sheet parent relationship).
-- `tools/ibtool` — the SDK ibtool wrapper at
-  `~/.swiftpm/swift-sdks/darwin.artifactbundle/Developer/Platforms/MacOSX.platform/Developer/usr/bin/ibtool`
-  imports `ibmac` from its own directory; the install step
-  (`install-toolchain.sh:install_darwin_tools`) used to miss
-  `ibmac.py`. Now fixed (commit eaa22b2 on branch `nnw-mac-final`).
+The one real bug of this run: the SDK `ibtool` imports `ibmac` from its own
+directory, and `install-toolchain.sh` did not copy `ibmac.py` there. Fixed in
+618622a. Side-by-side shots are kept with the lane's evidence on the
+build host, not in this repository.
 
 ## Crashes / log errors
 
