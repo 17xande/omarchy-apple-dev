@@ -478,6 +478,7 @@ class MacBuilder(I.Builder):
         self.srgbspace = None   # shared sRGB space (custom colors)
         self.late = []          # unresolved _Late refs
         self.cons_order = {}    # view xib id -> constraint ids in Apple order
+        self.grid_meta = {}     # gridView xib id -> (rows, cols, {cellId: cell})
         self.localize = False   # .lproj xibs wrap user strings
         self.nums = {}          # NSNumber intern pool by numeric value
         self.bool_nums = {}     # NSNumber bool pool for binding options (inverted)
@@ -861,6 +862,12 @@ def _constraint(b, el, owner_obj, owner_id, id_map, guides, guide_kinds, where,
         raise I.XibError(f"<constraint> missing firstAttribute ({where})")
     o.add("NSFirstAttributeV2", *b.int8(I.ATTRIBUTES.get(fa, I.MARGIN_V2.get(fa, 0))))
     o.add("NSFirstAttribute", *b.int8(I.ATTRIBUTES.get(I.MARGIN_BASE.get(fa, fa), 0)))
+    mul = el.get("multiplier")
+    if mul is not None and float(mul) != 1.0:
+        # golden AccountsReaderAPI [205]: multiplier="0.951613" archives as
+        # float32 widened to double (0.9516130089759827)
+        o.add("NSMultiplier", N.DOUBLE,
+              struct.unpack("<f", struct.pack("<f", float(mul)))[0])
     rel = I.RELATIONS.get(el.get("relation", "equal"))
     if rel is not None:
         o.add("NSRelation", *b.int8(rel))
@@ -1411,8 +1418,11 @@ def _view(b, el, where, superview=None, id_map=None, guides=None, parent=None,
         rarr.add("NSInlinedValue", *b.boolean(False))
         o.add("NSGrid_rows", *b.ref(rarr))
         col_objs = {}
+        row_objs = []
+        cell_of = {}
         for r_el in el.findall("rows/gridRow"):
             row = b.new("NSGridRow")
+            row_objs.append(row)
             rarr.add("UINibEncoderEmptyKey", *b.ref(row))
             row.add("NSGrid_owningGrid", *b.ref(o))
             row.add("NSGrid_yPlacement", *b.int8(0))
@@ -1426,6 +1436,7 @@ def _view(b, el, where, superview=None, id_map=None, guides=None, parent=None,
             row.add("NSGrid_cells", *b.ref(carr))
             for c_el in el.findall(f"gridCells/gridCell[@row='{r_el.get('id')}']"):
                 cell = b.new("NSGridCell")
+                cell_of[c_el.get("id")] = cell
                 carr.add("UINibEncoderEmptyKey", *b.ref(cell))
                 cell.add("NSGrid_owningRow", *b.ref(row))
                 col_id = c_el.get("column")
@@ -1455,6 +1466,12 @@ def _view(b, el, where, superview=None, id_map=None, guides=None, parent=None,
         for c_el in el.findall("columns/gridColumn"):
             clarr.add("UINibEncoderEmptyKey", *b.ref(col_objs[c_el.get("id")]))
         o.add("NSGrid_columns", *b.ref(clarr))
+        # collect() emits the grid's key pairs (rows, columns, then per-cell
+        # groups); it needs the scaffolding objects, which have no xib ids
+        b.grid_meta[el.get("id")] = (
+            row_objs,
+            [col_objs[c.get("id")] for c in el.findall("columns/gridColumn")],
+            cell_of)
     return o, keys
 
 
@@ -2052,7 +2069,14 @@ def compile_xib(path):
             if el is None or el.tag != "userDefaultsController":
                 raise I.XibError(f"binding destination {dest_id!r} not found ({where})")
             udc = b.new("NSUserDefaultsController")
-            udc.add("NSSharedInstance", *b.boolean(False))
+            # representsSharedInstance=YES -> NSSharedInstance false (inverted,
+            # GP [311]/Crash [131]); bare element -> NSAppliesImmediately
+            # (attr value, corpus point false; Adv golden [155]/[170])
+            if el.get("representsSharedInstance") == "YES":
+                udc.add("NSSharedInstance", *b.boolean(False))
+            else:
+                udc.add("NSAppliesImmediately",
+                        *b.boolean(el.get("appliesImmediately") == "YES"))
             id_map[dest_id] = udc
             bind_key_pairs.append((udc, owner))
         c.add("NSDestination", *b.ref(id_map[dest_id]))
@@ -2114,6 +2138,33 @@ def compile_xib(path):
         if obj is None:
             return
         keys.append((obj, parent))
+        if el.tag == "gridView":
+            # golden AccountsReaderAPI [221]: rows doc order, columns doc
+            # order (parent = grid), then per gridCell doc order: cell ->
+            # grid, content field -> cell, field cell -> field, field's
+            # constraints -> field
+            rows, cols, cell_of = b.grid_meta.get(el.get("id"), ([], [], {}))
+            for r in rows:
+                keys.append((r, obj))
+            for c in cols:
+                keys.append((c, obj))
+            for c_el in el.findall("gridCells/gridCell"):
+                cell = cell_of.get(c_el.get("id"))
+                content_el = c_el.find("*[@key='contentView']")
+                if cell is None or content_el is None:
+                    continue
+                keys.append((cell, obj))
+                fobj = id_map.get(content_el.get("id"))
+                if fobj is None:
+                    continue
+                keys.append((fobj, cell))
+                fcell_el = content_el.find("*[@key='cell']")
+                ckey = content_el.get("id") + "#cell"
+                if fcell_el is not None and ckey in id_map:
+                    keys.append((id_map[ckey], fobj))
+                for cid in b.cons_order.get(content_el.get("id"), []):
+                    if cid in id_map:
+                        keys.append((id_map[cid], fobj))
         if el.tag in ("textField", "button"):
             keys.append((id_map[el.get("id") + "#cell"], obj))
         if el.tag == "popUpButton":
@@ -2888,10 +2939,13 @@ def _scroll_view(b, el, where, superview, id_map, parent=None):
     hls = float(el.get("horizontalLineScroll", 10))
     vls = float(el.get("verticalLineScroll", 10))
     if is_table:
-        # line scrolls archive the table's ROW height, not the xib attr
-        # (golden SidebarView: lineScroll 40 -> 32 systemDefault sourceList)
+        # line scrolls archive the table's row STRIDE: archived row height
+        # plus intercell spacing height (goldens: Sidebar 32+0, TTT 96+0,
+        # APV 24+2=26; the xib lineScroll attrs are ignored)
         rowh = _table_row_height(doc_el, where)
-        hls = vls = rowh
+        size = doc_el.find("size[@key='intercellSpacing']")
+        stride = rowh + (float(size.get("height")) if size is not None else 0.0)
+        hls = vls = stride
     hps = float(el.get("horizontalPageScroll", 10))
     vps = float(el.get("verticalPageScroll", 10))
     if (hls, vls, hps, vps) != (10.0, 10.0, 10.0, 10.0):
