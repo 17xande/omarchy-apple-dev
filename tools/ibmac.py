@@ -474,7 +474,7 @@ class MacBuilder(I.Builder):
         o = self.nums.get(float(v))
         if o is None:
             o = self.new("NSNumber")
-            o.add("NS.intval" if typ == N.INT8 else "NS.dblval", typ, v)
+            o.add("NS.dblval" if typ == N.DOUBLE else "NS.intval", typ, v)
             self.nums[float(v)] = o
         return o
 
@@ -1249,8 +1249,22 @@ def _conn_blocks(objects_el):
             for child in subs:
                 walk(child)
 
+    def walk_menu(el):
+        for c in el.findall("connections"):
+            for conn in c:
+                pairs.append((el, conn))
+        items = el.find("items")
+        if items is not None:
+            for it in items:
+                walk_menu(it)
+        sub = el.find("menu[@key='submenu']")
+        if sub is not None:
+            walk_menu(sub)
+
     for el in objects_el:
-        if el.tag in ("customObject", "window", "customView", "view"):
+        if el.tag == "menu":
+            walk_menu(el)
+        elif el.tag in ("customObject", "window", "customView", "view"):
             walk(el)
     return pairs
 
@@ -1297,6 +1311,7 @@ def compile_xib(path):
     id_map = {}      # xib id -> Obj (objects as they get built)
     conn_objs = []   # NSNibOutletConnector objects, document order
     late_pending = []  # (_Late, superview xib id) filled after connections
+    late_menus = []    # (_Late, parent menu xib id) filled after the tree walk
 
     owner_el = next((e for e in objects if e.get("id") == "-2"), None)
     if owner_el is None:
@@ -1325,12 +1340,25 @@ def compile_xib(path):
     conns_arr = b.new("NSMutableArray")
     conns_arr.add("NSInlinedValue", *b.boolean(False))
 
+    outlets, actions = [], []
     for src_el, conn_el in _conn_blocks(objects):
+        (actions if conn_el.tag == "action" else outlets).append((src_el, conn_el))
+
+    # Outlets build their destination lazily on first reference, in document
+    # order; action connections are emitted in ASCII order of the SOURCE ITEM
+    # id, not document order (probe MainMenu golden: 104 actions sorted).
+    for src_el, conn_el in outlets + sorted(
+            actions, key=lambda p: (p[0].get("id") or "").encode()):
         if conn_el.tag == "action":
             c = b.new("NSNibControlConnector")
             src = id_map.get(src_el.get("id"))
             if src is None:
-                raise I.XibError(f"action source {src_el.get('id')!r} not built ({where})")
+                parent_el = _menu_parent_el(objects, src_el.get("id"))
+                if parent_el is None:
+                    raise I.XibError(f"action source {src_el.get('id')!r} not built ({where})")
+                late = _Late()
+                src = _xib_menu_item(b, src_el, late, id_map, where)
+                late_menus.append((late, parent_el.get("id")))
             c.add("NSSource", *b.ref(src))
             tgt = conn_el.get("target")
             if tgt is not None and tgt != "-1":
@@ -1341,8 +1369,6 @@ def compile_xib(path):
             conns_arr.add("UINibEncoderEmptyKey", *b.ref(c))
             conn_objs.append(c)
             continue
-        if conn_el.tag != "outlet":
-            raise I.XibError(f"unsupported connection <{conn_el.tag}> ({where})")
         c = b.new("NSNibOutletConnector")
         src = id_map.get(src_el.get("id"))
         if src is None:
@@ -1351,27 +1377,42 @@ def compile_xib(path):
         dest_id = conn_el.get("destination")
         if dest_id not in id_map:
             el = _find_id(objects, dest_id)
-            if el is None or el.tag not in ("window", "view", "customView", "textField",
-                                            "button", "popUpButton", "imageView",
-                                            "scrollView", "textView"):
+            if el is None:
                 raise I.XibError(f"connection destination {dest_id!r} not found ({where})")
-            parent_el = _find_parent(objects, dest_id)
-            is_cv = any(w.find("view[@key='contentView']") is not None
-                        and w.find("view[@key='contentView']").get("id") == dest_id
-                        for w in objects.findall("window"))
-            if parent_el is not None:
-                # A subview built by an outlet before its superview: Apple keeps
-                # the superview as a forward reference (probe NothingInspector).
+            if el.tag == "menu":
+                _xib_menu(b, el, id_map, where)
+            elif el.tag == "menuItem":
+                parent_el = _menu_parent_el(objects, dest_id)
+                if parent_el is None:
+                    raise I.XibError(f"menu item {dest_id!r} has no parent menu ({where})")
                 late = _Late()
-                _build_element(b, el, where, superview=late,
-                               id_map=id_map, guides={}, parent=late)
-                late_pending.append((late, parent_el.get("id")))
-            elif is_cv:
-                _build_element(b, el, where, superview=None,
-                               id_map=id_map, guides={}, parent=owner)
+                _xib_menu_item(b, el, late, id_map, where)
+                late_menus.append((late, parent_el.get("id")))
+            elif el.tag == "customObject":
+                # probe MainMenu [8]: customObject with customModule -> swapper
+                id_map[dest_id] = _xib_swapper(b, el, where)
+            elif el.tag in ("window", "view", "customView", "textField",
+                            "button", "popUpButton", "imageView",
+                            "scrollView", "textView"):
+                parent_el = _find_parent(objects, dest_id)
+                is_cv = any(w.find("view[@key='contentView']") is not None
+                            and w.find("view[@key='contentView']").get("id") == dest_id
+                            for w in objects.findall("window"))
+                if parent_el is not None:
+                    # A subview built by an outlet before its superview: Apple keeps
+                    # the superview as a forward reference (probe NothingInspector).
+                    late = _Late()
+                    _build_element(b, el, where, superview=late,
+                                   id_map=id_map, guides={}, parent=late)
+                    late_pending.append((late, parent_el.get("id")))
+                elif is_cv:
+                    _build_element(b, el, where, superview=None,
+                                   id_map=id_map, guides={}, parent=owner)
+                else:
+                    _build_element(b, el, where, superview=None,
+                                   id_map=id_map, guides={}, parent=owner, root=True)
             else:
-                _build_element(b, el, where, superview=None,
-                               id_map=id_map, guides={}, parent=owner, root=True)
+                raise I.XibError(f"connection destination {dest_id!r} not found ({where})")
         c.add("NSDestination", *b.ref(id_map[dest_id]))
         c.add("NSLabel", *b.ref(b.string(conn_el.get("property"))))
         c.add("NSChildControllerCreationSelectorName", *(N.NIL, None))
@@ -1380,11 +1421,12 @@ def compile_xib(path):
     for late, parent_id in late_pending:
         late.obj = id_map[parent_id]
 
-    # Top-level objects never referenced by a connection (probe: none in NNW).
+    # Top-level objects never referenced by a connection and not menus (menus
+    # are built by the tree walk below).
     for el in objects:
         if el.get("id") in ("-1", "-2", "-3") or el.tag == "placeholder":
             continue
-        if el.get("id") not in id_map:
+        if el.get("id") not in id_map and el.tag != "menu":
             raise I.XibError(f"top-level <{el.tag} id='{el.get('id')}'> is never "
                              f"referenced; Apple's build order unknown ({where})")
 
@@ -1436,14 +1478,25 @@ def compile_xib(path):
             if cid in id_map:
                 keys.append((id_map[cid], obj))
 
-    for el in objects:
-        if el.get("id") in ("-1", "-2", "-3") or el.tag == "placeholder":
-            continue
-        if el.get("id") in vis_ids:
-            continue
-        collect(el, owner)
+    def collect_menu(el, parent):
+        mo = id_map.get(el.get("id"))
+        if mo is None:
+            mo = _xib_menu(b, el, id_map, where)
+        keys.append((mo, parent))
+        items = el.find("items")
+        if items is not None:
+            for it in items:
+                io = id_map.get(it.get("id"))
+                if io is None:
+                    io = _xib_menu_item(b, it, mo, id_map, where)
+                keys.append((io, mo))
+                sub = it.find("menu[@key='submenu']")
+                if sub is not None:
+                    collect_menu(sub, io)
 
-    # NSObjectsKeys: NSApplication proxy, then the collected (obj, parent) pairs.
+    # NSObjectsKeys: NSApplication proxy, then the collected (obj, parent)
+    # pairs. Allocation order (probe MainMenu): keys array shell first, then
+    # the NSApplication proxy, then the tree-phase builds.
     keys_arr = b.new("NSArray")
     keys_arr.add("NSInlinedValue", *b.boolean(False))
     app_el = next((e for e in objects if e.get("id") == "-3"), None)
@@ -1453,6 +1506,17 @@ def compile_xib(path):
         raise I.XibError(f"{path}: Application customClass {app_el.get('customClass')!r} "
                          f"not probed ({where})")
     nsapp = _custom_object(b, app_el, "NSApplication", where)
+    for el in objects:
+        if el.get("id") in ("-1", "-2", "-3") or el.tag == "placeholder":
+            continue
+        if el.get("id") in vis_ids:
+            continue
+        if el.tag == "menu":
+            collect_menu(el, owner)
+        else:
+            collect(el, owner)
+    for late, menu_id in late_menus:
+        late.obj = id_map[menu_id]
     values = [(nsapp, owner)]
     values.extend(keys)
     keys_arr.add("UINibEncoderEmptyKey", *b.ref(nsapp))
@@ -1473,7 +1537,7 @@ def compile_xib(path):
     oids_values_arr.add("NSInlinedValue", *b.boolean(False))
     numbers = []
     for i in range(1, len(oids) + 1):
-        numbers.append(b.number(N.INT8, i))
+        numbers.append(b.number(*int_fit(i)))
         oids_values_arr.add("UINibEncoderEmptyKey", *b.ref(numbers[-1]))
     access_conns = b.new("NSMutableArray")
     access_conns.add("NSInlinedValue", *b.boolean(False))
@@ -2058,6 +2122,13 @@ def _button_cell(b, el, control, where):
 MENU_CHECKMARK = {"on": ("NSMenuCheckmark", "{18, 16}"), None: ("NSMenuCheckmark", "{18, 16}")}
 MENU_MIXED = ("NSMenuMixedState", "{18, 4}")
 
+# systemMenu -> NSName (probe MainMenu golden)
+MENU_SYSTEM_NAME = {"main": "_NSMainMenu", "apple": "_NSAppleMenu",
+                    "services": "_NSServicesMenu", "window": "_NSWindowsMenu",
+                    "help": "_NSHelpMenu"}
+# keyEquivalentModifierMask bits over the NSCommandKeyMask base 1048576
+MENU_MOD_BITS = {"option": 524288, "shift": 131072, "control": 262144}
+
 
 def _custom_image_resource(b, name, size, where):
     key = (name, size)
@@ -2073,6 +2144,16 @@ def _custom_image_resource(b, name, size, where):
     o.add("IBDesignSize", *b.ref(val))
     o.add("IBDesignImageConfiguration", *(N.NIL, None))
     b.images[key] = o
+    return o
+
+
+def _xib_swapper(b, el, where):
+    """Lazily-referenced customObject -> NSClassSwapper, NSObject original,
+    NSInitializeWithInit=false (probe MainMenu [8] AppDelegate)."""
+    o = b.new("NSClassSwapper")
+    o.add("NSClassName", *b.ref(b.string(I._swift_class(el))))
+    o.add("NSOriginalClassName", *b.ref(b.string("NSObject")))
+    o.add("NSInitializeWithInit", *b.boolean(False))
     return o
 
 
@@ -2095,6 +2176,90 @@ def _menu_item(b, item_el, menu, cell, where, localize_owner):
     o.add("NSTarget", *b.ref(cell))
     o.add("NSHiddenInRepresentation", *b.boolean(True))
     return o
+
+
+def _xib_menu_item(b, el, parent_menu, id_map, where):
+    """Top-level <menuItem> with its full subtree; parent_menu is the parent
+    NSMenu object or a _Late forward reference (probe MainMenu)."""
+    o = b.new("NSMenuItem")
+    o.add("NSMenu", *b.ref(parent_menu))
+    if el.get("alternate") == "YES":
+        # bug-compatible: xib alternate="YES" archives bool false (probe [189])
+        o.add("NSIsAlternate", *b.boolean(False))
+    sep = el.get("isSeparatorItem") == "YES"
+    if sep:
+        # bug-compatible: false flags on separators (probe [58])
+        o.add("NSIsDisabled", *b.boolean(False))
+        o.add("NSIsSeparator", *b.boolean(False))
+    o.add("NSAllowsKeyEquivalentLocalization", *b.boolean(False))
+    o.add("NSAllowsKeyEquivalentMirroring", *b.boolean(False))
+    if sep:
+        o.add("NSTitle", *b.ref(b.string("")))
+    else:
+        o.add("NSTitle", *b.ref(_localizable(b, el.get("id"), el.get("title", ""), where)))
+        if el.get("identifier"):
+            o.add("NSMenuItemIdentifier", *b.ref(b.string(el.get("identifier"))))
+    ke = el.get("keyEquivalent") or ""
+    o.add("NSKeyEquiv", *b.ref(b.string(ke)))
+    if ke:
+        mask = 1048576
+        mod = el.find("modifierMask[@key='keyEquivalentModifierMask']")
+        if mod is not None:
+            for name, bit in MENU_MOD_BITS.items():
+                if mod.get(name) == "YES":
+                    mask += bit
+            for name, val in mod.attrib.items():
+                if val == "YES" and name not in MENU_MOD_BITS and name != "command":
+                    raise I.XibError(f"modifierMask {name!r} not probed ({where})")
+        o.add("NSKeyEquivModMask", N.INT32, mask)
+    o.add("NSMnemonicLoc", N.INT32, 2147483647)
+    o.add("NSOnImage", *b.ref(_custom_image_resource(b, "NSMenuCheckmark", "{18, 16}", where)))
+    o.add("NSMixedImage", *b.ref(_custom_image_resource(b, "NSMenuMixedState", "{18, 4}", where)))
+    if el.get("tag") is not None:
+        o.add("NSTag", *b.int_fit32(int(el.get("tag"))))
+    sub = el.find("menu[@key='submenu']")
+    if sub is not None:
+        # probe MainMenu [37]: NSAction string allocated before the submenu
+        o.add("NSAction", *b.ref(b.string("submenuAction:")))
+        sm = _xib_menu(b, sub, id_map, where)
+        o.add("NSTarget", *b.ref(sm))
+        o.add("NSSubmenu", *b.ref(sm))
+    o.add("NSHiddenInRepresentation", *b.boolean(True))
+    id_map[el.get("id")] = o
+    return o
+
+
+def _xib_menu(b, el, id_map, where):
+    """Top-level/sub <menu>: title, items (reusing built ones), then NSName
+    after the whole subtree (probe MainMenu [720]/[730]/[849])."""
+    o = b.new("NSMenu")
+    id_map[el.get("id")] = o
+    title = el.get("title")
+    if title:
+        o.add("NSTitle", *b.ref(_localizable(b, el.get("id"), title, where)))
+    else:
+        o.add("NSTitle", *b.ref(b.string("")))
+    iarr = b.new("NSMutableArray")
+    iarr.add("NSInlinedValue", *b.boolean(False))
+    o.add("NSMenuItems", *b.ref(iarr))
+    items_el = el.find("items")
+    for it in (items_el if items_el is not None else []):
+        io = id_map.get(it.get("id"))
+        if io is None:
+            io = _xib_menu_item(b, it, o, id_map, where)
+        iarr.add("UINibEncoderEmptyKey", *b.ref(io))
+    name = MENU_SYSTEM_NAME.get(el.get("systemMenu"))
+    if name:
+        o.add("NSName", *b.ref(b.string(name)))
+    return o
+
+
+def _menu_parent_el(objects, ident):
+    for m in objects.iter("menu"):
+        items = m.find("items")
+        if items is not None and any(it.get("id") == ident for it in items):
+            return m
+    return None
 
 
 def _popup(b, el, where, superview, id_map, parent=None):
