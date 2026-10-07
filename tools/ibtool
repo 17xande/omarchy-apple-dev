@@ -35,8 +35,6 @@ VERSION_XML = """<?xml version="1.0" encoding="UTF-8"?>
 """
 
 GOLDEN = os.path.join(_TOOLS, "..", "tests", "ibtool", "golden")
-# Mac goldens that differ only in the window's saved canvas position.
-MAC_CANVAS_ALLOW = {"AboutWindowController"}
 TARGET_MODULE = None  # --module: the module for customModuleProvider="target" classes
 SRC = os.path.join(_TOOLS, "..", "tests", "ibtool", "src")
 
@@ -4468,18 +4466,6 @@ def self_test():
         out = compile_xib(src)
         want = open(os.path.join(_TOOLS, "..", "tests", "ibtool", "golden-mac",
                                  f"{name}.nib"), "rb").read()
-        if name in MAC_CANVAS_ALLOW:
-            # The reg build saved this window centered on the canvas; the
-            # committed xib keeps its saved position. Everything but the
-            # NSWindowRect payload must match.
-            a, w = N.parse(out), N.parse(want)
-            for arch in (a, w):
-                for v in arch.values:
-                    if (arch.keys[v.key_idx] == b"NSWindowRect"
-                            and v.type == N.OBJREF):
-                        for sv in arch.object_values(arch.objects[v.payload]):
-                            sv.payload = b""
-            out, want = N.encode(a, b""), N.encode(w, b"")
         if out != want:
             diff = next((i for i, (x, y) in enumerate(zip(out, want)) if x != y),
                         min(len(out), len(want)))
