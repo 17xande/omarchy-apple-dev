@@ -115,6 +115,10 @@ install_darwin_tools() {
   mkdir -p "$macbin"
   install -m755 "$REPO_DIR/tools/darwin-tools/.build/release/actool" "$macbin/actool"
   install -m755 "$REPO_DIR/tools/xcstringstool" "$REPO_DIR/tools/ibtool" "$macbin/"
+  # The Mac nib compiler: the SDK ibtool dispatches MacOSX.Cocoa xibs to the
+  # ibmac module and imports it from its own directory (SwiftBuild does not
+  # pass PYTHONPATH through to build tasks).
+  install -m644 "$REPO_DIR/tools/ibmac.py" "$macbin/"
   install -m644 "$REPO_DIR/tools/nibarchive.py" "$REPO_DIR/tools/keyorder.py" "$macbin/"
   install -m755 "$REPO_DIR/tools/momc" "$macbin/momc"
   install -m644 "$REPO_DIR/tools/xcstrings_symbols.py" "$macbin/xcstrings_symbols.py"
