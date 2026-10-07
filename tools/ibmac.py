@@ -2313,6 +2313,10 @@ BUTTON_BEHAVIOR = {
      None, False): (-2038415360, 161),
     (("pushIn", "lightByBackground", "lightByGray"), "bevel", "rounded",
      "overlaps", True): (-2042085376, 129),
+    (("pushIn", "lightByBackground", "lightByGray"), "smallSquare",
+     "smallSquare", "only", True): (-2034221056, 34),
+    (("pushIn", "lightByBackground", "lightByGray"), "smallSquare",
+     "smallSquare", "overlaps", True): (-2033696768, 162),
     (("pushIn", "lightByBackground", "lightByGray"), "roundRect", "roundedRect",
      None, False): (-2046803968, 164),
     (("changeContents", "doesNotDimImage", "lightByContents"), "check",
@@ -2380,10 +2384,12 @@ def _image_ref(b, name, where):
         o.add("NSCatalogName", *b.ref(b.string("system")))
     o.add("IBNamespaceID", *b.ref(b.string("system")) if system else (N.NIL, None))
     size = "{%s, %s}" % (el.get("width", "0"), el.get("height", "0")) if el is not None else None
-    if name == "NSActionTemplate":
-        # probe DinosaursWindow [340]: the declared 20x20 archives as the
-        # template's intrinsic 19x19
-        size = "{19, 19}"
+    INTRINSIC = {"NSActionTemplate": "{19, 19}",  # probe DinosaursWindow [340]
+                 "NSRemoveTemplate": "{18, 4}",   # probe AccountsPreferencesView [18]
+                 "NSAddTemplate": "{18, 16}"}     # probe AccountsPreferencesView [107]
+    if name in INTRINSIC:
+        # declared sizes archive as the template's intrinsic size
+        size = INTRINSIC[name]
     elif el is not None and el.get("catalog") == "system":
         # probe CurrentActivity circle [198]: declared 15x15 archives as the
         # symbol's intrinsic 32x32
@@ -2727,11 +2733,11 @@ def _scroll_view(b, el, where, superview, id_map, parent=None):
     if not nil_bg:
         if bg_el is not None:
             cv.add("NSBGColor", *b.ref(_color_ref(b, bg_el, where)))
-        elif is_table:
+        else:
+            # golden ActivityLog/ErrorLog [21]: non-table clipViews without
+            # an explicit backgroundColor archive controlBackgroundColor too
             cv.add("NSBGColor",
                    *b.ref(b.catalog_color("System", "controlBackgroundColor", where)))
-        else:
-            raise I.XibError(f"clipView backgroundColor missing ({where})")
     if not is_table:
         cv.add("NSCursor", *b.ref(_cursor(b, "{1, -1}", 0)))
     if cv_flags:
@@ -3016,15 +3022,24 @@ def _button_cell(b, el, control, where):
         flags2 = TEXT_ALIGN[el.get("alignment", "natural")] << 26
     else:
         flags = 0x4000000
-        flags2 = TEXT_ALIGN[el.get("alignment", "center")] << 26
+        if btype == "smallSquare" and el.get("image"):
+            # probe AccountsPreferencesView [14] remove/-106 add: pinned
+            # words (enabled=NO is confounded with imagePosition; corpus
+            # has remove=enabled-NO -> -1543503808, add -> -2080374720)
+            flags = (-1543503808 if el.get("imagePosition") == "overlaps"
+                     else -2080374720)
+            flags2 = 134219776  # center<<26 | 0x180
+        else:
+            flags2 = TEXT_ALIGN[el.get("alignment", "center")] << 26
     o.add("NSCellFlags", *int_fit(_i32(flags)))
     o.add("NSCellFlags2", *int_fit(_i32(flags2)))
     o.add("NSContents", *b.ref(_localizable(b, el.get("id") or "",
                                             el.get("title", ""), where)))
     fd = el.find("font[@key='font']")
-    if fd is None:
-        raise I.XibError(f"<buttonCell> without <font> ({where})")
-    o.add("NSSupport", *b.ref(b.font(fd, where)))
+    # probe AccountsPreferencesView [16]: font-less buttonCells archive the
+    # plain system font .AppleSystemUIFont 13/1044
+    o.add("NSSupport", *b.ref(b.font(fd, where) if fd is not None
+                              else _plain_system_font(b, 13, 1044)))
     o.add("NSControlView", *b.ref(control))
     if btype not in BUTTON_TYPE:
         raise I.XibError(f"button type {btype!r} not probed ({where})")
@@ -3081,6 +3096,7 @@ MENU_MOD_BITS = {"option": 524288, "shift": 131072, "control": 262144}
 TABLE_TVFLAGS = {
     (("allowsExpansionToolTips", "YES"), ("autosaveColumns", "NO"), ("columnAutoresizingStyle", "lastColumnOnly"), ("columnReordering", "NO"), ("columnResizing", "NO"), ("rowHeight", "96"), ("typeSelect", "NO"), ("verticalHuggingPriority", "750"), ("viewBased", "YES")): 438304768,  # TimelineTableView (tableView)
     (("allowsExpansionToolTips", "YES"), ("alternatingRowBackgroundColors", "YES"), ("autosaveColumns", "NO"), ("columnAutoresizingStyle", "firstColumnOnly"), ("columnReordering", "NO"), ("rowHeight", "24"), ("rowSizeStyle", "medium"), ("tableStyle", "inset"), ("verticalHuggingPriority", "750"), ("viewBased", "YES")): 1522532352,  # DinosaursWindow (tableView)
+    (("allowsExpansionToolTips", "YES"), ("autosaveColumns", "NO"), ("columnAutoresizingStyle", "lastColumnOnly"), ("columnReordering", "NO"), ("columnResizing", "NO"), ("columnSelection", "YES"), ("multipleSelection", "NO"), ("rowHeight", "24"), ("tableStyle", "fullWidth"), ("verticalHuggingPriority", "750"), ("viewBased", "YES")): 371195904,  # AccountsPreferencesView (tableView)
     (("allowsExpansionToolTips", "YES"), ("alternatingRowBackgroundColors", "YES"), ("autosaveColumns", "NO"), ("columnAutoresizingStyle", "lastColumnOnly"), ("columnReordering", "NO"), ("multipleSelection", "NO"), ("rowHeight", "24"), ("rowSizeStyle", "medium"), ("tableStyle", "inset"), ("typeSelect", "NO"), ("verticalHuggingPriority", "750"), ("viewBased", "YES")): 1388314624,  # CurrentActivityWindow (tableView)
     (("allowsExpansionToolTips", "YES"), ("alternatingRowBackgroundColors", "YES"), ("autosaveName", "AccountStatsTable"), ("columnAutoresizingStyle", "firstColumnOnly"), ("multipleSelection", "NO"), ("rowHeight", "24"), ("rowSizeStyle", "medium"), ("tableStyle", "inset"), ("verticalHuggingPriority", "750"), ("viewBased", "YES")): 3552575488,  # AccountStatsWindow (tableView)
     (("allowsExpansionToolTips", "YES"), ("autosaveColumns", "NO"), ("columnAutoresizingStyle", "firstColumnOnly"), ("columnReordering", "NO"), ("columnResizing", "NO"), ("floatsGroupRows", "NO"), ("indentationPerLevel", "13"), ("rowHeight", "40"), ("rowSizeStyle", "systemDefault"), ("selectionHighlightStyle", "sourceList"), ("typeSelect", "NO"), ("verticalHuggingPriority", "750"), ("viewBased", "YES")): 440401920,  # SidebarView (outlineView)
@@ -3792,9 +3808,11 @@ def _table_view(b, el, where, superview, id_map, parent=None):
             raise I.XibError("selectionHighlightStyle not probed")
         o.add("NSTableViewSelectionHighlightStyle", *b.int8(1))
     if el.get("tableStyle"):
-        if el.get("tableStyle") != "inset":
+        if el.get("tableStyle") not in ("inset", "fullWidth"):
             raise I.XibError("tableStyle not probed")
-        o.add("NSTableViewStyle", *b.int8(2))
+        # probe AccountsPreferencesView [31]: fullWidth archives 1, inset 2
+        o.add("NSTableViewStyle",
+              *b.int8(2 if el.get("tableStyle") == "inset" else 1))
     o.add("NSTableViewDraggingDestinationStyle",
           *b.int8(1 if el.get("selectionHighlightStyle") == "sourceList" else 0))
     protos = []
