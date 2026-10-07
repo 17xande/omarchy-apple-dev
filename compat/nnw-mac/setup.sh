@@ -104,7 +104,8 @@ s = open(p, encoding="utf-8").read()
 for name in ("WebViewWindow", "IndeterminateProgressWindow"):
     line = f'.process("Resources/{name}.xib")'
     if line in s:
-        s = s.replace(f"				{line},\n", "").replace(f"\t\t\t\t{line},\n", "")
+        # Drop the line plus its indentation and trailing comma/newline.
+        s = re.sub(rf"^[ \t]*{re.escape(line)},?\n", "", s, flags=re.M)
         print(f"warning: RSCore: excluded AppKit xib {name}.xib "
               "(Linux ibtool cannot compile it; the window will be missing)")
 open(p, "w").write(s)
