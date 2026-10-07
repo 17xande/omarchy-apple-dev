@@ -860,7 +860,11 @@ def _cell(b, el, control, where, owner_id=None, cell_cls="NSTextFieldCell"):
     if el.get("usesSingleLineMode") == "YES":
         flags2 |= 0x40
     if el.get("editable") == "YES":
-        flags |= 0x90000000 | 0x400000
+        flags |= 0x10000000 | 0x400000
+        # probe AddLocal/Feedbin/ReaderAPI (no state attr: 0x14700041) vs
+        # RenameSheet/ShareVC (state="on": +0x80000000)
+        if el.get("state") == "on":
+            flags |= 0x80000000
         # probe AddFeedSheet/FeedInspector vs RenameSheet/AddFolder: the 0x400
         # flags2 bit only joins editable when the cell is also scrollable
         if el.get("scrollable") == "YES":
@@ -1001,7 +1005,8 @@ def _view(b, el, where, superview=None, id_map=None, guides=None, parent=None,
     (probe-ordered), layout guides, IB guide placeholders."""
     guide_kinds = {}
     is_custom = el.tag == "customView" or el.get("customClass")
-    o = b.new("NSClassSwapper" if is_custom else "NSView")
+    o = b.new("NSStackView" if el.tag == "stackView"
+              else "NSClassSwapper" if is_custom else "NSView")
     if is_custom:
         # probe NNW3OpenPanelAccessoryView: bare <customView> (no customClass)
         # archives as NSClassSwapper with NSView/NSView; with customClass the
@@ -1110,6 +1115,62 @@ def _view(b, el, where, superview=None, id_map=None, guides=None, parent=None,
         o.add("IBNSSafeAreaLayoutGuide", *(N.NIL, None))
         o.add("IBNSLayoutMarginsGuide", *(N.NIL, None))
     o.add("IBNSClipsToBounds", *b.int8(0))
+    if el.tag == "stackView":
+        # probe AccountsAddLocal [55]/[57] (empty stacks), ShareViewController
+        # [11] (arranged subviews + NSStackViewBeginningContainer)
+        align = el.get("alignment")
+        stack_align = {"bottom": 4, "centerY": 10, "firstBaseline": 12}.get(align)
+        if stack_align is None:
+            raise I.XibError(f"stackView alignment {align!r} not probed ({where})")
+        if el.get("orientation") not in ("horizontal", "vertical"):
+            raise I.XibError(f"stackView orientation {el.get('orientation')!r} "
+                             f"not probed ({where})")
+        if el.get("distribution", "fill") != "fill":
+            raise I.XibError(f"stackView distribution "
+                             f"{el.get('distribution')!r} not probed ({where})")
+        o.add("NSStackViewOrientation",
+              *b.int8(0 if el.get("orientation") == "horizontal" else 1))
+        o.add("NSStackViewSecondaryAlignment",
+              *b.int8({"centerY": 3, "bottom": 4, "firstBaseline": 2}[align]))
+        o.add("NSStackViewAlignment", *b.int8(stack_align))
+        o.add("NSStackViewVerticalClippingResistance", *b.float32(
+            float(el.get("verticalCompressionResistancePriority", 1000))))
+        o.add("NSStackViewHorizontalClippingResistance", *b.float32(
+            float(el.get("horizontalCompressionResistancePriority", 1000))))
+        o.add("NSStackViewVerticalHugging", *b.float32(
+            float(el.get("verticalStackHuggingPriority", 250))))
+        o.add("NSStackViewHorizontalHugging", *b.float32(
+            float(el.get("horizontalStackHuggingPriority", 250))))
+        o.add("NSStackViewSpacing", *b.float32(float(el.get("spacing", 8))))
+        o.add("NSStackViewdistribution", *b.int8(0))
+        for edge in ("top", "left", "right", "bottom"):
+            o.add(f"NSStackViewEdgeInsets.{edge}", *b.float32(0.0))
+        if subs is not None:
+            # container allocated after the arranged subviews' subtrees and the
+            # stack frame string (golden ShareVC [61] after [60])
+            cont = b.new("NSStackViewContainer")
+            cont.add("NSNextResponder", *(N.NIL, None))
+            cont.add("NSNibTouchBar", *(N.NIL, None))
+            cont.add("NSvFlags", *b.int16(256))
+            cont.add("NSFrameSize", *b.ref(b.string("{0, 0}")))
+            cont.add("NSViewWantsBestResolutionOpenGLSurface", *b.boolean(False))
+            cont.add("NSDoNotTranslateAutoresizingMask", *b.boolean(False))
+            cont.add("IBNSSafeAreaLayoutGuide", *(N.NIL, None))
+            cont.add("IBNSLayoutMarginsGuide", *(N.NIL, None))
+            cont.add("IBNSClipsToBounds", *b.int8(0))
+            cont.add("NSStackViewContainerStackView", *b.ref(o))
+            cont.add("NSStackViewContainerViewToCustomAfterSpaceMap", *(N.NIL, None))
+            cont.add("NSStackViewContainerVisibilityPriorities", *(N.NIL, None))
+            ndv = b.new("NSMutableArray")
+            ndv.add("NSInlinedValue", *b.boolean(False))
+            cont.add("NSStackViewContainerNonDroppedViews", *b.ref(ndv))
+            for child in subs:
+                ndv.add("UINibEncoderEmptyKey", *b.ref(id_map[child.get("id")]))
+            o.add("NSStackViewBeginningContainer", *b.ref(cont))
+        # probe: xib detachesHiddenViews="YES" archives False (inverted)
+        o.add("NSStackViewDetachesHiddenViews",
+              *b.boolean(el.get("detachesHiddenViews") != "YES"))
+        o.add("NSStackViewHasFlatViewHierarchy", *b.boolean(False))
     return o, keys
 
 
@@ -1918,8 +1979,10 @@ def _key_equivalent(b, cell_el, where):
     s = cell_el.find("string[@key='keyEquivalent']")
     if s is None or not (s.text or "").strip():
         return b.string("")
-    import base64
-    raw = base64.b64decode(s.text.strip() + "=" * (-len(s.text.strip()) % 4))
+    raw = s.text.strip().encode("utf-8")
+    if s.get("base64-UTF8") == "YES":
+        import base64
+        raw = base64.b64decode(s.text.strip() + "=" * (-len(s.text.strip()) % 4))
     o = b.new("NSString")
     o.add("NS.bytes", N.DATA, raw)
     return o
@@ -2405,6 +2468,20 @@ def _button(b, el, where, superview, id_map, parent=None):
     o.add("NSViewWantsBestResolutionOpenGLSurface", *b.boolean(False))
     if _translates(el):
         o.add("NSDoNotTranslateAutoresizingMask", *b.boolean(False))
+    # probe AccountsAddLocal Create button [59]: own <constraints> archive as
+    # NSViewConstraints after NSDoNotTranslate, allocated before the cell
+    cons_el = el.find("constraints")
+    cons = []
+    if cons_el is not None and cons_el.findall("constraint"):
+        carr = b.new("NSArray")
+        carr.add("NSInlinedValue", *b.boolean(False))
+        els = I._constraint_order(el, cons_el.findall("constraint"), where, mac=True)
+        for c in els:
+            con = _constraint(b, c, o, el.get("id"), id_map, {}, {}, where)
+            carr.add("UINibEncoderEmptyKey", *b.ref(con))
+            cons.append(con)
+        b.cons_order[el.get("id")] = [c.get("id") for c in els]
+        o.add("NSViewConstraints", *b.ref(carr))
     cell_el = el.find("buttonCell[@key='cell']")
     if cell_el is None:
         raise I.XibError(f"<button> without buttonCell ({where})")
@@ -2466,7 +2543,7 @@ def _button(b, el, where, superview, id_map, parent=None):
     o.add("NSControlWritingDirection", N.INT64, -1)
     o.add("NSControlSendActionMask", *b.int8(4))
     o.add("IBNSShadowedSymbolConfiguration", *(N.NIL, None))
-    return o, [(o, parent), (cell, o)]
+    return o, [(o, parent)] + [(con, o) for con in cons] + [(cell, o)]
 
 
 def _button_cell(b, el, control, where):
