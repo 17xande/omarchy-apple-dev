@@ -77,7 +77,8 @@ CONTENT_MODES = {"scaleToFill": 0, "center": 4, "left": 7, "scaleAspectFit": 1,
 # NSLayoutAttribute as Apple encodes it (standard order shifted by one).
 ATTRIBUTES = {"left": 1, "right": 2, "top": 3, "bottom": 4, "leading": 5,
               "trailing": 6, "width": 7, "height": 8, "centerX": 9,
-              "centerY": 10, "baseline": 11}
+              "centerY": 10, "baseline": 11, "firstBaseline": 12,
+              "lastBaseline": 11}
 MARGIN_V2 = {"topMargin": 15, "bottomMargin": 16, "leadingMargin": 17,
              "trailingMargin": 18}
 MARGIN_BASE = {"topMargin": "top", "bottomMargin": "bottom",
@@ -1378,7 +1379,7 @@ OTHER_ORDER = ("centerX", "trailing", "leading", "centerY", "bottom", "top", "wi
 # macOS groups by the item's subview index (not frame distance), orders
 # owner-branch ties by relation, and knows baseline (probe RenameSheet).
 MAC_OTHER_ORDER = ("centerX", "trailing", "leading", "centerY", "bottom", "top",
-                   "baseline", "width", "height")
+                   "baseline", "firstBaseline", "width", "height")
 RELATION_ORDER = {"lessThanOrEqual": 0, "greaterThanOrEqual": 1, "equal": 2}
 
 

@@ -207,14 +207,22 @@ LINE_BREAK = {"wordWrap": 0, "charWrap": 1, "clipping": 2, "truncatingHead": 3,
 LINE_BREAK_FLAGS2 = {"wordWrap": 0, "charWrap": 0x200, "clipping": 0x400,
                      "truncatingHead": 0xC00, "truncatingTail": 0x800,
                      "truncatingMiddle": 0xA00}
-META_FONTS = {  # metaFont -> (NSSize, NSfFlags); NSName is the system UI font
+META_FONTS = {  # metaFont -> (NSSize, NSfFlags); probed names and flags
     "system": (13.0, 1044), "smallSystem": (11.0, 3100),
-    "miniSystem": (9.0, 3100), "boldSystem": (13.0, 4148),
+    "miniSystem": (9.0, 3100), "boldSystem": (13.0, 2072),
     "smallBoldSystem": (11.0, 6204), "label": (10.0, 3100),
-    "toolTips": (11.0, 3100), "menu": (13.0, 1044), "message": (13.0, 1044),
+    "toolTips": (11.0, 3100), "menu": (13.0, 1558), "message": (13.0, 1044),
     "palette": (11.0, 3100), "titleBar": (13.0, 1044),
-    "systemDetail": (11.0, 3100),
+    "systemDetail": (11.0, 3100), "cellTitle": (11.0, 3100),
+    "systemBold": (13.0, 2072),
 }
+FONT_NAMES = {"system": ".AppleSystemUIFont", "smallSystem": ".AppleSystemUIFont",
+              "miniSystem": ".AppleSystemUIFont", "boldSystem": ".AppleSystemUIFontBold",
+              "smallBoldSystem": ".AppleSystemUIFontBold", "systemBold": ".AppleSystemUIFontBold",
+              "cellTitle": ".AppleSystemUIFontMedium", "menu": ".AppleSystemUIFont",
+              "message": ".AppleSystemUIFont", "palette": ".AppleSystemUIFont",
+              "label": ".AppleSystemUIFont", "toolTips": ".AppleSystemUIFont",
+              "titleBar": ".AppleSystemUIFont", "systemDetail": ".AppleSystemUIFont"}
 # System catalog colors resolve to Generic Gray Gamma 2.2 at compile time
 # (oracle probe, Xcode 27.0): name -> (NSWhite payload, NSComponents payload).
 CATALOG_COLORS = {
@@ -330,11 +338,13 @@ class MacBuilder(I.Builder):
             raise I.XibError(f"<font> metaFont {meta!r} not probed ({where})")
         if fd_el.get("size"):
             size = float(fd_el.get("size"))
+        if meta not in FONT_NAMES:
+            raise I.XibError(f"<font> metaFont {meta!r} not probed ({where})")
         key = (meta, size)
         if key in self.fonts:
             return self.fonts[key]
         o = self.new("NSFont")
-        o.add("NSName", *self.ref(self.string(".AppleSystemUIFont")))
+        o.add("NSName", *self.ref(self.string(FONT_NAMES[meta])))
         o.add("NSSize", *self.float64(size))
         o.add("NSfFlags", N.INT16, flags)
         self.fonts[key] = o
@@ -401,7 +411,7 @@ def _custom_object(b, el, class_name, where):
     return o
 
 
-def _vflags(el, where):
+def _vflags(el, where, solved=False):
     translates = el.get("translatesAutoresizingMaskIntoConstraints") == "NO"
     if translates:
         v = 268
@@ -412,6 +422,10 @@ def _vflags(el, where):
             for flag, bit in I.RESIZE_FLAGS.items():
                 if m.get(flag) == "YES":
                     v |= bit
+    if solved:
+        # the canvas solves the content view to fill the window (probe
+        # ImportOPMLSheet: width/height stretch bits despite the stale rect)
+        v = 256 | I.RESIZE_FLAGS["widthSizable"] | I.RESIZE_FLAGS["heightSizable"]
     hidden = el.get("hidden") == "YES"
     if hidden:
         v |= 0x80000000
@@ -584,7 +598,10 @@ def _field(b, el, where, superview, id_map, parent=None):
     o.add("NSCell", *b.ref(cell))
     id_map[el.get("id") + "#cell"] = cell
     o.add("NSAllowsLogicalLayoutDirection",
-          *b.boolean(el.get("horizontalHuggingPriority") is not None))
+          *b.boolean(el.get("horizontalHuggingPriority") is not None
+                     or cell_el.get("scrollable") == "YES"
+                     or (cell_el.get("selectable") == "YES"
+                         and el.get("editable") is None)))
     o.add("NSControlSize", *b.int8(0))
     o.add("NSControlContinuous", *b.boolean(True))
     o.add("NSControlRefusesFirstResponder", *b.boolean(True))
@@ -626,7 +643,7 @@ def _view(b, el, where, superview=None, id_map=None, guides=None, parent=None):
         o.add("NSOriginalClassName", *b.ref(b.string("NSView")))
     o.add("NSNextResponder", *(b.ref(superview) if superview is not None else (N.NIL, None)))
     o.add("NSNibTouchBar", *(N.NIL, None))
-    v, vt = _vflags(el, where)
+    v, vt = _vflags(el, where, solved=getattr(b, "cv_solved", False))
     o.add("NSvFlags", vt, v)
     id_map[el.get("id")] = o
     keys = [(o, parent)]
@@ -652,12 +669,25 @@ def _view(b, el, where, superview=None, id_map=None, guides=None, parent=None):
         r = getattr(b, "cv_rect", None)
         if r is not None:
             cr = getattr(b, "cv_content_rect", None)
-            if cr and (float(r.get("width")), float(r.get("height"))) == cr:
+            wants = getattr(b, "cv_wants_layer", False)
+            rw, rh = float(r.get("width")), float(r.get("height"))
+            if cr is None:
                 o.add("NSFrameSize", *b.ref(b.string(_size_str(el))))
+            elif (rw, rh) == cr:
+                o.add("NSFrameSize", *b.ref(b.string(
+                    "{%s, %s}" % (_fmt_g(cr[0]), _fmt_g(cr[1])))))
+            elif rw == cr[0]:
+                # canvas with equal widths: frame shifted by the height delta
+                o.add("NSFrame", *b.ref(b.string(
+                    "{{0, %s}, {%s, %s}}" % (_fmt_g(cr[1] - rh),
+                                             _fmt_g(cr[0]), _fmt_g(rh)))))
+            elif rh == cr[1]:
+                o.add("NSFrameSize", *b.ref(b.string(
+                    "{%s, %s}" % (_fmt_g(rw), _fmt_g(cr[1])))))
             else:
-                # constraint-solved canvas frame: stale xib rects differ here
-                o.add("NSFrame", *b.ref(b.string(_rect(el, "frame", where))))
-            if getattr(b, "cv_wants_layer", False):
+                o.add("NSFrameSize", *b.ref(b.string(
+                    "{%s, %s}" % (_fmt_g(cr[0]), _fmt_g(cr[1])))))
+            if wants:
                 o.add("NSViewIsLayerTreeHost", *b.boolean(False))
         else:
             o.add("NSFrameSize", *b.ref(b.string(_size_str(el))))
@@ -732,6 +762,8 @@ def _build_element(b, el, where, superview, id_map, guides, parent=None):
                      guides=guides, parent=parent)
     if el.tag == "button":
         return _button(b, el, where, superview, id_map, parent=parent)
+    if el.tag == "popUpButton":
+        return _popup(b, el, where, superview, id_map, parent=parent)
     if el.tag == "window":
         return _window(b, el, where, id_map, parent=parent)
     raise I.XibError(f"unsupported element <{el.tag}> ({where})")
@@ -788,10 +820,14 @@ def _window(b, el, where, id_map, parent=None):
         b.cv_rect = cv.find("rect[@key='frame']")
         cr = el.find("rect[@key='contentRect']")
         b.cv_content_rect = (float(cr.get("width")), float(cr.get("height"))) if cr is not None else None
+        r0 = cv.find("rect[@key='frame']")
+        b.cv_solved = (cr is not None and r0 is not None
+                       and (float(r0.get("width")), float(r0.get("height"))) != b.cv_content_rect)
         b.cv_wants_layer = cv.get("wantsLayer") == "YES"
-        _cv, cv_pairs = _build_element(b, cv, where, superview=None,
-                                       id_map=id_map, guides={}, parent=o)
-        o.add("NSWindowView", *b.ref(_cv))
+        _cv_obj, cv_pairs = _build_element(b, cv, where, superview=None,
+                                           id_map=id_map, guides={}, parent=o)
+        b.cv_solved = False
+        o.add("NSWindowView", *b.ref(_cv_obj))
     else:
         b.cv_rect = None
         cv_pairs = []
@@ -839,6 +875,9 @@ def _conn_blocks(objects_el):
         for c in el.findall("connections"):
             for conn in c:
                 pairs.append((el, conn))
+        for tag in ("buttonCell", "popUpButtonCell"):
+            for cell in el.findall(f"{tag}[@key='cell']"):
+                walk(cell)
         cv = el.find("view[@key='contentView']")
         if cv is not None:
             walk(cv)
@@ -929,7 +968,7 @@ def compile_xib(path):
         dest_id = conn_el.get("destination")
         if dest_id not in id_map:
             el = _find_id(objects, dest_id)
-            if el is None or el.tag not in ("window", "view", "customView", "textField", "button"):
+            if el is None or el.tag not in ("window", "view", "customView", "textField", "button", "popUpButton"):
                 raise I.XibError(f"connection destination {dest_id!r} not found ({where})")
             parent_el = _find_parent(objects, dest_id)
             if parent_el is not None:
@@ -970,6 +1009,14 @@ def compile_xib(path):
         keys.append((obj, parent))
         if el.tag in ("textField", "button"):
             keys.append((id_map[el.get("id") + "#cell"], obj))
+        if el.tag == "popUpButton":
+            cell_el = el.find("popUpButtonCell[@key='cell']")
+            menu_el = cell_el.find("menu[@key='menu']")
+            # cell -> popup, menu -> cell, items -> menu (probe ImportOPMLSheet)
+            keys.append((id_map[el.get("id") + "#cell"], obj))
+            keys.append((id_map[menu_el.get("id")], id_map[cell_el.get("id")]))
+            for m in menu_el.find("items"):
+                keys.append((id_map[m.get("id")], id_map[menu_el.get("id")]))
         cv = el.find("view[@key='contentView']")
         if cv is not None:
             collect(cv, obj)
@@ -1121,14 +1168,13 @@ def _button(b, el, where, superview, id_map, parent=None):
     if el.get("translatesAutoresizingMaskIntoConstraints") == "NO":
         o.add("NSDoNotTranslateAutoresizingMask", *b.boolean(False))
     h, v2 = el.get("horizontalHuggingPriority"), el.get("verticalHuggingPriority")
-    if (h is not None and h != "750") or (v2 is not None and v2 != "750"):
-        o.add("NSHuggingPriority",
-              *b.ref(b.string("{%s, %s}" % (_fmt_g(h or 750), _fmt_g(v2 or 750)))))
+    if h is not None and v2 is not None:
+        o.add("NSHuggingPriority", *b.ref(b.string("{%s, %s}" % (_fmt_g(h), _fmt_g(v2)))))
     h, v2 = (el.get("horizontalCompressionResistancePriority"),
              el.get("verticalCompressionResistancePriority"))
-    if (h is not None and h != "750") or (v2 is not None and v2 != "750"):
+    if h is not None and v2 is not None:
         o.add("NSAntiCompressionPriority",
-              *b.ref(b.string("{%s, %s}" % (_fmt_g(h or 750), _fmt_g(v2 or 750)))))
+              *b.ref(b.string("{%s, %s}" % (_fmt_g(h), _fmt_g(v2)))))
     o.add("IBNSSafeAreaLayoutGuide", *(N.NIL, None))
     o.add("IBNSLayoutMarginsGuide", *(N.NIL, None))
     o.add("IBNSClipsToBounds", *b.int8(0))
@@ -1139,7 +1185,8 @@ def _button(b, el, where, superview, id_map, parent=None):
     cell = _button_cell(b, cell_el, o, where)
     o.add("NSCell", *b.ref(cell))
     id_map[el.get("id") + "#cell"] = cell
-    o.add("NSAllowsLogicalLayoutDirection", *b.boolean(False))
+    id_map[cell_el.get("id")] = cell
+    o.add("NSAllowsLogicalLayoutDirection", *b.boolean(True))
     o.add("NSControlSize", *b.int8(0))
     o.add("NSControlContinuous", *b.boolean(True))
     o.add("NSControlRefusesFirstResponder", *b.boolean(True))
@@ -1192,4 +1239,157 @@ def _button_cell(b, el, control, where):
     o.add("NSPeriodicDelay", N.INT16, 400)
     o.add("NSPeriodicInterval", *b.int8(75))
     o.add("NSAuxButtonType", *b.int8(BUTTON_TYPE[btype]))
+    return o
+
+
+MENU_CHECKMARK = {"on": ("NSMenuCheckmark", "{18, 16}"), None: ("NSMenuCheckmark", "{18, 16}")}
+MENU_MIXED = ("NSMenuMixedState", "{18, 4}")
+
+
+def _custom_image_resource(b, name, size, where):
+    key = (name, size)
+    if key in b.images:
+        return b.images[key]
+    o = b.new("NSCustomResource")
+    o.add("NSClassName", *b.ref(b.string("NSImage")))
+    o.add("NSResourceName", *b.ref(b.string(name)))
+    o.add("IBNamespaceID", *(N.NIL, None))
+    val = b.new("NSValue")
+    val.add("NS.special", *b.int8(2))
+    val.add("NS.sizeval", *b.ref(b.string(size)))
+    o.add("IBDesignSize", *b.ref(val))
+    o.add("IBDesignImageConfiguration", *(N.NIL, None))
+    b.images[key] = o
+    return o
+
+
+def _menu_item(b, item_el, menu, cell, where, localize_owner):
+    o = b.new("NSMenuItem")
+    o.add("NSMenu", *b.ref(menu if menu is not None else _Late()))
+    o.add("NSAllowsKeyEquivalentLocalization", *b.boolean(False))
+    o.add("NSAllowsKeyEquivalentMirroring", *b.boolean(False))
+    o.add("NSTitle", *b.ref(_localizable(b, localize_owner or item_el.get("id") or "",
+                                         item_el.get("title", ""), where)))
+    o.add("NSKeyEquiv", *b.ref(b.string("")))
+    o.add("NSKeyEquivModMask", N.INT32, 1048576)
+    o.add("NSMnemonicLoc", N.INT32, 2147483647)
+    if item_el.get("state") == "on":
+        o.add("NSState", *b.int8(1))
+    on_name, on_size = MENU_CHECKMARK[item_el.get("state") if item_el.get("state") == "on" else None]
+    o.add("NSOnImage", *b.ref(_custom_image_resource(b, on_name, on_size, where)))
+    o.add("NSMixedImage", *b.ref(_custom_image_resource(b, MENU_MIXED[0], MENU_MIXED[1], where)))
+    o.add("NSAction", *b.ref(b.string("_popUpItemAction:")))
+    o.add("NSTarget", *b.ref(cell))
+    o.add("NSHiddenInRepresentation", *b.boolean(True))
+    return o
+
+
+def _popup(b, el, where, superview, id_map, parent=None):
+    """<popUpButton> -> NSPopUpButton + NSPopUpButtonCell + NSMenu (probe ImportOPMLSheet)."""
+    o = b.new("NSPopUpButton")
+    o.add("NSNextResponder", *(b.ref(superview) if superview is not None else (N.NIL, None)))
+    o.add("NSNibTouchBar", *(N.NIL, None))
+    v, vt = _vflags(el, where)
+    o.add("NSvFlags", vt, v)
+    id_map[el.get("id")] = o
+    o.add("NSFrame", *b.ref(b.string(_rect(el, "frame", where))))
+    if superview is not None:
+        o.add("NSSuperview", *b.ref(superview))
+    o.add("NSViewWantsBestResolutionOpenGLSurface", *b.boolean(False))
+    if el.get("translatesAutoresizingMaskIntoConstraints") == "NO":
+        o.add("NSDoNotTranslateAutoresizingMask", *b.boolean(False))
+    h, v2 = el.get("horizontalHuggingPriority"), el.get("verticalHuggingPriority")
+    if (h is not None and h != "750") or (v2 is not None and v2 != "750"):
+        o.add("NSHuggingPriority",
+              *b.ref(b.string("{%s, %s}" % (_fmt_g(h or 750), _fmt_g(v2 or 750)))))
+    o.add("IBNSSafeAreaLayoutGuide", *(N.NIL, None))
+    o.add("IBNSLayoutMarginsGuide", *(N.NIL, None))
+    o.add("IBNSClipsToBounds", *b.int8(0))
+    o.add("NSEnabled", *b.boolean(False))
+    cell_el = el.find("popUpButtonCell[@key='cell']")
+    if cell_el is None:
+        raise I.XibError(f"<popUpButton> without popUpButtonCell ({where})")
+    cell = _popup_cell(b, cell_el, o, where, id_map)
+    o.add("NSCell", *b.ref(cell))
+    id_map[cell_el.get("id")] = cell
+    id_map[el.get("id") + "#cell"] = cell
+    o.add("NSAllowsLogicalLayoutDirection", *b.boolean(True))
+    o.add("NSControlSize", *b.int8(0))
+    o.add("NSControlContinuous", *b.boolean(True))
+    o.add("NSControlRefusesFirstResponder", *b.boolean(True))
+    o.add("NSControlUsesSingleLineMode",
+          *b.boolean(cell_el.get("usesSingleLineMode") != "YES"))
+    align = cell_el.get("alignment", "left")
+    if align not in CONTROL_ALIGN:
+        raise I.XibError(f"alignment {align!r} not probed ({where})")
+    o.add("NSControlTextAlignment", *b.int8(CONTROL_ALIGN[align]))
+    lb = cell_el.get("lineBreakMode", "wordWrap")
+    if lb not in LINE_BREAK:
+        raise I.XibError(f"lineBreakMode {lb!r} not probed ({where})")
+    o.add("NSControlLineBreakMode", *b.int8(LINE_BREAK[lb]))
+    o.add("NSControlWritingDirection", N.INT64, -1)
+    o.add("NSControlSendActionMask", *b.int8(4))
+    o.add("IBNSShadowedSymbolConfiguration", *(N.NIL, None))
+    return o, [(o, parent), (cell, o)]
+
+
+def _popup_cell(b, el, control, where, id_map):
+    o = b.new("NSPopUpButtonCell")
+    o.add("NSCellFlags", N.INT64, -2076180416)
+    lb = el.get("lineBreakMode", "wordWrap")
+    if lb not in LINE_BREAK:
+        raise I.XibError(f"lineBreakMode {lb!r} not probed ({where})")
+    o.add("NSCellFlags2", N.INT16, LINE_BREAK_FLAGS2[lb])
+    menu_el = el.find("menu[@key='menu']")
+    if menu_el is None:
+        raise I.XibError(f"<popUpButtonCell> without menu ({where})")
+    items = menu_el.find("items")
+    if items is None:
+        raise I.XibError(f"<menu> without items ({where})")
+    sel_id = el.get("selectedItem")
+    sel_el = next((m for m in items if m.get("id") == sel_id), items[0] if len(items) else None)
+    sel_title = sel_el.get("title", "") if sel_el is not None else ""
+    o.add("NSContents", *b.ref(_localizable(b, sel_el.get("id") if sel_el is not None else "",
+                                            sel_title, where)))
+    fd = el.find("font[@key='font']")
+    if fd is None:
+        raise I.XibError(f"<popUpButtonCell> without <font> ({where})")
+    o.add("NSSupport", *b.ref(b.font(fd, where)))
+    o.add("NSControlView", *b.ref(control))
+    o.add("NSButtonFlags", N.INT32, 109068288)
+    o.add("NSButtonFlags2", N.INT16, 129)
+    o.add("NSBezelStyle", *b.int8(1))
+    o.add("NSAlternateContents", *b.ref(b.string("")))
+    o.add("NSKeyEquivalent", *b.ref(b.string("")))
+    o.add("NSPeriodicDelay", N.INT16, 400)
+    o.add("NSPeriodicInterval", *b.int8(75))
+    o.add("NSAuxButtonType", *b.int8(0))
+    if sel_el is None:
+        raise I.XibError(f"<popUpButtonCell> without items ({where})")
+    late_menu = _Late()
+    sel = _menu_item(b, sel_el, late_menu, o, where, el.get("id"))
+    o.add("NSMenuItem", *b.ref(sel))
+    o.add("NSMenuItemRespectAlignment", *b.boolean(False))
+    menu = b.new("NSMenu")
+    late_menu.obj = menu
+    o.add("NSMenu", *b.ref(menu))
+    id_map[menu_el.get("id")] = menu
+    id_map[sel_el.get("id")] = sel
+    o.add("NSPreferredEdge", *b.int8(1))
+    o.add("NSUsesItemFromMenu", *b.boolean(False))
+    o.add("NSAltersState", *b.boolean(False))
+    o.add("NSArrowPosition", *b.int8(2))
+    # menu shell + remaining items in document order (probe ImportOPMLSheet)
+    menu.add("NSTitle", *b.ref(b.string("")))
+    iarr = b.new("NSMutableArray")
+    iarr.add("NSInlinedValue", *b.boolean(False))
+    menu.add("NSMenuItems", *b.ref(iarr))
+    b.images = getattr(b, "images", {})
+    for m in items:
+        if m is sel_el:
+            iarr.add("UINibEncoderEmptyKey", *b.ref(sel))
+            continue
+        item = _menu_item(b, m, menu, o, where, el.get("id"))
+        id_map[m.get("id")] = item
+        iarr.add("UINibEncoderEmptyKey", *b.ref(item))
     return o
