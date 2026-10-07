@@ -371,6 +371,7 @@ CATALOG_COLORS = {
     "separatorColor": (b"0.874618\00", b"0.874618 1"),
     "gridColor": (b"0.8 got\00", b"0.8 1"),
     "headerTextColor": (b"0\x00", b"0 1"),
+    "headerColor": (b"1\x00", b"1 1"),
     "highlightColor": (b"0.8470830959\x00", b"0.733333 0.827451 0.898039 1"),
     "selectedMenuItemTextColor": (b"1\x00", b"1 1"),
     "selectedContentBackgroundColor": (b"0.2826356863\x00", b"0.258824 0.513725 0.870588 1"),
@@ -1081,6 +1082,45 @@ def _size_str(el):
     return "{%s, %s}" % (_fmt_g(r.get("width")), _fmt_g(r.get("height")))
 
 
+def _table_cell_view(b, el, where, superview, id_map, parent=None):
+    """<tableCellView> prototype: NSTableCellView, swapper when customClass
+    (probe golden SidebarCell: NSOriginalClassName NSTableCellView, no
+    NSSuperview key, NSReuseIdentifierKey from the identifier)."""
+    o = b.new("NSClassSwapper" if el.get("customClass") else "NSTableCellView")
+    if el.get("customClass"):
+        o.add("NSClassName", *b.ref(b.string(I._swift_class(el))))
+        o.add("NSOriginalClassName", *b.ref(b.string("NSTableCellView")))
+    o.add("NSNextResponder", *(b.ref(superview) if superview is not None else (N.NIL, None)))
+    o.add("NSNibTouchBar", *(N.NIL, None))
+    v, vt = _vflags(el, where)
+    o.add("NSvFlags", vt, v)
+    r = el.find("rect[@key='frame']")
+    if float(r.get("x", 0)) == 0 and float(r.get("y", 0)) == 0:
+        o.add("NSFrameSize", *b.ref(b.string(_size_str(el))))
+    else:
+        o.add("NSFrame", *b.ref(b.string(_rect(el, "frame", where))))
+    o.add("NSViewWantsBestResolutionOpenGLSurface", *b.boolean(False))
+    if el.get("identifier"):
+        o.add("NSReuseIdentifierKey", *b.ref(b.string(el.get("identifier"))))
+    o.add("IBNSSafeAreaLayoutGuide", *(N.NIL, None))
+    o.add("IBNSLayoutMarginsGuide", *(N.NIL, None))
+    o.add("IBNSClipsToBounds", *b.int8(0))
+    id_map[el.get("id")] = o
+    keys = [(o, parent)]
+    subs = el.find("subviews")
+    if subs is not None:
+        arr = b.new("NSMutableArray")
+        arr.add("NSInlinedValue", *b.boolean(False))
+        o.add("NSSubviews", *b.ref(arr))
+        guides = {}
+        for child in subs:
+            sub, sub_pairs = _build_element(b, child, where, superview=o,
+                                            id_map=id_map, guides=guides, parent=o)
+            arr.add("UINibEncoderEmptyKey", *b.ref(sub))
+            keys.extend(sub_pairs)
+    return o, keys
+
+
 def _build_element(b, el, where, superview, id_map, guides, parent=None, root=False):
     """One element: (obj, [(obj, parent)] pairs for NSObjectsKeys/Values)."""
     if el.tag == "textField":
@@ -1096,6 +1136,10 @@ def _build_element(b, el, where, superview, id_map, guides, parent=None, root=Fa
         return _image_view(b, el, where, superview, id_map, parent=parent)
     if el.tag == "scrollView":
         return _scroll_view(b, el, where, superview, id_map, parent=parent)
+    if el.tag in ("tableView", "outlineView"):
+        return _table_view(b, el, where, superview, id_map, parent=parent)
+    if el.tag == "tableCellView":
+        return _table_cell_view(b, el, where, superview, id_map, parent=parent)
     if el.tag == "textView":
         o = _text_view(b, el, where, superview)
         id_map[el.get("id")] = o
@@ -1244,10 +1288,15 @@ def _conn_blocks(objects_el):
         cv = el.find("view[@key='contentView']")
         if cv is not None:
             walk(cv)
+        clip = el.find("clipView[@key='contentView']")
+        if clip is not None:
+            walk(clip)
         subs = el.find("subviews")
         if subs is not None:
             for child in subs:
                 walk(child)
+        for pv in el.findall("prototypeCellViews/tableCellView"):
+            walk(pv)
 
     def walk_menu(el):
         for c in el.findall("connections"):
@@ -1264,7 +1313,8 @@ def _conn_blocks(objects_el):
     for el in objects_el:
         if el.tag == "menu":
             walk_menu(el)
-        elif el.tag in ("customObject", "window", "customView", "view"):
+        elif el.tag in ("customObject", "window", "customView", "view",
+                        "scrollView", "tableView", "outlineView"):
             walk(el)
     return pairs
 
@@ -1371,6 +1421,13 @@ def compile_xib(path):
             continue
         c = b.new("NSNibOutletConnector")
         src = id_map.get(src_el.get("id"))
+        if src is None and src_el.tag == "tableCellView":
+            # a prototype cell view referenced by its own outlet before the
+            # tree walk builds it (probe SidebarView HeaderCell textField)
+            src = _build_element(b, src_el, where, superview=None,
+                                 id_map=id_map, guides={}, parent=None)[0]
+        if src is None and src_el.tag == "menu":
+            src = _xib_menu(b, src_el, id_map, where)
         if src is None:
             raise I.XibError(f"connection source {src_el.get('id')!r} not built ({where})")
         c.add("NSSource", *b.ref(src))
@@ -1393,7 +1450,8 @@ def compile_xib(path):
                 id_map[dest_id] = _xib_swapper(b, el, where)
             elif el.tag in ("window", "view", "customView", "textField",
                             "button", "popUpButton", "imageView",
-                            "scrollView", "textView"):
+                            "scrollView", "textView", "tableView",
+                            "outlineView", "tableCellView"):
                 parent_el = _find_parent(objects, dest_id)
                 is_cv = any(w.find("view[@key='contentView']") is not None
                             and w.find("view[@key='contentView']").get("id") == dest_id
@@ -1453,6 +1511,31 @@ def compile_xib(path):
         cv = el.find("view[@key='contentView']")
         if cv is not None:
             collect(cv, obj)
+        if el.tag in ("tableView", "outlineView"):
+            cols = el.find("tableColumns")
+            for col_el in (cols if cols is not None else []):
+                cobj = id_map.get(col_el.get("id"))
+                if cobj is None:
+                    continue
+                keys.append((cobj, obj))
+                dc_el = col_el.find("textFieldCell[@key='dataCell']")
+                if dc_el is not None and dc_el.get("id") in id_map:
+                    keys.append((id_map[dc_el.get("id")], cobj))
+                pvs = col_el.find("prototypeCellViews")
+                for pv in (pvs if pvs is not None else []):
+                    pobj = id_map.get(pv.get("id"))
+                    if pobj is None:
+                        pobj = _build_element(b, pv, where, superview=None,
+                                              id_map=id_map, guides={},
+                                              parent=cobj)[0]
+                    keys.append((pobj, cobj))
+                    subs3 = pv.find("subviews")
+                    if subs3 is not None:
+                        for child in subs3:
+                            collect(child, pobj)
+                    for cid in b.cons_order.get(pv.get("id"), []):
+                        if cid in id_map:
+                            keys.append((id_map[cid], pobj))
         if el.tag == "scrollView":
             clip = el.find("clipView[@key='contentView']")
             if clip is not None:
@@ -1467,6 +1550,12 @@ def compile_xib(path):
                 s_el = el.find(f"scroller[@key='{k2}']")
                 if s_el is not None and s_el.get("id") in id_map:
                     keys.append((id_map[s_el.get("id")], obj))
+            subs2 = clip.find("subviews") if clip is not None else None
+            if subs2 is not None and len(subs2) == 1 \
+                    and subs2[0].tag in ("tableView", "outlineView"):
+                hv = subs2[0].find("tableHeaderView[@key='headerView']")
+                if hv is not None and hv.get("id") in id_map:
+                    keys.append((id_map[hv.get("id")], obj))
         subs = el.find("subviews")
         if subs is not None:
             for child in subs:
@@ -1541,8 +1630,33 @@ def compile_xib(path):
         oids_values_arr.add("UINibEncoderEmptyKey", *b.ref(numbers[-1]))
     access_conns = b.new("NSMutableArray")
     access_conns.add("NSInlinedValue", *b.boolean(False))
+    # <accessibility description=...> archives an NSNibAXAttributeConnector
+    # outside the main connection/oid arrays (probe SidebarView [214], oid N+1)
+    ax_objs = []
+    for tvel in objects.iter():
+        ax_el = tvel.find("accessibility[@description]")
+        if ax_el is None or tvel.get("id") not in id_map:
+            continue
+        c = b.new("NSNibAXAttributeConnector")
+        c.add("AXDestinationArchiveKey", *b.ref(id_map[tvel.get("id")]))
+        c.add("AXAttributeTypeArchiveKey", *b.ref(b.string("AXDescription")))
+        c.add("AXAttributeValueArchiveKey",
+              *b.ref(_localizable(b, tvel.get("id"), ax_el.get("description"),
+                                  where,
+                                  suffix=".ibExternalAccessibilityDescription")))
+        ax_objs.append(c)
+        access_conns.add("UINibEncoderEmptyKey", *b.ref(c))
     access_oids = b.new("NSArray")
     access_oids.add("NSInlinedValue", *b.boolean(False))
+    if ax_objs:
+        access_vals = b.new("NSArray")
+        access_vals.add("NSInlinedValue", *b.boolean(False))
+        for c in ax_objs:
+            access_oids.add("UINibEncoderEmptyKey", *b.ref(c))
+            access_vals.add("UINibEncoderEmptyKey",
+                            *b.ref(b.number(*int_fit(len(oids) + 1 + ax_objs.index(c)))))
+    else:
+        access_vals = access_oids
 
     ibd.add("NSRoot", *b.ref(owner))
     ibd.add("NSVisibleWindows", *b.ref(vis))
@@ -1553,7 +1667,7 @@ def compile_xib(path):
     ibd.add("NSOidsValues", *b.ref(oids_values_arr))
     ibd.add("NSAccessibilityConnectors", *b.ref(access_conns))
     ibd.add("NSAccessibilityOidsKeys", *b.ref(access_oids))
-    ibd.add("NSAccessibilityOidsValues", *b.ref(access_oids))
+    ibd.add("NSAccessibilityOidsValues", *b.ref(access_vals))
     for late in b.late:
         if late.obj is None:
             raise I.XibError(f"{path}: a forward reference was never filled")
@@ -1923,9 +2037,12 @@ def _scroll_view(b, el, where, superview, id_map, parent=None):
     if len(doc_els) != 1:
         raise I.XibError(f"<clipView> without exactly one subview ({where})")
     doc_el = doc_els[0]
+    is_table = doc_el.tag in ("tableView", "outlineView")
     if doc_el.tag == "textView":
         doc = _text_view(b, doc_el, where, cv)
         id_map[doc_el.get("id")] = doc
+    elif is_table:
+        doc, _doc_pairs = _table_view(b, doc_el, where, cv, id_map, parent=cv)
     else:
         raise I.XibError(f"clipView subview <{doc_el.tag}> not probed ({where})")
     arr.add("UINibEncoderEmptyKey", *b.ref(cv))
@@ -1933,6 +2050,12 @@ def _scroll_view(b, el, where, superview, id_map, parent=None):
     r = cv_el.find("rect[@key='frame']")
     cv.add("NSFrameSize", *b.ref(b.string("{%s, %s}" % (_fmt_g(r.get("width")),
                                                         _fmt_g(r.get("height"))))))
+    hv_el0 = doc_el.find("tableHeaderView[@key='headerView']") if is_table else None
+    if hv_el0 is not None:
+        cv.add("NSBounds", *b.ref(b.string(
+            "{{0, -%s}, {%s, %s}}" % (_fmt_g(hv_el0.find("rect[@key='frame']").get("height")),
+                                      _fmt_g(r.get("width")),
+                                      _fmt_g(r.get("height"))))))
     cv.add("NSSuperview", *b.ref(o))
     cv.add("NSNextKeyView", *b.ref(doc))
     cv.add("NSViewWantsBestResolutionOpenGLSurface", *b.boolean(False))
@@ -1940,9 +2063,45 @@ def _scroll_view(b, el, where, superview, id_map, parent=None):
     cv.add("IBNSLayoutMarginsGuide", *(N.NIL, None))
     cv.add("IBNSClipsToBounds", *b.int8(0))
     cv.add("NSDocView", *b.ref(doc))
-    cv.add("NSBGColor", *b.ref(_color_ref(b, cv_el.find("color[@key='backgroundColor']"),
-                                          where)))
-    cv.add("NSCursor", *b.ref(_cursor(b, "{1, -1}", 0)))
+    hv_el = doc_el.find("tableHeaderView[@key='headerView']") if is_table else None
+    if hv_el is not None:
+        hr = hv_el.find("rect[@key='frame']")
+        hclip = b.new("NSClipView")
+        hclip.add("NSNextResponder", *b.ref(o))
+        hclip.add("NSNibTouchBar", *(N.NIL, None))
+        hclip.add("NSvFlags", N.INT16, 256)
+        harr = b.new("NSMutableArray")
+        harr.add("NSInlinedValue", *b.boolean(False))
+        hclip.add("NSSubviews", *b.ref(harr))
+        hclip.add("NSFrameSize", *b.ref(b.string(
+            "{%s, %s}" % (_fmt_g(hr.get("width")), _fmt_g(hr.get("height"))))))
+        hclip.add("NSSuperview", *b.ref(o))
+        hclip.add("NSNextKeyView", *b.ref(id_map[hv_el.get("id")]))
+        hclip.add("NSViewWantsBestResolutionOpenGLSurface", *b.boolean(False))
+        hclip.add("IBNSSafeAreaLayoutGuide", *(N.NIL, None))
+        hclip.add("IBNSLayoutMarginsGuide", *(N.NIL, None))
+        hclip.add("IBNSClipsToBounds", *b.int8(0))
+        hclip.add("NSDocView", *b.ref(id_map[hv_el.get("id")]))
+        hclip.add("NSAutomaticallyAdjustsContentInsets", *b.boolean(False))
+        harr.add("UINibEncoderEmptyKey", *b.ref(id_map[hv_el.get("id")]))
+        # patch the header view's forward references to this clip
+        doc._hdr_late.obj = hclip
+    cv_flags = (0 if cv_el.get("drawsBackground") == "NO" else 4) \
+        + (2 if cv_el.get("copiesOnScroll") == "NO" else 0)
+    bg_el = cv_el.find("color[@key='backgroundColor']")
+    nil_bg = cv_el.find("nil[@key='backgroundColor']") is not None
+    if not nil_bg:
+        if bg_el is not None:
+            cv.add("NSBGColor", *b.ref(_color_ref(b, bg_el, where)))
+        elif is_table:
+            cv.add("NSBGColor",
+                   *b.ref(b.catalog_color("System", "controlBackgroundColor", where)))
+        else:
+            raise I.XibError(f"clipView backgroundColor missing ({where})")
+    if not is_table:
+        cv.add("NSCursor", *b.ref(_cursor(b, "{1, -1}", 0)))
+    if cv_flags:
+        cv.add("NScvFlags", *b.int8(cv_flags))
     cv.add("NSAutomaticallyAdjustsContentInsets", *b.boolean(False))
     h_el = el.find("scroller[@key='horizontalScroller']")
     v_el = el.find("scroller[@key='verticalScroller']")
@@ -1952,11 +2111,28 @@ def _scroll_view(b, el, where, superview, id_map, parent=None):
         arr.add("UINibEncoderEmptyKey", *b.ref(hs))
     if vs is not None:
         arr.add("UINibEncoderEmptyKey", *b.ref(vs))
-    o.add("NSFrame", *b.ref(b.string(_rect(el, "frame", where))))
+    r2 = el.find("rect[@key='frame']")
+    if float(r2.get("x", 0)) == 0 and float(r2.get("y", 0)) == 0:
+        o.add("NSFrameSize", *b.ref(b.string(
+            "{%s, %s}" % (_fmt_g(r2.get("width")), _fmt_g(r2.get("height"))))))
+    else:
+        o.add("NSFrame", *b.ref(b.string(_rect(el, "frame", where))))
     if superview is not None:
         o.add("NSSuperview", *b.ref(superview))
     o.add("NSNextKeyView", *b.ref(cv))
     o.add("NSViewWantsBestResolutionOpenGLSurface", *b.boolean(False))
+    if _translates(el):
+        o.add("NSDoNotTranslateAutoresizingMask", *b.boolean(False))
+    cons_el = el.find("constraints")
+    if cons_el is not None and cons_el.findall("constraint"):
+        carr2 = b.new("NSArray")
+        carr2.add("NSInlinedValue", *b.boolean(False))
+        els = I._constraint_order(el, cons_el.findall("constraint"), where, mac=True)
+        for c in els:
+            con = _constraint(b, c, o, el.get("id"), id_map, {}, {}, where)
+            carr2.add("UINibEncoderEmptyKey", *b.ref(con))
+        b.cons_order[el.get("id")] = [c.get("id") for c in els]
+        o.add("NSViewConstraints", *b.ref(carr2))
     gest = b.new("NSArray")
     gest.add("NSInlinedValue", *b.boolean(False))
     pan = b.new("NSPanGestureRecognizer")
@@ -1979,6 +2155,15 @@ def _scroll_view(b, el, where, superview, id_map, parent=None):
         o.add("NSHScroller", *b.ref(hs))
         id_map[h_el.get("id")] = hs
     o.add("NSContentView", *b.ref(cv))
+    if hv_el is not None:
+        o.add("NSHeaderClipView", *b.ref(hclip))
+    hls = float(el.get("horizontalLineScroll", 10))
+    vls = float(el.get("verticalLineScroll", 10))
+    hps = float(el.get("horizontalPageScroll", 10))
+    vps = float(el.get("verticalPageScroll", 10))
+    if (hls, vls, hps, vps) != (10.0, 10.0, 10.0, 10.0):
+        import struct as _struct
+        o.add("NSScrollAmts", N.DATA, _struct.pack("<4f", hps, vps, hls, vls))
     o.add("NSMinMagnification", N.DOUBLE, 0.25)
     o.add("NSMaxMagnification", N.DOUBLE, 4.0)
     o.add("NSMagnification", N.DOUBLE, 1.0)
@@ -2129,6 +2314,40 @@ MENU_SYSTEM_NAME = {"main": "_NSMainMenu", "apple": "_NSAppleMenu",
 # keyEquivalentModifierMask bits over the NSCommandKeyMask base 1048576
 MENU_MOD_BITS = {"option": 524288, "shift": 131072, "control": 262144}
 
+# NSTvFlags is a packed word ibtool derives from the tableView/outlineView
+# attribute set plus the canvas geometry (probe batch /tmp/tvprobes: single-bit
+# attribute flips cascade through derived fields). Pinned per corpus attribute
+# combination; unknown combos raise (same policy as SCROLL_SFLAGS).
+TABLE_TVFLAGS = {
+    (("allowsExpansionToolTips", "YES"), ("autosaveColumns", "NO"), ("columnAutoresizingStyle", "lastColumnOnly"), ("columnReordering", "NO"), ("columnResizing", "NO"), ("rowHeight", "96"), ("typeSelect", "NO"), ("verticalHuggingPriority", "750"), ("viewBased", "YES")): 438304768,  # TimelineTableView (tableView)
+    (("allowsExpansionToolTips", "YES"), ("alternatingRowBackgroundColors", "YES"), ("autosaveColumns", "NO"), ("columnAutoresizingStyle", "lastColumnOnly"), ("columnReordering", "NO"), ("multipleSelection", "NO"), ("rowHeight", "24"), ("rowSizeStyle", "medium"), ("tableStyle", "inset"), ("typeSelect", "NO"), ("verticalHuggingPriority", "750"), ("viewBased", "YES")): 1388314624,  # CurrentActivityWindow (tableView)
+    (("allowsExpansionToolTips", "YES"), ("alternatingRowBackgroundColors", "YES"), ("autosaveName", "AccountStatsTable"), ("columnAutoresizingStyle", "firstColumnOnly"), ("multipleSelection", "NO"), ("rowHeight", "24"), ("rowSizeStyle", "medium"), ("tableStyle", "inset"), ("verticalHuggingPriority", "750"), ("viewBased", "YES")): 3552575488,  # AccountStatsWindow (tableView)
+    (("allowsExpansionToolTips", "YES"), ("autosaveColumns", "NO"), ("columnAutoresizingStyle", "firstColumnOnly"), ("columnReordering", "NO"), ("columnResizing", "NO"), ("floatsGroupRows", "NO"), ("indentationPerLevel", "13"), ("rowHeight", "40"), ("rowSizeStyle", "systemDefault"), ("selectionHighlightStyle", "sourceList"), ("typeSelect", "NO"), ("verticalHuggingPriority", "750"), ("viewBased", "YES")): 440401920,  # SidebarView (outlineView)
+}
+
+
+def _tv_attr_key(el):
+    return tuple(sorted((k, v) for k, v in el.attrib.items()
+                        if k not in ("id", "customClass", "customModule",
+                                     "customModuleProvider", "headerView",
+                                     "outlineTableColumn")))
+
+
+# Last-column canvas solve (probe p00 reproduces the golden TimelineTableView:
+# a 447pt column in a 450pt table archives NSWidth 415; at 240/500/700 the
+# solve differs, so the pin is geometry-exact).
+TABLE_COL_SOLVE = {("447", "40", "1000", 450.0): 415.0}
+
+# NSCellFlags for column dataCells (probe p16-p19): base 0x4000000 +
+# 0x20 (lineBreak truncatingTail) + selectable (0x200000|0x1|0x20) +
+# editable (0x10000000|0x20); flags2 = alignment<<26 | 0x800.
+TABLE_HEADER_CELL_FLAGS = (75497536, 268437504)  # probe: constant for the
+# truncatingTail/border header cells in the corpus
+
+
+def _tv_int(v):
+    return (N.INT64, v) if v < 0 else (N.INT8, v)
+
 
 def _custom_image_resource(b, name, size, where):
     key = (name, size)
@@ -2260,6 +2479,277 @@ def _menu_parent_el(objects, ident):
         if items is not None and any(it.get("id") == ident for it in items):
             return m
     return None
+
+
+def _plain_system_font(b, size, flags):
+    key = ("plain", size, flags)
+    if key in b.fonts:
+        return b.fonts[key]
+    o = b.new("NSFont")
+    o.add("NSName", *b.ref(b.string(".AppleSystemUIFont")))
+    o.add("NSSize", *b.float64(float(size)))
+    o.add("NSfFlags", *int_fit(flags))
+    b.fonts[key] = o
+    return o
+
+
+def _header_font(b):
+    """tableHeaderCell smallSystem: the text-style-descriptor variant
+    (probe golden TimelineTableView [22]: 11pt, NSfFlags 16, Subhead)."""
+    key = ("hdrsmall",)
+    if key in b.fonts:
+        return b.fonts[key]
+    o = b.new("NSFont")
+    o.add("NSName", *b.ref(b.string(".AppleSystemUIFont")))
+    o.add("NSSize", *b.float64(11.0))
+    o.add("NSfFlags", *int_fit(16))
+    o.add("NSTextStyleDescriptor", *b.ref(b._style_descriptor("Subhead", 11.0)))
+    o.add("NSHasWidth", *b.boolean(True))
+    b.fonts[key] = o
+    return o
+
+
+def _table_header_cell(b, col_el, hc_el, where):
+    o = b.new("NSTableHeaderCell")
+    o.add("NSCellFlags", N.INT32, TABLE_HEADER_CELL_FLAGS[0])
+    o.add("NSCellFlags2", N.INT32, TABLE_HEADER_CELL_FLAGS[1])
+    title = hc_el.get("title")
+    has_font = hc_el.find("font[@key='font']") is not None
+    if title is not None or has_font:
+        o.add("NSContents", *b.ref(_localizable(b, col_el.get("id") or "",
+                                                title or "", where,
+                                                suffix=".headerCell.title")))
+        fd = hc_el.find("font[@key='font']")
+        o.add("NSSupport", *b.ref(_header_font(b)))
+    for key, store in (("backgroundColor", "NSBackgroundColor"),
+                       ("textColor", "NSTextColor")):
+        c = hc_el.find(f"color[@key='{key}']")
+        if c is not None:
+            o.add(store, *b.ref(_color_ref(b, c, where)))
+    return o
+
+
+def _table_data_cell(b, col_el, dc_el, table, where):
+    o = b.new("NSTextFieldCell")
+    flags = 0x4000000 + 0x20  # truncatingTail base (corpus lineBreakMode)
+    if dc_el.get("lineBreakMode", "truncatingTail") != "truncatingTail":
+        raise I.XibError(f"dataCell lineBreakMode not probed ({where})")
+    if dc_el.get("selectable") == "YES":
+        flags |= 0x200000 | 0x1 | 0x20
+    if dc_el.get("editable") == "YES":
+        flags |= 0x10000000 | 0x20
+    o.add("NSCellFlags", N.INT32, flags)
+    align = TEXT_ALIGN[dc_el.get("alignment", "natural")]
+    o.add("NSCellFlags2", N.INT32, (align << 26) | 0x800)
+    o.add("NSContents", *b.ref(_localizable(b, dc_el.get("id") or "",
+                                            dc_el.get("title", ""), where)))
+    fd = dc_el.find("font[@key='font']")
+    o.add("NSSupport", *b.ref(b.font(fd, where) if fd is not None
+                              else _plain_system_font(b, 13, 1044)))
+    o.add("NSControlView", *b.ref(table))
+    o.add("NSBackgroundColor",
+          *b.ref(b.catalog_color("System", "controlBackgroundColor", where)))
+    o.add("NSTextColor", *b.ref(b.catalog_color("System", "controlTextColor", where)))
+    return o
+
+
+def _table_column(b, col_el, table, table_el, id_map, where):
+    o = b.new("NSTableColumn")
+    ident = col_el.get("identifier")
+    cols = table_el.find("tableColumns")
+    if ident is None:
+        ident = ("AutomaticTableColumnIdentifier.%d"
+                 % list(cols).index(col_el) if cols is not None else 0)
+    o.add("NSIdentifier", *b.ref(b.string(ident)))
+    width = float(col_el.get("width", 100))
+    solve = TABLE_COL_SOLVE.get((col_el.get("width"),
+                                 col_el.get("minWidth"),
+                                 col_el.get("maxWidth"),
+                                 float(table_el.find("rect[@key='frame']").get("width"))))
+    o.add("NSWidth", *b.float64(solve if solve is not None else width))
+    o.add("NSMinWidth", *b.float64(float(col_el.get("minWidth", 10))))
+    maxw = col_el.get("maxWidth")
+    o.add("NSMaxWidth", *b.float64(3.4028234663852886e+38 if maxw is None
+                                   else float(maxw)))
+    hc_el = col_el.find("tableHeaderCell[@key='headerCell']")
+    o.add("NSHeaderCell", *b.ref(_table_header_cell(b, col_el, hc_el, where)))
+    dc_el = col_el.find("textFieldCell[@key='dataCell']")
+    dc = _table_data_cell(b, col_el, dc_el, table, where)
+    o.add("NSDataCell", *b.ref(dc))
+    id_map[dc_el.get("id")] = dc
+    mask = 0
+    rm = col_el.find("tableColumnResizingMask[@key='resizingMask']")
+    if rm is not None:
+        if rm.get("resizeWithTable") == "YES":
+            mask |= 1
+        if rm.get("userResizable") == "YES":
+            mask |= 2
+    o.add("NSResizingMask", N.INT8, mask)
+    o.add("NSIsResizeable", *b.boolean(False))
+    if col_el.get("editable") != "NO":
+        # bug-compat: default-editable columns archive false; editable="NO"
+        # drops the key (probe golden [31] vs [18])
+        o.add("NSIsEditable", *b.boolean(False))
+    o.add("NSTableView", *b.ref(table))
+    sd = col_el.find("sortDescriptor[@key='sortDescriptorPrototype']")
+    if sd is not None:
+        d = b.new("NSSortDescriptor")
+        d.add("NSKey", *b.ref(b.string(sd.get("sortKey"))))
+        d.add("NSAscending", *b.boolean(sd.get("ascending") == "YES"))
+        d.add("NSSelector", *b.ref(b.string(sd.get("selector", "compare:"))))
+        d.add("NSReverseNullOrder", *b.boolean(True))
+        o.add("NSSortDescriptorPrototype", *b.ref(d))
+    return o
+
+
+def _corner_view(b, where):
+    o = b.new("_NSCornerView")
+    o.add("NSNextResponder", *(N.NIL, None))
+    o.add("NSNibTouchBar", *(N.NIL, None))
+    o.add("NSvFlags", N.INT16, 256)
+    o.add("NSFrameSize", *b.ref(b.string("{17, 28}")))
+    o.add("NSViewWantsBestResolutionOpenGLSurface", *b.boolean(False))
+    o.add("IBNSSafeAreaLayoutGuide", *(N.NIL, None))
+    o.add("IBNSLayoutMarginsGuide", *(N.NIL, None))
+    o.add("IBNSClipsToBounds", *b.int8(0))
+    return o
+
+
+def _table_view(b, el, where, superview, id_map, parent=None):
+    """<tableView>/<outlineView> (+ customClass -> NSClassSwapper)."""
+    is_outline = el.tag == "outlineView"
+    o = b.new("NSClassSwapper" if el.get("customClass")
+              else ("NSOutlineView" if is_outline else "NSTableView"))
+    if el.get("customClass"):
+        o.add("NSClassName", *b.ref(b.string(I._swift_class(el))))
+        o.add("NSOriginalClassName",
+              *b.ref(b.string("NSOutlineView" if is_outline else "NSTableView")))
+    o.add("NSNextResponder", *(b.ref(superview) if superview is not None else (N.NIL, None)))
+    o.add("NSNibTouchBar", *(N.NIL, None))
+    v, vt = _vflags(el, where)
+    if v == 256 and el.find("autoresizingMask[@key='autoresizingMask']") is not None:
+        # the canvas solves the table to fill its clip (probe golden: empty
+        # autoresizingMask archives widthSizable|heightSizable)
+        v = 256 | I.RESIZE_FLAGS["widthSizable"] | I.RESIZE_FLAGS["heightSizable"]
+    o.add("NSvFlags", vt, v)
+    id_map[el.get("id")] = o
+    r = el.find("rect[@key='frame']")
+    if float(r.get("x", 0)) == 0 and float(r.get("y", 0)) == 0:
+        o.add("NSFrameSize", *b.ref(b.string(
+            "{%s, %s}" % (_fmt_g(r.get("width")), _fmt_g(r.get("height"))))))
+    else:
+        o.add("NSFrame", *b.ref(b.string(_rect(el, "frame", where))))
+    if superview is not None:
+        o.add("NSSuperview", *b.ref(superview))
+    o.add("NSViewWantsBestResolutionOpenGLSurface", *b.boolean(False))
+    if _translates(el):
+        o.add("NSDoNotTranslateAutoresizingMask", *b.boolean(False))
+    o.add("IBNSSafeAreaLayoutGuide", *(N.NIL, None))
+    o.add("IBNSLayoutMarginsGuide", *(N.NIL, None))
+    o.add("IBNSClipsToBounds", *b.int8(0))
+    o.add("NSEnabled", *b.boolean(False))
+    o.add("NSAllowsLogicalLayoutDirection", *b.boolean(not b.localize))
+    o.add("NSControlAllowsExpansionToolTips",
+          *b.boolean(el.get("allowsExpansionToolTips") != "YES"))
+    o.add("NSControlSize", *b.int8(0))
+    o.add("NSControlContinuous", *b.boolean(True))
+    o.add("NSControlRefusesFirstResponder", *b.boolean(True))
+    o.add("NSControlUsesSingleLineMode", *b.boolean(True))
+    o.add("NSControlTextAlignment", *b.int8(0))
+    o.add("NSControlLineBreakMode", *b.int8(0))
+    o.add("NSControlWritingDirection", *b.int8(0))
+    o.add("NSControlSendActionMask", *b.int8(0))
+    hv_el = el.find("tableHeaderView[@key='headerView']")
+    if hv_el is not None:
+        late_clip = _Late()
+        hv = b.new("NSTableHeaderView")
+        hv.add("NSNextResponder", *b.ref(late_clip))
+        hv.add("NSNibTouchBar", *(N.NIL, None))
+        hv.add("NSvFlags", N.INT16, 256)
+        hr = hv_el.find("rect[@key='frame']")
+        hv.add("NSFrameSize", *b.ref(b.string(
+            "{%s, %s}" % (_fmt_g(hr.get("width")), _fmt_g(hr.get("height"))))))
+        hv.add("NSSuperview", *b.ref(late_clip))
+        hv.add("NSViewIsLayerTreeHost", *b.boolean(False))
+        hv.add("NSViewWantsBestResolutionOpenGLSurface", *b.boolean(False))
+        hv.add("IBNSSafeAreaLayoutGuide", *(N.NIL, None))
+        hv.add("IBNSLayoutMarginsGuide", *(N.NIL, None))
+        hv.add("IBNSClipsToBounds", *b.int8(0))
+        hv.add("NSTableView", *b.ref(o))
+        id_map[hv_el.get("id")] = hv
+        o._hdr_late = late_clip
+        o.add("NSHeaderView", *b.ref(hv))
+    o.add("NSCornerView", *b.ref(_corner_view(b, where)))
+    cols_arr = b.new("NSMutableArray")
+    cols_arr.add("NSInlinedValue", *b.boolean(False))
+    o.add("NSTableColumns", *b.ref(cols_arr))
+    cols_el = el.find("tableColumns")
+    for col_el in (cols_el if cols_el is not None else []):
+        col = _table_column(b, col_el, o, el, id_map, where)
+        cols_arr.add("UINibEncoderEmptyKey", *b.ref(col))
+        id_map[col_el.get("id")] = col
+    size = el.find("size[@key='intercellSpacing']")
+    o.add("NSIntercellSpacingWidth",
+          *b.float64(float(size.get("width")) if size is not None else 0.0))
+    o.add("NSIntercellSpacingHeight",
+          *b.float64(float(size.get("height")) if size is not None else 0.0))
+    bg = el.find("color[@key='backgroundColor']")
+    if bg is None:
+        raise I.XibError(f"<{el.tag}> without backgroundColor ({where})")
+    o.add("NSBackgroundColor", *b.ref(_color_ref(b, bg, where)))
+    o.add("NSGridColor",
+          *b.ref(b.catalog_color("System", "gridColor", where)))
+    rss = el.get("rowSizeStyle")
+    if rss is None:
+        rowh = float(el.get("rowHeight", 17))
+    elif rss == "medium":
+        rowh = 24.0
+    elif rss == "systemDefault":
+        rowh = 32.0 if el.get("selectionHighlightStyle") == "sourceList" else 24.0
+    else:
+        raise I.XibError(f"rowSizeStyle {rss!r} not probed ({where})")
+    o.add("NSRowHeight", *b.float64(rowh))
+    key = _tv_attr_key(el)
+    if key not in TABLE_TVFLAGS:
+        raise I.XibError(f"<{el.tag}> attr set "
+                         f"{sorted(k for k, _ in key)} not probed ({where})")
+    o.add("NSTvFlags", N.INT32, _i32(TABLE_TVFLAGS[key]))
+    o.add("NSDelegate", *(N.NIL, None))
+    o.add("NSDataSource", *(N.NIL, None))
+    if el.get("autosaveName"):
+        o.add("NSAutosaveName", *b.ref(b.string(el.get("autosaveName"))))
+    cas = el.get("columnAutoresizingStyle", "uniform")
+    cas_map = {"uniform": 1, "lastColumnOnly": 4, "firstColumnOnly": 5}
+    if cas not in cas_map:
+        raise I.XibError(f"columnAutoresizingStyle {cas!r} not probed ({where})")
+    o.add("NSColumnAutoresizingStyle", *b.int8(cas_map[cas]))
+    o.add("NSDraggingSourceMaskForLocal", N.INT64, -1)
+    o.add("NSDraggingSourceMaskForNonLocal", *b.int8(0))
+    o.add("NSAllowsTypeSelect", *b.boolean(el.get("typeSelect") == "NO"))
+    if el.get("selectionHighlightStyle"):
+        if el.get("selectionHighlightStyle") != "sourceList":
+            raise I.XibError("selectionHighlightStyle not probed")
+        o.add("NSTableViewSelectionHighlightStyle", *b.int8(1))
+    if el.get("tableStyle"):
+        if el.get("tableStyle") != "inset":
+            raise I.XibError("tableStyle not probed")
+        o.add("NSTableViewStyle", *b.int8(2))
+    o.add("NSTableViewDraggingDestinationStyle",
+          *b.int8(1 if el.get("selectionHighlightStyle") == "sourceList" else 0))
+    if rss is not None:
+        o.add("NSTableViewArchivedReusableViewsKey", *b.ref(b.new("NSMutableDictionary")))
+    if el.get("floatsGroupRows") is not None:
+        # bug-compat: floatsGroupRows="NO" archives true
+        o.add("NSTableViewShouldFloatGroupRows",
+              *b.boolean(el.get("floatsGroupRows") != "YES"))
+    o.add("NSTableViewGroupRowStyle", *b.int8(1))
+    if rss is not None:
+        o.add("NSTableViewRowSizeStyle", *_tv_int(
+            -1 if rss == "systemDefault" else 2))
+    if is_outline:
+        o.add("NSOutlineViewAutoresizesOutlineColumnKey", *b.boolean(True))
+        o.add("NSOutineViewStronglyReferencesItems", *b.boolean(False))
+    return o, [(o, parent)]
 
 
 def _popup(b, el, where, superview, id_map, parent=None):
