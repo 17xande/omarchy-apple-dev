@@ -466,6 +466,7 @@ class MacBuilder(I.Builder):
         self.cons_order = {}    # view xib id -> constraint ids in Apple order
         self.localize = False   # .lproj xibs wrap user strings
         self.nums = {}          # NSNumber intern pool by numeric value
+        self.img_sources = {}   # NSButtonImageSource intern pool by name
 
     def number(self, typ, v):
         """Apple pools NSNumbers across the whole archive by value (probe About:
@@ -825,7 +826,10 @@ def _cell(b, el, control, where, owner_id=None, cell_cls="NSTextFieldCell"):
         flags2 |= 0x40
     if el.get("editable") == "YES":
         flags |= 0x90000000 | 0x400000
-        flags2 |= 0x400
+        # probe AddFeedSheet/FeedInspector vs RenameSheet/AddFolder: the 0x400
+        # flags2 bit only joins editable when the cell is also scrollable
+        if el.get("scrollable") == "YES":
+            flags2 |= 0x400
     elif el.get("editable") is not None:
         flags |= 0x400000
     if flags > 0x7FFFFFFF or flags < -0x80000000:
@@ -854,7 +858,11 @@ def _cell(b, el, control, where, owner_id=None, cell_cls="NSTextFieldCell"):
         if key == "backgroundColor" and el.get("drawsBackground") is not None:
             o.add("NSDrawsBackground", *b.boolean(el.get("drawsBackground") != "YES"))
         o.add("NSBackgroundColor" if key == "backgroundColor" else "NSTextColor",
-              *b.ref(b.catalog_color(c.get("catalog"), c.get("name"), where)))
+              *b.ref(b.catalog_color(c.get("catalog"),
+                                     "controlTextColor"
+                                     if key == "textColor"
+                                     and c.get("name") == "textColor"
+                                     else c.get("name"), where)))
     return o
 
 
@@ -875,15 +883,8 @@ def _field(b, el, where, superview, id_map, parent=None):
     o.add("NSViewWantsBestResolutionOpenGLSurface", *b.boolean(False))
     if _translates(el):
         o.add("NSDoNotTranslateAutoresizingMask", *b.boolean(False))
-    h, v2 = el.get("horizontalHuggingPriority"), el.get("verticalHuggingPriority")
-    if (h is not None and h != "250") or (v2 is not None and v2 != "750"):
-        o.add("NSHuggingPriority",
-              *b.ref(b.string("{%s, %s}" % (_fmt_g(h or 250), _fmt_g(v2 or 750)))))
-    h, v2 = (el.get("horizontalCompressionResistancePriority"),
-             el.get("verticalCompressionResistancePriority"))
-    if (h is not None and h != "750") or (v2 is not None and v2 != "750"):
-        o.add("NSAntiCompressionPriority",
-              *b.ref(b.string("{%s, %s}" % (_fmt_g(h or 750), _fmt_g(v2 or 750)))))
+    # probe FeedInspector [38]: the constraints array precedes the priority
+    # strings on textFields
     cons_el = el.find("constraints")
     if cons_el is not None and cons_el.findall("constraint"):
         carr = b.new("NSArray")
@@ -894,6 +895,15 @@ def _field(b, el, where, superview, id_map, parent=None):
             carr.add("UINibEncoderEmptyKey", *b.ref(con))
         b.cons_order[el.get("id")] = [c.get("id") for c in els]
         o.add("NSViewConstraints", *b.ref(carr))
+    h, v2 = el.get("horizontalHuggingPriority"), el.get("verticalHuggingPriority")
+    if (h is not None and h != "250") or (v2 is not None and v2 != "750"):
+        o.add("NSHuggingPriority",
+              *b.ref(b.string("{%s, %s}" % (_fmt_g(h or 250), _fmt_g(v2 or 750)))))
+    h, v2 = (el.get("horizontalCompressionResistancePriority"),
+             el.get("verticalCompressionResistancePriority"))
+    if (h is not None and h != "750") or (v2 is not None and v2 != "750"):
+        o.add("NSAntiCompressionPriority",
+              *b.ref(b.string("{%s, %s}" % (_fmt_g(h or 750), _fmt_g(v2 or 750)))))
     o.add("IBNSSafeAreaLayoutGuide", *(N.NIL, None))
     o.add("IBNSLayoutMarginsGuide", *(N.NIL, None))
     o.add("IBNSClipsToBounds", *b.int8(0))
@@ -902,6 +912,9 @@ def _field(b, el, where, superview, id_map, parent=None):
     if cell_el is None:
         raise I.XibError(f"<textField> without textFieldCell ({where})")
     cell = _cell(b, cell_el, o, where, owner_id=cell_el.get("id"))
+    if el.get("textCompletion") == "NO":
+        # probe AccountsAddCloudKit [59]: last cell key, bool false
+        cell.add("NSAutomaticTextCompletionDisabled", *b.boolean(False))
     o.add("NSCell", *b.ref(cell))
     id_map[el.get("id") + "#cell"] = cell
     o.add("NSAllowsLogicalLayoutDirection",
@@ -948,9 +961,13 @@ def _view(b, el, where, superview=None, id_map=None, guides=None, parent=None,
     subview completes, cell included), then this view's frame, constraints
     (probe-ordered), layout guides, IB guide placeholders."""
     guide_kinds = {}
-    o = b.new("NSClassSwapper" if el.get("customClass") else "NSView")
-    if el.get("customClass"):
-        o.add("NSClassName", *b.ref(b.string(I._swift_class(el))))
+    is_custom = el.tag == "customView" or el.get("customClass")
+    o = b.new("NSClassSwapper" if is_custom else "NSView")
+    if is_custom:
+        # probe NNW3OpenPanelAccessoryView: bare <customView> (no customClass)
+        # archives as NSClassSwapper with NSView/NSView; with customClass the
+        # mangled name + NSView
+        o.add("NSClassName", *b.ref(b.string(I._swift_class(el) or "NSView")))
         o.add("NSOriginalClassName", *b.ref(b.string("NSView")))
     o.add("NSNextResponder", *(b.ref(superview) if superview is not None else (N.NIL, None)))
     o.add("NSNibTouchBar", *(N.NIL, None))
@@ -1933,14 +1950,23 @@ def _button(b, el, where, superview, id_map, parent=None):
     o.add("NSViewWantsBestResolutionOpenGLSurface", *b.boolean(False))
     if _translates(el):
         o.add("NSDoNotTranslateAutoresizingMask", *b.boolean(False))
+    cell_el = el.find("buttonCell[@key='cell']")
+    if cell_el is None:
+        raise I.XibError(f"<button> without buttonCell ({where})")
+    btype = cell_el.get("type", "momentaryPushIn")
+    # probe FeedInspector/GP/Adv: check+radio always carry NSHuggingPriority
+    # (defaults filled); push only when a hugging attr differs from 250/750.
+    # NSAntiCompressionPriority only when a resistance attr differs from 750.
     h, v2 = el.get("horizontalHuggingPriority"), el.get("verticalHuggingPriority")
-    if h is not None and v2 is not None:
-        o.add("NSHuggingPriority", *b.ref(b.string("{%s, %s}" % (_fmt_g(h), _fmt_g(v2)))))
+    nondef = (h is not None and h != "250") or (v2 is not None and v2 != "750")
+    if nondef or (btype in ("check", "radio") and (h is not None or v2 is not None)):
+        o.add("NSHuggingPriority",
+              *b.ref(b.string("{%s, %s}" % (_fmt_g(h or 250), _fmt_g(v2 or 750)))))
     h, v2 = (el.get("horizontalCompressionResistancePriority"),
              el.get("verticalCompressionResistancePriority"))
-    if h is not None and v2 is not None:
+    if (h is not None and h != "750") or (v2 is not None and v2 != "750"):
         o.add("NSAntiCompressionPriority",
-              *b.ref(b.string("{%s, %s}" % (_fmt_g(h), _fmt_g(v2)))))
+              *b.ref(b.string("{%s, %s}" % (_fmt_g(h or 750), _fmt_g(v2 or 750)))))
     o.add("IBNSSafeAreaLayoutGuide", *(N.NIL, None))
     o.add("IBNSLayoutMarginsGuide", *(N.NIL, None))
     o.add("IBNSClipsToBounds", *b.int8(0))
@@ -1958,7 +1984,8 @@ def _button(b, el, where, superview, id_map, parent=None):
     o.add("NSControlRefusesFirstResponder", *b.boolean(True))
     o.add("NSControlUsesSingleLineMode",
           *b.boolean(cell_el.get("usesSingleLineMode") != "YES"))
-    align = cell_el.get("alignment", "center")
+    align = cell_el.get("alignment",
+                        "natural" if btype in ("check", "radio") else "center")
     if align not in CONTROL_ALIGN:
         raise I.XibError(f"alignment {align!r} not probed ({where})")
     o.add("NSControlTextAlignment", *b.int8(CONTROL_ALIGN[align]))
@@ -1974,10 +2001,20 @@ def _button(b, el, where, superview, id_map, parent=None):
 
 def _button_cell(b, el, control, where):
     o = b.new("NSButtonCell")
-    flags = 0x4000000
-    flags2 = TEXT_ALIGN[el.get("alignment", "center")] << 26
-    o.add("NSCellFlags", N.INT32, flags)
-    o.add("NSCellFlags2", N.INT32, flags2)
+    btype = el.get("type", "momentaryPushIn")
+    if btype in ("check", "radio"):
+        # probe FeedInspector [52] / GP [175],[183]: check+radio cells archive
+        # NSCellFlags 0x84000000 when state="on" else 0x4000000, and default
+        # to natural alignment
+        flags = 0x84000000 if el.get("state") == "on" else 0x4000000
+        if el.get("state") not in (None, "on"):
+            raise I.XibError(f"button state {el.get('state')!r} not probed ({where})")
+        flags2 = TEXT_ALIGN[el.get("alignment", "natural")] << 26
+    else:
+        flags = 0x4000000
+        flags2 = TEXT_ALIGN[el.get("alignment", "center")] << 26
+    o.add("NSCellFlags", N.INT32, _i32(flags))
+    o.add("NSCellFlags2", N.INT32, _i32(flags2))
     o.add("NSContents", *b.ref(_localizable(b, el.get("id") or "",
                                             el.get("title", ""), where)))
     fd = el.find("font[@key='font']")
@@ -1985,7 +2022,6 @@ def _button_cell(b, el, control, where):
         raise I.XibError(f"<buttonCell> without <font> ({where})")
     o.add("NSSupport", *b.ref(b.font(fd, where)))
     o.add("NSControlView", *b.ref(control))
-    btype = el.get("type", "momentaryPushIn")
     if btype not in BUTTON_TYPE:
         raise I.XibError(f"button type {btype!r} not probed ({where})")
     behavior = el.find("behavior[@key='behavior']")
@@ -2000,6 +2036,17 @@ def _button_cell(b, el, control, where):
     if bezel not in BEZEL_STYLE:
         raise I.XibError(f"bezelStyle {bezel!r} not probed ({where})")
     o.add("NSBezelStyle", *b.int8(BEZEL_STYLE[bezel]))
+    if btype in ("check", "radio"):
+        # probe FeedInspector [56] / GP [126]: check -> NSSwitch, radio ->
+        # NSRadioButton, between NSBezelStyle and NSAlternateContents; one
+        # object shared by every cell with the same name
+        name = "NSSwitch" if btype == "check" else "NSRadioButton"
+        img = b.img_sources.get(name)
+        if img is None:
+            img = b.new("NSButtonImageSource")
+            img.add("NSImageName", *b.ref(b.string(name)))
+            b.img_sources[name] = img
+        o.add("NSAlternateImage", *b.ref(img))
     o.add("NSAlternateContents", *b.ref(b.string("")))
     o.add("NSKeyEquivalent", *b.ref(_key_equivalent(b, el, where)))
     o.add("NSPeriodicDelay", N.INT16, 400)
