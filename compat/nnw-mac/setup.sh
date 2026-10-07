@@ -96,19 +96,38 @@ extension WKPreferences {
 }
 EOF
 
-# 3. Drop RSCore's package-declared AppKit xibs from its resources.
+# 3. Drop AppKit xibs from local packages. SwiftPM auto-detects .xib under a
+# target dir even when undeclared, so the entries must move to the target's
+# `exclude:` - removal alone does not stop the IB compiler.
 python3 - "$dir" <<'PY'
-import os, re, sys
-p = os.path.join(sys.argv[1], "Modules/RSCore/Package.swift")
-s = open(p, encoding="utf-8").read()
-for name in ("WebViewWindow", "IndeterminateProgressWindow"):
-    line = f'.process("Resources/{name}.xib")'
-    if line in s:
-        # Drop the line plus its indentation and trailing comma/newline.
-        s = re.sub(rf"^[ \t]*{re.escape(line)},?\n", "", s, flags=re.M)
-        print(f"warning: RSCore: excluded AppKit xib {name}.xib "
-              "(Linux ibtool cannot compile it; the window will be missing)")
-open(p, "w").write(s)
+import glob, os, re, sys
+for p in sorted(glob.glob(os.path.join(sys.argv[1], "Modules/*/Package.swift"))):
+    s = open(p, encoding="utf-8").read()
+    blocks = [(m.group(1), m.start(), m.end()) for m in
+              re.finditer(r"\.target\(\s*\n\s*name:\s*\"([^\"]+)\""
+                          r".*?(?=\.target\(|\.executableTarget\(|\.testTarget\(|\Z)",
+                          s, re.S)]
+    for name, start, end in blocks:
+        body = s[start:end]
+        paths = re.findall(r'\.process\("([^"]+\.(?:xib|storyboard))"\)', body)
+        if not paths:
+            continue
+        new_body = re.sub(r"^[ \t]*\.process\(\"[^\"]+\.(?:xib|storyboard)\"\),?\n",
+                          "", body, flags=re.M)
+        ex = ", ".join(f'"{x}"' for x in paths)
+        if "exclude:" in new_body:
+            new_body = new_body.replace("exclude: [",
+                                        f"exclude: [\n\t\t\t{ex},", 1)
+        else:
+            new_body = re.sub(r"(\.target\(\s*\n\s*name:\s*\"[^\"]+\",\s*\n)",
+                              rf"\1\t\t\texclude: [{ex}],\n",
+                              new_body, count=1)
+        s = s[:start] + new_body + s[end:]
+        for x in paths:
+            print(f"warning: {os.path.basename(os.path.dirname(p))}: excluded "
+                  f"AppKit IB file {x} (Linux ibtool cannot compile it)")
+    if s != open(p, encoding="utf-8").read():
+        open(p, "w").write(s)
 PY
 
 # 3b. The Xcode project links some local products statically twice and
