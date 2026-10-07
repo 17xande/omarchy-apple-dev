@@ -225,6 +225,15 @@ BOOL_GENERATED_KEYS = {
     "LSSupportsOpeningDocumentsInPlace",
 }
 
+# Per-platform generation: deployment-target build setting, SwiftPM platform
+# token, fallback deployment target when the project sets none (14.0 matches
+# ship-mac.sh's MACOS_MIN default for macOS), and the version at which Xcode
+# resolves SWIFT_ENABLE_BARE_SLASH_REGEX to YES when the setting is unset.
+PLATFORMS = {
+    "ios": ("IPHONEOS_DEPLOYMENT_TARGET", ".iOS", "17.0", (16, 0)),
+    "macos": ("MACOSX_DEPLOYMENT_TARGET", ".macOS", "14.0", (13, 0)),
+}
+
 
 def ibtool_compiles(path):
     """Whether the repo's ibtool compiles one Interface Builder source.
@@ -380,6 +389,12 @@ class Generator:
                     o.get("productType") == "com.apple.product-type.application":
                 out.append((oid, o))
         return out
+
+    def platform_of(self, layers):
+        """'macos' when the target's settings name only macosx, else 'ios'."""
+        plat = self.setting(layers, "SUPPORTED_PLATFORMS") or \
+            self.setting(layers, "SDKROOT") or ""
+        return "macos" if "macosx" in plat and "iphoneos" not in plat else "ios"
 
     def pick_target(self):
         apps = self.app_targets()
@@ -708,7 +723,9 @@ class Generator:
                 rp = os.path.join(base, stripped) if base else stripped
                 if os.path.isfile(os.path.join(self.proj_dir, rp, "Package.swift")):
                     return rp
-        return None
+        # A secondary product of a package whose dir is named after its main
+        # product (NNW's RSCore package also ships RSCoreResources).
+        return self.discover_local_packages().get(product)
 
     _module_names_cache = None
 
@@ -786,6 +803,45 @@ class Generator:
                         queue.append(d)
         self._module_names_cache[(rp, prod_name)] = provided
         return provided
+
+    def product_target_closure(self, rp, prod_name):
+        """Transitive same-package TARGET names product prod_name of local
+        package rp carries. Unlike provided_module_closure this excludes the
+        manifest's other product names: importing a sibling target's module
+        (RSCore's RSCoreResources beside RSCore) needs its own product
+        dependency, SwiftPM will not expose it through the sibling product."""
+        mf = os.path.join(self.proj_dir, rp, "Package.swift")
+        if not os.path.isfile(mf):
+            return set()
+        text = open(mf, encoding="utf-8", errors="replace").read()
+        libraries = {}
+        for m in re.finditer(r'\.library\((.*?)\)', text):
+            body = m.group(1)
+            nm = re.search(r'name:\s*"([^"]+)"', body)
+            tm = re.search(r'targets:\s*\[([^\]]*)\]', body)
+            if nm:
+                libraries[nm.group(1)] = \
+                    re.findall(r'"([^"]+)"', tm.group(1)) if tm else None
+        targets = {}
+        for m in re.finditer(
+                r'\.target\(\s*name:\s*"([^"]+)"(.*?)(?=\.target\(|'
+                r'\.executableTarget\(|\.testTarget\(|$)', text, re.S):
+            body = m.group(2)
+            products = re.findall(r'\.product\(\s*name:\s*"([^"]+)"', body)
+            deps = [d for d in re.findall(r'"([^"]+)"', body)
+                    if d not in products]
+            targets[m.group(1)] = deps
+        queue = libraries.get(prod_name)
+        if queue is None and targets:
+            queue = list(targets)
+        seen = set()
+        while queue:
+            t = queue.pop()
+            if t in seen:
+                continue
+            seen.add(t)
+            queue += [d for d in targets.get(t, []) if d in targets]
+        return seen
 
     def remote_products_in_manifests(self, local_paths):
         """product name -> (url, requirement snippet) for remotes declared by
@@ -1264,17 +1320,23 @@ class Generator:
                     packages.append(f'.package(url: {sw_sy(x)}, {req})')
                 products.append((name, package_label(x)))
             else:
-                if name in provided and name != decl_local.get(x):
+                declared = decl_local.get(x)
+                sibling = declared is not None and name != declared and \
+                    name in provided and \
+                    name not in self.product_target_closure(x, declared)
+                if name in provided and name != declared and not sibling:
                     self.warn(f"product {name!r} is already carried by "
                               f"{provider_of.get(name)!r}; omitted from this "
                               "target's dependencies")
                     continue
-                if x not in decl_local or decl_local[x] == name:
+                if declared is None or declared == name:
                     if not any(p.startswith(f'.package(name: {sw_sy(name)}, ')
                                for p in packages):
                         packages.append(f'.package(name: {sw_sy(name)}, '
                                         f'path: {sw_sy(self.path_from_out(x))})')
-                products.append((name, name))
+                    products.append((name, name))
+                else:
+                    products.append((name, declared))
 
         # SwiftPM needs transitive products that target sources import directly
         # (Xcode resolves them through indirect dependencies; SwiftPM does not).
@@ -1364,9 +1426,10 @@ class Generator:
         # GenericMastodonPost+Subclasses.swift).
         bare = self.setting(layers, "SWIFT_ENABLE_BARE_SLASH_REGEX")
         if bare not in ("YES", "NO"):
-            dt = self.setting(layers, "IPHONEOS_DEPLOYMENT_TARGET")
+            dt_key, _tok, _def, bare_min = PLATFORMS[self.platform]
+            dt = self.setting(layers, dt_key)
             m = re.match(r"(\d+)(?:\.(\d+))?", self.expand(dt, layers)) if dt else None
-            bare = "YES" if m and (int(m.group(1)), int(m.group(2) or 0)) >= (16, 0) else "NO"
+            bare = "YES" if m and (int(m.group(1)), int(m.group(2) or 0)) >= bare_min else "NO"
         if bare == "YES" and mode != ".v6" and "BareSlashRegexLiterals" not in upcoming:
             upcoming.insert(0, "BareSlashRegexLiterals")
             out.insert(1, '.enableUpcomingFeature("BareSlashRegexLiterals")')
@@ -1448,9 +1511,11 @@ class Generator:
         # Xcode writes UIDeviceFamily from TARGETED_DEVICE_FAMILY into every
         # target's processed Info.plist (app and extensions alike), keeping only
         # the iphoneos families: IceCubes' "1,2,7" becomes [1, 2] (7 = visionOS,
-        # which App Store rejects in an iOS bundle: ITMS-90100).
+        # which App Store rejects in an iOS bundle: ITMS-90100). Mac targets
+        # get no UIDeviceFamily.
         tdf_setting = self.setting(layers, "TARGETED_DEVICE_FAMILY")
-        tdf = self.expand(tdf_setting, layers) if tdf_setting else ""
+        tdf = self.expand(tdf_setting, layers) if tdf_setting and \
+            self.platform != "macos" else ""
         if tdf and "UIDeviceFamily" not in plist:
             try:
                 plist["UIDeviceFamily"] = [f for f in (int(s) for s in tdf.split(",") if s.strip()) if f in (1, 2)]
@@ -1530,6 +1595,7 @@ class Generator:
         target = self.target
         name = target["name"]
         layers = self.target_merged(target)
+        self.platform = self.platform_of(layers)
         dev_region = self.project.get("developmentRegion")
 
         podfile = os.path.join(self.proj_dir, "Podfile")
@@ -1610,8 +1676,9 @@ class Generator:
             symlink_count += len(esym)
             eplist, _ = self.target_infoplan(elayers, ename, dev_region, extension=True)
             epath = write_plist(ename, eplist, extension=True)
-            edt = self.setting(elayers, "IPHONEOS_DEPLOYMENT_TARGET")
-            adt = self.setting(layers, "IPHONEOS_DEPLOYMENT_TARGET")
+            dt_key = PLATFORMS[self.platform][0]
+            edt = self.setting(elayers, dt_key)
+            adt = self.setting(layers, dt_key)
             if edt and adt and self.expand(edt, elayers) != self.expand(adt, layers):
                 self.warn(f"extension {ename} deployment target {edt} differs from "
                           f"the app's {adt}; xtool applies one platform to the whole "
@@ -1806,8 +1873,9 @@ class Generator:
 
     def write_manifest(self, name, layers, packages, products,
                        excludes, resources, swift, extensions):
-        plat = self.setting(layers, "IPHONEOS_DEPLOYMENT_TARGET") or "17.0"
-        plat = re.sub(r"[^0-9.]", "", self.expand(plat, layers)) or "17.0"
+        dt_key, tok, default, _bare = PLATFORMS[self.platform]
+        plat = self.setting(layers, dt_key) or default
+        plat = re.sub(r"[^0-9.]", "", self.expand(plat, layers)) or default
         deps = (",\n".join(f"        {p}" for p in packages)) or "        // none"
         dev_region = self.project.get("developmentRegion")
         libs = [f"    .library(name: {sw_sy(name)}, targets: [{sw_sy(name)}])"]
@@ -1828,7 +1896,7 @@ let package = Package(
 """
         if dev_region:
             txt += f"    defaultLocalization: {sw_sy(dev_region)},\n"
-        txt += f"""    platforms: [.iOS({sw_sy(plat)})],
+        txt += f"""    platforms: [{tok}({sw_sy(plat)})],
     products: [
 {libs_txt},
     ],
