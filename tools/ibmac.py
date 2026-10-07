@@ -769,7 +769,8 @@ def _guide(b, gid, guides, guide_kinds, where):
     return o
 
 
-def _ref_to(b, item, owner_obj, owner_id, id_map, guides, guide_kinds, where):
+def _ref_to(b, item, owner_obj, owner_id, id_map, guides, guide_kinds, where,
+            lates=None):
     if item is None or item == "-2":
         return b.ref(owner_obj)
     if item in guides:
@@ -778,15 +779,20 @@ def _ref_to(b, item, owner_obj, owner_id, id_map, guides, guide_kinds, where):
         return b.ref(_guide(b, item, guides, guide_kinds, where))
     if item in id_map:
         return b.ref(id_map[item])
+    if lates is not None:
+        late = _Late()
+        lates.append((late, item))
+        return b.ref(late)
     raise I.XibError(f"reference to {item!r} before it is built ({where})")
 
 
-def _constraint(b, el, owner_obj, owner_id, id_map, guides, guide_kinds, where):
+def _constraint(b, el, owner_obj, owner_id, id_map, guides, guide_kinds, where,
+                lates=None):
     """Mac NSLayoutConstraint: the iOS value order; guides are real objects."""
     o = b.new("NSLayoutConstraint")
     first = el.get("firstItem")
     o.add("NSFirstItem", *_ref_to(b, first, owner_obj, owner_id, id_map,
-                                  guides, guide_kinds, where))
+                                  guides, guide_kinds, where, lates))
     fa = el.get("firstAttribute")
     if fa is None:
         raise I.XibError(f"<constraint> missing firstAttribute ({where})")
@@ -798,7 +804,7 @@ def _constraint(b, el, owner_obj, owner_id, id_map, guides, guide_kinds, where):
     second = el.get("secondItem")
     if second is not None:
         o.add("NSSecondItem", *_ref_to(b, second, owner_obj, owner_id, id_map,
-                                       guides, guide_kinds, where))
+                                       guides, guide_kinds, where, lates))
         sa = el.get("secondAttribute")
         if sa is None:
             raise I.XibError(f"<constraint> secondItem without secondAttribute ({where})")
