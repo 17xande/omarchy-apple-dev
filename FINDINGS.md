@@ -1465,3 +1465,28 @@ rcodesign seals the plists, and a device install runs it with
 `xtool install`; `asc.py validate` now FAILs an ipa whose Info.plists carry
 any surviving `$(...)`. Receipt
 `receipts/2026-10-07-app-identifier-prefix.md`.
+
+## LLDB on a device without root, 2026-10-08
+
+**63. `device-run.sh --lldb` attaches over pymobiledevice3's userspace tunnel,
+with no sudo; the earlier "hang" was LLDB's synchronous `process connect`.**
+`debugserver lldb` refuses `--userspace` (its external lldb cannot reach the
+in-process tunnel address), so the script runs `debugserver start-server
+--local-port N --userspace` (a localhost forwarder) and drives lldb itself
+with the steps `debugserver lldb` types. A gdb-remote packet log showed lldb
+never sent `vAttach`: in synchronous mode (`-b`, `-o`) `process connect` waits
+for the process to stop, and a debugserver with no process never sends a
+stop. `debugserver lldb` types into a pty, so its session is async and never
+hit this. `script lldb.debugger.SetAsync(True)` around the connect fixes it;
+`vAttach` is answered in about 1 s. The attach then reads every image missing
+from the sysroot out of process memory in 512-byte `x` packets (13,700 in
+60 s over the tunnel, still going; item 14 saw ~90 s over the kernel tunnel).
+`settings set target.memory-module-load-level minimal` makes the attach
+about 30 s; system frames then show only their module name, while the app
+(from the local binary) and the sysroot's Swift runtime keep symbols
+(`LLDB_LOAD_LEVEL=complete` restores the rest). Two shell traps: a background
+job of a non-interactive bash starts with SIGINT ignored, so the forwarder is
+started with `env --default-signal=INT`, and with `setsid` so a Ctrl-C at the
+LLDB prompt does not reach it. `wait` on the SIGINTed forwarder returns 130,
+which `set -e` turned into the script's exit status. Receipt
+`receipts/2026-10-08-device-run-lldb-userspace.md`.

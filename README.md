@@ -227,7 +227,10 @@ it cannot map (FINDINGS.md item 27).
   Arch and optionally verifies ROOT resolves; `--user-only` skips every sudo
   step and uses the Swift already on PATH.
 - `device-run.sh`: pair, install, launch, LLDB attach; `--network` and
-  `--rsd` modes for wireless deploys (unverified).
+  `--rsd` modes for wireless deploys (unverified). `--lldb` needs no root
+  (userspace tunnel; `--sudo` for the old kernel-tunnel path). `LLDB_CMDS`
+  runs LLDB commands after the attach, in synchronous mode; `LLDB_LOAD_LEVEL`
+  (default `minimal`) trades system-frame symbols for a ~30 s attach.
 - `ship.sh`: App Store `.ipa` build, offline validation, and `--upload`.
   Helpers: `tools/asc.py` (stamp, identity, validate, upload) and
   `tools/darwin-tools` (the Linux `actool`, on AssetKit) and
