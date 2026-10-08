@@ -85,6 +85,11 @@ whole project; cross-file results appear when that ends.
    10-character team id when the app reads `$(AppIdentifierPrefix)`) rebuilds
    with every resource at the bundle roots, like Xcode; install the result
    with `xtool install xtool/<App>.app` (FINDINGS.md 63).
+   No xtool on the machine that holds the phone? `tools/sign-dev.sh App.app
+   out.ipa` signs the result with your development identity and profiles
+   (`tools/provision-dev.py`), and `pymobiledevice3 apps install out.ipa`
+   installs it. `CONFIGURATION=debug ship.sh --device` builds the debug app
+   for LLDB.
 
 ## 4. Upload to TestFlight
 

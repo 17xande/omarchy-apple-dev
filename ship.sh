@@ -51,7 +51,7 @@ fi
 stage=$(mktemp -d)
 trap 'rm -rf "$stage"' EXIT
 echo "== 1. Release build =="
-xtool dev build --configuration release
+xtool dev build --configuration "${CONFIGURATION:-release}"
 app=$(find xtool -maxdepth 1 -name '*.app' -print -quit)
 [ -n "$app" ] || { echo "no .app under xtool/" >&2; exit 1; }
 
