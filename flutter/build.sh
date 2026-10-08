@@ -22,6 +22,9 @@ sdkb=${DARWIN_SDK_BUNDLE:-${XDG_CONFIG_HOME:-$HOME/.config}/swiftpm/swift-sdks/d
 [ -d "$sdkb" ] || { echo "no darwin SDK bundle; run install-toolchain.sh first" >&2; exit 1; }
 ios_sdk=$sdkb/Developer/Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS.sdk
 tools=$sdkb/Developer/Platforms/iPhoneOS.platform/Developer/usr/bin
+# ibtool runs from this checkout, not from the copy install-toolchain.sh put in
+# the SDK bundle, so a `git pull` is enough to pick up a newer one.
+ibtool=$here/../tools/ibtool
 tc=$(dirname "$(readlink -f "$(command -v swift)")")
 # The shims forward to LLVM's binutils, which neither the Swift toolchain nor
 # the darwin SDK bundle ships.
@@ -54,7 +57,7 @@ asm=$out/assemble; shell_pkg=$out/shell; stage=$out/stage; bundle=$out/Payload/R
 for d in "$asm" "$stage" "$out/Payload"; do
   [ ! -d "$d" ] || find "$d" -mindepth 1 -delete
 done
-mkdir -p "$asm" "$shell_pkg" "$stage/sbsrc" "$stage/sbc" "$bundle/Frameworks" "$bundle/Base.lproj"
+mkdir -p "$asm" "$shell_pkg" "$stage/sbc" "$bundle/Frameworks" "$bundle/Base.lproj"
 
 export PATH="$here/shims:$sdkb/toolset/bin:$tc:$PATH"
 export XCRUN_SHIM_LOG=$out/shims.log
@@ -86,13 +89,12 @@ echo "== 3. Wrapper: icons, storyboards, Info.plist"
   --app-icon AppIcon --minimum-deployment-target "$MIN_IOS" --target-device iphone --target-device ipad \
   --output-partial-info-plist "$stage/icon.plist" --output-format human-readable-text >"$out/actool.log" 2>&1 ||
   { cat "$out/actool.log" >&2; exit 1; }
-python3 "$here/tools/storyboard-compat.py" "$app/ios/Runner/Base.lproj" "$stage/sbsrc"
-for sb in "$stage"/sbsrc/*.storyboard; do
-  "$tools/ibtool" --module Runner --minimum-deployment-target "$MIN_IOS" --target-device iphone \
+for sb in "$app"/ios/Runner/Base.lproj/*.storyboard; do
+  "$ibtool" --module Runner --minimum-deployment-target "$MIN_IOS" --target-device iphone \
     --target-device ipad --output-partial-info-plist "$stage/$(basename "$sb").plist" "$sb" \
     --compilation-directory "$stage/sbc" 2>"$out/ibtool.log" || { cat "$out/ibtool.log" >&2; exit 1; }
 done
-"$tools/ibtool" --module Runner --target-device iphone --target-device ipad \
+"$ibtool" --module Runner --target-device iphone --target-device ipad \
   --link "$bundle/Base.lproj" "$stage"/sbc/*.storyboardc 2>"$out/ibtool.log" || { cat "$out/ibtool.log" >&2; exit 1; }
 python3 "$here/tools/gen-info-plist.py" "$app/ios/Runner/Info.plist" "$stage/icon.plist" "$bundle/Info.plist" \
   "$BUNDLE_ID" "$BUILD_NAME" "$BUILD_NUMBER" "$MIN_IOS" "$ios_sdk" "$families"

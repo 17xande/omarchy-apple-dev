@@ -58,7 +58,7 @@ laptop (i7-8650U).
 | `xcrun`, `xcodebuild`, `codesign`, `lipo`, `strip`, `otool`, `install_name_tool`, `dsymutil`, `ld` | Xcode | `shims/`: SDK queries answered from the darwin SDK bundle, tools forwarded to LLVM, `codesign` a no-op (xtool signs the finished app). |
 | Runner and plugins | Xcode project plus Swift packages | `tools/gen-shell-package.py` writes one SwiftPM package from `.flutter-plugins-dependencies`; SwiftBuild compiles it against `Flutter.framework`. |
 | Icons | `actool` | This repo's Linux `actool`. |
-| Storyboards | `ibtool` | This repo's Linux `ibtool`, after `tools/storyboard-compat.py` (below). |
+| Storyboards | `ibtool` | This repo's Linux `ibtool`. Flutter's two template storyboards compile byte-identical to Xcode's (FINDINGS.md item 65). |
 | `Info.plist` | Xcode | `tools/gen-info-plist.py`. |
 
 ## Things that would otherwise bite
@@ -73,11 +73,6 @@ laptop (i7-8650U).
 - **The Swift toolchain's `ld64.lld` refuses iOS.** `shims/clang-darwin` links
   with the SDK bundle's `ld64.lld` and passes `-mlinker-version`, without
   which clang omits `-platform_version`.
-- **The stock storyboards use two constructs the Linux ibtool does not
-  compile**: a `calibratedWhite` background and views without a design-time
-  frame. `storyboard-compat.py` rewrites build-time copies (same white in
-  sRGB; a frame that constraints override at run time). The app's own files
-  are not modified.
 - **`xtool install` waits forever while the app being replaced is running.**
   Quit it first.
 
@@ -86,7 +81,8 @@ laptop (i7-8650U).
 - Release mode only: no debug build, no hot reload, no profile `gen_snapshot`.
 - Every plugin with native iOS code must ship a `Package.swift`; a
   CocoaPods-only plugin stops the build with its name.
-- Storyboards beyond the stock template may exceed the Linux ibtool.
+- A storyboard edited beyond Flutter's template may use something the Linux
+  ibtool does not compile yet; it stops with an `error:` line naming it.
 - Not tried: App Store upload of a Flutter app, app extensions, entitlements
   beyond the defaults, simulator builds.
 - A Flutter upgrade needs `flutter/setup.sh` again: the snapshot format is

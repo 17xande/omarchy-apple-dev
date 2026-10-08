@@ -1527,6 +1527,46 @@ passed. And llvm-strip and llvm-install-name-tool both leave the string pool
 4-byte aligned; dyld refuses that for images built against the 27.0 SDK
 (`mis-aligned LINKEDIT string pool`) while letting older-SDK images through,
 so a prebuilt dylib loads and a locally compiled one does not.
-`flutter/tools/macho-align.py` pads it. The stock Flutter storyboards need two
-neutral rewrites to fit the Linux ibtool (`flutter/tools/storyboard-compat.py`).
+`flutter/tools/macho-align.py` pads it. The stock Flutter storyboards at first
+needed two neutral rewrites to fit the Linux ibtool; item 65 made the compiler
+take them as they are and removed the rewrite.
 Release device builds only. Receipt `receipts/2026-10-08-flutter-ios.md`.
+
+**65. The Linux ibtool compiles Flutter's template storyboards byte-identical
+to Xcode's.** `flutter create` still writes the `Main.storyboard` and
+`LaunchScreen.storyboard` of the Xcode 7 era, and they use four things no
+storyboard in the corpus had. (1) `<layoutGuides>` with
+`viewControllerLayoutGuide` top and bottom, the guides that predate the safe
+area. ibtool was skipping the element without an error, so the scene view nib
+came out 1010 bytes where Apple's is 1863. Each guide is a `_UILayoutGuide`
+(class fallback `UIView`) appended to the scene view's subviews after the
+document's own, with one `_UILayoutSupportConstraint` (fallback
+`NSLayoutConstraint`; width, priority 999) of its own and three constraints
+that the view owns and the guide lists again under
+`_UILayoutGuideConstraintsToRemove`: top is leading = view.leading, top =
+view.top, height; bottom is leading = view.leading, height, view.bottom =
+guide.bottom. They lead the view's constraint array, ahead of the document's,
+and the view gets a subviews array and a constraint array even when the
+document gives it neither. In the objects array the guides follow the view's
+constraints and precede its subviews. (2) `<color white= alpha=
+customColorSpace="calibratedWhite">` is stored as RGB with the white repeated,
+not as a white color. The white passes through float32 and is then rounded to
+ten significant digits, the alpha is only rounded (white 1/3 gives
+`UIRed-Double` 0.3333333433 and 2/3 gives 0.6666666865, while alpha 0.1 stays
+0.1): eight probe values, all identical. An opaque inline sRGB color writes
+three `NSRGB` components, not four, the rule system and named colors already
+followed. (3) A view saved with no design-time frame is 1000 x 1000 at the
+origin, the scene view and an image view alike, and sorts at the origin in the
+constraint order. Below a deployment target of 17.0 the scene view alone
+becomes 393 x 852 instead: compiled at 13.0, 15.0, 16.6, 17.0 and 26.0, the
+boundary is 17.0, so ibtool now reads `--minimum-deployment-target`, which it
+had been accepting and ignoring. (4) On a scene image view,
+`multipleTouchEnabled` (stored inverted, after `UIDeepDrawRect`) and
+`image="Name"` for an asset-catalog image, whose placeholder is 1 x 1 whatever
+the document's `<image>` resource says; both were dropped silently. The two
+storyboards, three more with other whites and the 16.6 scene nib are in the
+self-test. The six files also match, byte for byte, the `Base.lproj` of an app
+that Xcode 27.0 itself built from these storyboards at a 16.6 target. With
+that, `flutter/tools/storyboard-compat.py` is gone and `flutter/build.sh`
+compiles the app's storyboards untouched. Receipt
+`receipts/2026-10-08-ibtool-flutter-storyboards.md`.

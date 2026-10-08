@@ -36,6 +36,7 @@ VERSION_XML = """<?xml version="1.0" encoding="UTF-8"?>
 
 GOLDEN = os.path.join(_TOOLS, "..", "tests", "ibtool", "golden")
 TARGET_MODULE = None  # --module: the module for customModuleProvider="target" classes
+MIN_DEPLOYMENT = None  # --minimum-deployment-target as (major, minor); None reads as 17.0 or later
 SRC = os.path.join(_TOOLS, "..", "tests", "ibtool", "src")
 
 SYSTEM_COLORS = {  # name -> built-in spec, preferred over document resources
@@ -256,7 +257,17 @@ def _autoresizing_mask(el, where, default=36):
     return mask
 
 
+# Apple's ibtool gives an element saved without a design-time frame a
+# 1000 x 1000 one at the origin (Runner LaunchScreen golden: the scene view and
+# its image view, both sized by constraints at run time).
+FRAMELESS_TAGS = {"view", "imageView"}
+FRAMELESS_RECT = (0.0, 0.0, 1000.0, 1000.0)
+PRE_17_FRAMELESS_SCENE_SIZE = (393, 852)
+
+
 def _frame(el):
+    if el.tag in FRAMELESS_TAGS and el.find("rect[@key='frame']") is None:
+        return FRAMELESS_RECT
     rect = _sub(el, "frame", el.tag)
     try:
         return (float(rect.get("x", "0.0")), float(rect.get("y", "0.0")),
@@ -344,7 +355,25 @@ def build_color_el(b, el, where, resources, named):
         return build_color(b, "clearColor", where)
     if el.get("red") is not None:
         return build_rgb_color(b, el, where)
+    if el.get("white") is not None and el.get("customColorSpace") == "calibratedWhite":
+        return build_calibrated_white_color(b, el, where)
     raise XibError(f"unsupported color element {el.attrib} ({where})")
+
+
+def build_calibrated_white_color(b, color, where):
+    """An inline <color white= alpha= customColorSpace="calibratedWhite">, the
+    form Xcode 7-era documents (Flutter's template storyboards) carry. Apple
+    stores it as an RGB color with the white repeated, not as a white color
+    (Runner Main golden: white=1 alpha=1 -> NSRGB "1 1 1", NSColorSpace 2)."""
+    if color.get("colorSpace") != "custom":
+        raise XibError(f"<color> {dict(color.attrib)} is not a custom-space color ({where})")
+    # The white goes through float32 and both components are rounded to ten
+    # significant digits; the -Double keys carry the result (probes: white 1/3
+    # -> 0.3333333433, white 2/3 -> 0.6666666865, while alpha 0.1 stays 0.1).
+    f32 = struct.unpack("<f", struct.pack("<f", float(_attr(color, "white", where))))[0]
+    w = float(f"{f32:.10g}")
+    al = float(f"{float(_attr(color, 'alpha', where)):.10g}")
+    return _color_components(b, b.new("UIColor"), ("rgba", w, w, w, al))
 
 
 def build_rgb_color(b, color, where):
@@ -359,6 +388,10 @@ def build_rgb_color(b, color, where):
     c.add("UIColorComponentCount", *b.int8(4))
     for k, v in zip(("UIRed", "UIGreen", "UIBlue", "UIAlpha"), comps):
         c.add(k, *b.float32(v))
+    # NSRGB drops the alpha when the color is opaque, as for system and named
+    # colors (Runner LaunchScreen golden: 1 1 1 1 -> "1 1 1").
+    if comps[3] == 1.0:
+        comps = comps[:3]
     c.add("NSRGB", N.DATA, " ".join(f"{v:.3g}" for v in comps).encode("ascii"))
     c.add("NSColorSpace", *b.int8(2))
     return c
@@ -1206,7 +1239,9 @@ def finalize(b, root):
     creation_keys = []
     creation_idx = {}
     SUPERCLASS = {"UIColor": "NSColor", "UIFont": "NSFont",
-                  "UITableViewCellContentView": "UIView"}
+                  "UITableViewCellContentView": "UIView",
+                  "_UILayoutGuide": "UIView",
+                  "_UILayoutSupportConstraint": "NSLayoutConstraint"}
     for o in b.objects:
         o.value_start = len(values)
         for key, v in o.values:
@@ -1428,6 +1463,9 @@ def _constraint_order(view_el, cons, where, mac=False):
         r = sv.find("rect[@key='frame']")
         if r is not None:
             origin[sv.get("id")] = (float(r.get("x")), float(r.get("y")))
+        elif sv.tag in FRAMELESS_TAGS:
+            # no design-time frame: Apple places it at the origin (_frame)
+            origin[sv.get("id")] = FRAMELESS_RECT[:2]
 
     def key(c):
         first, second = c.get("firstItem", owner), c.get("secondItem")
@@ -2261,6 +2299,12 @@ def _scene_image_view(sb, el, where, resources, named, id_map):
     o.add("UIDeepDrawRect", *b.boolean(False))
     if el.get("userInteractionEnabled") is not None:
         o.add("UIUserInteractionDisabled", *b.boolean(el.get("userInteractionEnabled") != "NO"))
+    if el.get("multipleTouchEnabled") is not None:
+        if el.get("userInteractionEnabled") is not None:
+            raise XibError("<imageView> with both userInteractionEnabled and multipleTouchEnabled: "
+                           f"Apple's key order unknown ({where})")
+        # stored inverted, like UIClipsToBounds (Runner LaunchScreen golden)
+        o.add("UIMultipleTouchEnabled", *b.boolean(el.get("multipleTouchEnabled") != "YES"))
     o.add("UIAutoresizeSubviews", *b.boolean(False))
     o.add("UIAutoresizingMask", *b.int8(_autoresizing_mask(el, where)))
     cm = el.get("contentMode")
@@ -2290,6 +2334,21 @@ def _scene_image_view(sb, el, where, resources, named, id_map):
     img = el.find("imageReference[@key='image']")
     if img is not None:
         o.add("UIImage", *b.ref(_image_ref(b, img, where)))
+    elif el.get("image") is not None:
+        # image="Name": an asset-catalog image named by attribute (Runner
+        # LaunchScreen golden). The placeholder is 1 x 1 whatever the document's
+        # <image> resource says.
+        if el.get("catalog") is not None:
+            raise XibError(f"<imageView image=... catalog={el.get('catalog')!r}> "
+                           f"not supported in a scene ({where})")
+        ph = b.new("UIImageNibPlaceholder")
+        ph.add("UIImageWidth", *b.float32(1.0))
+        ph.add("UIImageHeight", *b.float32(1.0))
+        ph.add("UIResourceName", *b.ref(b.string(el.get("image"))))
+        ph.add("UISystemSymbolResourceName", N.NIL, None)
+        ph.add("UISymbolImageConfiguration", N.NIL, None)
+        ph.add("UIResourceCatalogName", N.NIL, None)
+        o.add("UIImage", *b.ref(ph))
     psym = _symbol_config(b, el, "preferredSymbolConfiguration", where)
     if psym is not None:
         o.add("UIPreferredSymbolConfiguration", *b.ref(psym))
@@ -2487,6 +2546,78 @@ def _scene_collection_view(sb, el, where, resources, named, id_map, state):
     return o, [], []
 
 
+def _deployment_target(text):
+    """'16.6' -> (16, 6); None when it is not a version."""
+    parts = text.split(".")
+    if not all(p.isdigit() for p in parts) or not parts:
+        return None
+    return (int(parts[0]), int(parts[1]) if len(parts) > 1 else 0)
+
+
+LEGACY_GUIDE_IDENT = {"top": "_UIViewControllerTop", "bottom": "_UIViewControllerBottom"}
+
+
+def _legacy_layout_guide(b, g_el, view, where):
+    """One <viewControllerLayoutGuide> of a scene's <layoutGuides> (the pre-safe-area
+    top/bottom guides) -> (guide, constraints the view owns). The guide is a hidden
+    subview of the scene view with one support constraint of its own; the view
+    carries three constraints per guide, which the guide also lists as the ones
+    to remove (Runner Main and LaunchScreen goldens)."""
+    kind = g_el.get("type")
+    if kind not in LEGACY_GUIDE_IDENT:
+        raise XibError(f"<viewControllerLayoutGuide> type={kind!r} not supported ({where})")
+    unknown = set(g_el.attrib) - {"type", "id"}
+    if unknown or len(g_el):
+        raise XibError(f"<viewControllerLayoutGuide> has unsupported content ({where})")
+    g = b.new("_UILayoutGuide")
+    own = b.new("NSMutableArray")
+    support = b.new("_UILayoutSupportConstraint")
+    ident = b.string(LEGACY_GUIDE_IDENT[kind])
+    remove = b.new("NSArray")
+
+    def constraint(first, first_attr, second=None, second_attr=None):
+        c = b.new("NSLayoutConstraint")
+        c.add("NSFirstItem", *b.ref(first))
+        c.add("NSFirstAttributeV2", *b.int8(ATTRIBUTES[first_attr]))
+        c.add("NSFirstAttribute", *b.int8(ATTRIBUTES[first_attr]))
+        if second is not None:
+            c.add("NSSecondItem", *b.ref(second))
+            c.add("NSSecondAttributeV2", *b.int8(ATTRIBUTES[second_attr]))
+            c.add("NSSecondAttribute", *b.int8(ATTRIBUTES[second_attr]))
+        c.add("NSShouldBeArchived", *b.boolean(False))
+        return c
+
+    if kind == "top":
+        cons = [constraint(g, "leading", view, "leading"),
+                constraint(g, "top", view, "top"),
+                constraint(g, "height")]
+    else:
+        cons = [constraint(g, "leading", view, "leading"),
+                constraint(g, "height"),
+                constraint(view, "bottom", g, "bottom")]
+    g.add("UIDeepDrawRect", *b.boolean(False))
+    g.add("UIOpaque", *b.boolean(False))
+    g.add("UIHidden", *b.boolean(False))
+    g.add("UIAutoresizeSubviews", *b.boolean(False))
+    g.add("UIViewDoesNotTranslateAutoresizingMaskIntoConstraints", *b.boolean(False))
+    g.add("UIViewAutolayoutConstraints", *b.ref(own))
+    g.add("UIViewSemanticContentAttribute", *b.int8(0))
+    g.add("UIViewLargeContentStoredProperties", N.NIL, None)
+    g.add("_UILayoutGuideIdentifier", *b.ref(ident))
+    g.add("_UILayoutGuideConstraintsToRemove", *b.ref(remove))
+    own.add("NSInlinedValue", *b.boolean(False))
+    own.add("UINibEncoderEmptyKey", *b.ref(support))
+    support.add("NSFirstItem", *b.ref(g))
+    support.add("NSFirstAttributeV2", *b.int8(ATTRIBUTES["width"]))
+    support.add("NSFirstAttribute", *b.int8(ATTRIBUTES["width"]))
+    support.add("NSShouldBeArchived", *b.boolean(False))
+    support.add("NSPriority", *b.int16(999))
+    remove.add("NSInlinedValue", *b.boolean(False))
+    for c in cons:
+        remove.add("UINibEncoderEmptyKey", *b.ref(c))
+    return g, cons
+
+
 def _scene_element(sb, el, where, resources, named, id_map, state):
     """One scene element -> (obj, own_constraint_group, events)."""
     state.setdefault("id_map", {}).update({k: v for k, v in id_map.items()})
@@ -2526,7 +2657,9 @@ def _scene_element(sb, el, where, resources, named, id_map, state):
     subs_el = el.find("subviews")
     slot = None
     subs = None
-    if subs_el is not None:
+    # the scene's legacy top/bottom layout guides live in its root view
+    legacy_els = state.get("legacy_guides", ()) if state.get("legacy_root") is el else ()
+    if subs_el is not None or legacy_els:
         subs = b.new("NSMutableArray")
         subs.add("NSInlinedValue", *b.boolean(False))
         o.add("UISubviews", *b.ref(subs))
@@ -2535,6 +2668,14 @@ def _scene_element(sb, el, where, resources, named, id_map, state):
     if subs is not None:
         for k in kids:
             subs.add("UINibEncoderEmptyKey", *b.ref(k))
+    legacy_cons = []
+    for g_el in legacy_els:
+        g_obj, g_cons = _legacy_layout_guide(b, g_el, o, where)
+        subs.add("UINibEncoderEmptyKey", *b.ref(g_obj))
+        legacy_cons.extend(g_cons)
+        state.setdefault("legacy_guide_objs", []).append(g_obj)
+        if g_el.get("id"):
+            id_map[g_el.get("id")] = g_obj
     color = el.find("color[@key='backgroundColor']")
     if color is not None:
         cobj = build_color_el(b, color, where, resources, named)
@@ -2558,12 +2699,21 @@ def _scene_element(sb, el, where, resources, named, id_map, state):
             guides[gid] = _guide_maker(o, cache)
     if el.find("constraints") is not None:
         arr, cons = build_constraints_block(b, el, o, id_map, where, guides)
+        # the guides' constraints come first in the view's list
+        for i, c in enumerate(legacy_cons):
+            arr.values.insert(1 + i, ("UINibEncoderEmptyKey", N.Value(0, N.OBJREF, c.idx)))
         o.add("UIViewAutolayoutConstraints", *b.ref(arr))
         group.append(cons)
         ordered_els = _constraint_order(el, el.find("constraints").findall("constraint"), where)
         for c_el, c_obj in zip(ordered_els, cons):
             if c_el.get("id"):
                 state.setdefault("id_map", {})[c_el.get("id")] = c_obj
+    elif legacy_cons:
+        arr = b.new("NSMutableArray")
+        arr.add("NSInlinedValue", *b.boolean(False))
+        for c in legacy_cons:
+            arr.add("UINibEncoderEmptyKey", *b.ref(c))
+        o.add("UIViewAutolayoutConstraints", *b.ref(arr))
     if cache:
         garr = b.new("NSMutableArray")
         garr.add("NSInlinedValue", *b.boolean(False))
@@ -3383,8 +3533,24 @@ def _scene_view_nib(vc_el, root_el, where, resources, named, device=None):
     state = {"device": device}
     up = _proxy(b, "UpstreamPlaceholder-1") if _vc_has_upstream(vc_el) else None
     all_ids = state.setdefault("id_map", {})
+    guides_el = vc_el.find("layoutGuides")
+    if guides_el is not None:
+        if root_el.tag != "view":
+            raise XibError(f"<layoutGuides> on a <{root_el.tag}> scene not supported ({where})")
+        other = [g.tag for g in guides_el if g.tag != "viewControllerLayoutGuide"]
+        if other:
+            raise XibError(f"<layoutGuides> has unsupported {sorted(set(other))} ({where})")
+        state["legacy_root"] = root_el
+        state["legacy_guides"] = list(guides_el)
     view, groups, events = _scene_element(sb, root_el, where, resources, named,
                                           all_ids, state)
+    if device is None and root_el.tag in FRAMELESS_TAGS \
+            and root_el.find("rect[@key='frame']") is None \
+            and MIN_DEPLOYMENT is not None and MIN_DEPLOYMENT < (17, 0):
+        # Below iOS 17 a scene view saved without a frame takes the default
+        # device's size instead of 1000 x 1000; its subviews keep 1000 x 1000
+        # (Runner LaunchScreen compiled at 13.0, 15.0 and 16.6 against 17.0 and 26.0).
+        device = PRE_17_FRAMELESS_SCENE_SIZE
     if device is not None and \
             vc_el.find("freeformSimulatedSizeMetrics") is None:
         w, h = device
@@ -3406,6 +3572,7 @@ def _scene_view_nib(vc_el, root_el, where, resources, named, device=None):
         decode.append(lambda bb: _guide_ph(bb))
     for cons in groups:
         decode.extend(cons)
+    decode.extend(state.get("legacy_guide_objs", []))
     kid_ph_els = [el for el in state.get("scroll_guides", []) if el is not root_el]
     for kid, _g in state.get("kid_decode", []):
         decode.append(kid)
@@ -4442,6 +4609,34 @@ SB_SELF_TEST = (
     ("NetNewsWire Inspector.storyboardc",
      "NetNewsWire/Inspector.storyboard",
      "Inspector.storyboardc"),
+    # Flutter's template storyboards (flutter create, unchanged since Xcode 7):
+    # legacy top/bottom layout guides, calibratedWhite, views with no frame.
+    ("Flutter Runner Main.storyboardc",
+     "Runner/Base.lproj/Main.storyboard",
+     "Runner/Base.lproj/Main.storyboardc"),
+    ("Flutter Runner LaunchScreen.storyboardc",
+     "Runner/Base.lproj/LaunchScreen.storyboard",
+     "Runner/Base.lproj/LaunchScreen.storyboardc"),
+    # Main.storyboard with other calibratedWhite backgrounds: white 1/3, white
+    # 2/3 at alpha 0.5, white 0.25 at alpha 0.1 (the -Double rounding rules).
+    ("Flutter Runner white-third.storyboardc",
+     "Runner/Base.lproj/white-third.storyboard",
+     "Runner/Base.lproj/white-third.storyboardc"),
+    ("Flutter Runner white-twothirds-half.storyboardc",
+     "Runner/Base.lproj/white-twothirds-half.storyboard",
+     "Runner/Base.lproj/white-twothirds-half.storyboardc"),
+    ("Flutter Runner white-quarter-tenth.storyboardc",
+     "Runner/Base.lproj/white-quarter-tenth.storyboard",
+     "Runner/Base.lproj/white-quarter-tenth.storyboardc"),
+)
+# (label, source, golden nib, --minimum-deployment-target): one scene nib that
+# Apple's ibtool writes differently below iOS 17 (tests/ibtool/golden-pre17,
+# compiled like compile-golden.sh but with --minimum-deployment-target 16.6).
+PRE17_SELF_TEST = (
+    ("Flutter Runner LaunchScreen at iOS 16.6",
+     "Runner/Base.lproj/LaunchScreen.storyboard",
+     "Runner/Base.lproj/LaunchScreen.storyboardc/01J-lp-oVM-view-Ze5-6b-2t3.nib",
+     (16, 6)),
 )
 
 
@@ -4509,6 +4704,22 @@ def self_test():
                       for k in sorted(set(mine) | set(want))
                       if mine.get(k) != want.get(k)]
             failed.append(f"{label}: {detail}")
+    global MIN_DEPLOYMENT
+    for label, src_rel, golden_rel, target in PRE17_SELF_TEST:
+        TARGET_MODULE = None
+        tmp = tempfile.mkdtemp(prefix="/tmp/ibtool-sbtest-")
+        MIN_DEPLOYMENT = target
+        try:
+            sbc = compile_storyboard(os.path.join(SRC, src_rel), tmp)
+        finally:
+            MIN_DEPLOYMENT = None
+        want = open(os.path.join(_TOOLS, "..", "tests", "ibtool", "golden-pre17", golden_rel),
+                    "rb").read()
+        mine_path = os.path.join(sbc, os.path.basename(golden_rel))
+        if os.path.isfile(mine_path) and open(mine_path, "rb").read() == want:
+            compiled.append(label)
+        else:
+            failed.append(f"{label}: {os.path.basename(golden_rel)} differs")
     if failed:
         raise SystemExit("self-test FAILED: " + "; ".join(failed))
     print(f"self-test passed (round-trip {len(nibs)} golden nibs; "
@@ -4544,9 +4755,11 @@ def main(argv):
     known_flags = flags_with_value | {"--errors", "--warnings",
                                       "--notices", "--auto-activate-custom-fonts",
                                       "--compile", "--link"}
-    global TARGET_MODULE
+    global TARGET_MODULE, MIN_DEPLOYMENT
     if "--module" in argv[:-1]:
         TARGET_MODULE = _swift_module(argv[argv.index("--module") + 1], argv)
+    if "--minimum-deployment-target" in argv[:-1]:
+        MIN_DEPLOYMENT = _deployment_target(argv[argv.index("--minimum-deployment-target") + 1])
     action = None
     action_args = []
     positional = []
