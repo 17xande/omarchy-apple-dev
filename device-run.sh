@@ -297,7 +297,7 @@ usb)
     || { echo "Pairing needed: run '$PMD3 lockdown pair' and accept the prompt on the phone."; }
 
   echo "== 3. List devices via xtool =="
-  $XT devices "${UDID_ARGS[@]}"
+  $XT devices
 
   echo "== 4. Build, sign, install, launch =="
   # Signing uses your Apple ID (free tier works); the first deploy creates a free
