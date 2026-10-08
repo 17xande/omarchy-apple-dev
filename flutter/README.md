@@ -21,8 +21,9 @@ flutter/build.sh --install /path/to/flutter/app [KEY=VALUE ...]
 
 The `llvm` package is the one dependency `install-toolchain.sh` does not
 bring: the shims forward to its binutils, and neither the Swift toolchain nor
-the darwin SDK bundle ships them. `build.sh` names whatever is missing before
-it starts.
+the darwin SDK bundle ships them. `flutter assemble` also calls `rsync`, which
+a minimal Arch install lacks. `build.sh` names whatever is missing before it
+starts.
 
 `KEY=VALUE` arguments become `--dart-define`s. Without `--install` the result
 is `<app>/build/ios-linux/Runner.ipa`, unsigned, for `xtool install` or

@@ -33,7 +33,7 @@ for t in llvm-strip llvm-lipo llvm-otool llvm-install-name-tool llvm-ar; do
   command -v "$t" >/dev/null || missing+=" $t"
 done
 [ -z "$missing" ] || { echo "missing:$missing (Arch package: llvm; install with: sudo pacman -S --needed llvm)" >&2; exit 1; }
-for t in python3 zip file; do
+for t in python3 zip file rsync; do
   command -v "$t" >/dev/null || { echo "missing: $t (Arch package: ${t/python3/python})" >&2; exit 1; }
 done
 file -b "$flutter_root/bin/cache/artifacts/engine/ios-release/gen_snapshot_arm64" 2>/dev/null | grep -q ELF ||
