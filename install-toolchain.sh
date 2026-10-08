@@ -36,7 +36,10 @@ sdk_install_from() {
 }
 
 REPO_DIR=$(dirname "$(readlink -f "$0")")
-DARWIN_SDK_BUNDLE="$HOME/.swiftpm/swift-sdks/darwin.artifactbundle"
+# SwiftPM keeps Swift SDKs under $XDG_CONFIG_HOME/swiftpm when XDG_CONFIG_HOME is
+# set (it is in an Omarchy desktop terminal), else under ~/.swiftpm.
+DARWIN_SDK_BUNDLE="${XDG_CONFIG_HOME:+$XDG_CONFIG_HOME/swiftpm}"
+DARWIN_SDK_BUNDLE="${DARWIN_SDK_BUNDLE:-$HOME/.swiftpm}/swift-sdks/darwin.artifactbundle"
 
 # Shallow-fetch one commit of a repo into a cache dir (kept; the build reuses it).
 fetch_commit() { # repo sha dir
@@ -191,7 +194,8 @@ for rel, fixes in (
     p = os.path.join(toolchain_root, rel)
     if not os.path.isfile(p):
         continue
-    lines = open(p).read().split("\n")
+    old = open(p).read()
+    lines = old.split("\n")
     for setting, value in fixes:
         for i, line in enumerate(lines):
             if f'Name = "{setting}";' in line or f'Name = {setting};' in line:
@@ -199,7 +203,16 @@ for rel, fixes in (
                     if "DefaultValue =" in lines[j]:
                         lines[j] = re.sub(r'"[^"]*"\s*;', f'"{value}";', lines[j])
                         break
-    open(p, "w").write("\n".join(lines))
+    new = "\n".join(lines)
+    if new == old:
+        continue
+    # A package-managed toolchain (AUR swift-bin under /usr/lib/swift) is
+    # root-owned: say what to patch instead of aborting the rest of the install.
+    if not os.access(p, os.W_OK):
+        print(f"WARNING: {p} is not writable; set its {', '.join(s for s, _ in fixes)} "
+              f"DefaultValue to {', '.join(v for _, v in fixes)} as root", file=sys.stderr)
+        continue
+    open(p, "w").write(new)
 PY
   echo "Installed actool, xcstringstool, momc and ibtool (version probe; compiles a small xib subset) into $bin"
 }
