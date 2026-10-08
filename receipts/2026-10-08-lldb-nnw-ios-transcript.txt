@@ -1,0 +1,85 @@
+(lldb) platform select remote-ios --sysroot "/home/joshuawarren/phone-install/Symbols"
+  Platform: remote-ios
+ Connected: no
+   Sysroot: /home/joshuawarren/phone-install/Symbols
+  SDK Path: "/home/joshuawarren/phone-install/Symbols"
+(lldb) process connect connect://[fd29:c097:ec56::1]:54482
+(lldb) process attach --pid 71687
+warning: libobjc.A.dylib is being read from process memory. This indicates that LLDB could not find the on-disk shared cache for this device. This will likely reduce debugging performance.
+
+Process 71687 stopped
+* thread #1, queue = 'com.apple.main-thread', stop reason = signal SIGSTOP
+      frame #0: 0x0000000239864cd4 libsystem_kernel.dylib`mach_msg2_trap + 8
+libsystem_kernel.dylib`mach_msg2_trap:
+->  0x239864cd4 <+8>: ret    
+
+libsystem_kernel.dylib`macx_swapon:
+    0x239864cd8 <+0>: mov    x16, #-0x30               ; =-48 
+    0x239864cdc <+4>: svc    #0x80
+    0x239864ce0 <+8>: ret    
+Target 0: (NetNewsWire-iOS) stopped.
+Executable binary set to "/private/var/containers/Bundle/Application/<UUID>/nnwios-dev-fix2.app/NetNewsWire-iOS".
+warning: Architecture changed from arm64e-apple-ios to arm64-apple-ios-.
+(lldb) target symbols add /home/joshuawarren/phone-install/fix2.app/NetNewsWire-iOS
+symbol file '/home/joshuawarren/phone-install/fix2.app/NetNewsWire-iOS' has been added to '/private/var/containers/Bundle/Application/<UUID>/nnwios-dev-fix2.app/NetNewsWire-iOS'
+(lldb) breakpoint set -r SceneDelegate.*sceneDidEnterBackground
+Breakpoint 1: 2 locations.
+(lldb) process continue
+Process 71687 resuming
+(lldb) script import time; time.sleep(90)
+Process 71687 stopped
+* thread #1, queue = 'com.apple.main-thread', stop reason = breakpoint 1.1
+      frame #0: 0x000000010526fd54 NetNewsWire-iOS`@objc SceneDelegate.sceneDidEnterBackground(_:)
+NetNewsWire-iOS`sceneDidEnterBackground:
+->  0x10526fd54 <+0>:  sub    sp, sp, #0x40
+    0x10526fd58 <+4>:  stp    x20, x19, [sp, #0x20]
+    0x10526fd5c <+8>:  stp    x29, x30, [sp, #0x30]
+    0x10526fd60 <+12>: add    x29, sp, #0x30
+Target 0: (NetNewsWire-iOS) stopped.
+(lldb) thread backtrace
+* thread #1, queue = 'com.apple.main-thread', stop reason = breakpoint 1.1
+  * frame #0: 0x000000010526fd54 NetNewsWire-iOS`@objc SceneDelegate.sceneDidEnterBackground(_:)
+    frame #1: 0x00000001867a3c74 UIKitCore`<redacted> + 152
+    frame #2: 0x00000001867c1fb8 UIKitCore`<redacted> + 52
+    frame #3: 0x0000000186213268 UIKitCore`_UIScenePerformActionsWithLifecycleActionMask + 116
+    frame #4: 0x000000018621fcd0 UIKitCore`<redacted> + 164
+    frame #5: 0x0000000186213c10 UIKitCore`<redacted> + 296
+    frame #6: 0x00000001862139c4 UIKitCore`<redacted> + 688
+    frame #7: 0x0000000186214390 UIKitCore`<redacted> + 320
+    frame #8: 0x00000001862140d0 UIKitCore`<redacted> + 116
+    frame #9: 0x00000001862136a0 UIKitCore`<redacted> + 736
+    frame #10: 0x0000000186213394 UIKitCore`_UISceneSettingsDiffActionPerformChangesWithTransitionContextAndCompletion + 224
+    frame #11: 0x0000000186211628 UIKitCore`<redacted> + 300
+    frame #12: 0x0000000186aa5218 UIKitCore`<redacted> + 636
+    frame #13: 0x0000000186212ca4 UIKitCore`<redacted> + 248
+    frame #14: 0x00000001862b8ea8 UIKitCore`<redacted> + 244
+    frame #15: 0x000000018650a274 UIKitCore`<redacted> + 336
+    frame #16: 0x00000001a967a064 FrontBoardServices`<redacted> + 380
+    frame #17: 0x00000001a9654d54 FrontBoardServices`<redacted> + 128
+    frame #18: 0x00000001a9664a2c FrontBoardServices`<redacted> + 688
+    frame #19: 0x00000001a9654adc FrontBoardServices`<redacted> + 352
+    frame #20: 0x00000001a965536c FrontBoardServices`<redacted> + 96
+    frame #21: 0x00000001a9655458 FrontBoardServices`<redacted> + 168
+    frame #22: 0x00000001b0478fb4 libdispatch.dylib`<redacted> + 16
+    frame #23: 0x00000001b0463d34 libdispatch.dylib`<redacted> + 224
+    frame #24: 0x00000001912bc874 BoardServices`<redacted> + 52
+    frame #25: 0x00000001912bc6d4 BoardServices`<redacted> + 232
+    frame #26: 0x0000000181fc0c20 CoreFoundation`<redacted> + 28
+    frame #27: 0x0000000181fc0b94 CoreFoundation`<redacted> + 192
+    frame #28: 0x0000000181fa2268 CoreFoundation`<redacted> + 316
+    frame #29: 0x0000000181fa1384 CoreFoundation`<redacted> + 416
+    frame #30: 0x0000000181fa27f4 CoreFoundation`<redacted> + 344
+    frame #31: 0x000000022c664f24 GraphicsServices`GSEventRunModal + 120
+    frame #32: 0x00000001862801cc UIKitCore`UIApplicationMain + 336
+    frame #33: 0x000000018651b644 UIKitCore`___lldb_unnamed_symbol_184baf5dc + 104
+    frame #34: 0x0000000105110b98 NetNewsWire-iOS`static UIApplicationDelegate.main() + 128
+    frame #35: 0x0000000105110b0c NetNewsWire-iOS`static AppDelegate.$main() + 32
+    frame #36: 0x00000001051173c8 NetNewsWire-iOS`main + 28
+    frame #37: 0x0000000181df35b8 dyld`<redacted> + 6616
+(lldb) frame info
+frame #0: 0x000000010526fd54 NetNewsWire-iOS`@objc SceneDelegate.sceneDidEnterBackground(_:)
+(lldb) process detach
+Process 71687 detached
+(lldb) quit
+
+Script done on 2026-10-08 14:13:31-05:00 [COMMAND_EXIT_CODE="124"]
