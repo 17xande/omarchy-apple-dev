@@ -31,11 +31,41 @@ About 30 s end to end, exit 0, forwarder gone, the app still answering its debug
 Packet logs: attaching with a synchronous `process connect` never sends `vAttach`; with
 `SetAsync(True)` it is answered with a `T11` stop in ~1 s.
 
-## Not verified yet
+## Full run, 2026-10-08 (after the usbmuxd restart)
 
-The full `./device-run.sh --lldb` (build, stop app, install, suspended launch, attach, app
-function names, Ctrl-C at the prompt). The attempt on 2026-10-08 21:20 built fine, then
-usbmuxd aborted (`free(): invalid pointer` right after "Sending to client fd 13 failed: Broken
-pipe") while `xtool install` was connecting, so the install failed with `noDevice`. The
-app-stop-before-install step, the setsid/trap rework and the readiness checks were added after
-the isolated run above and have only been syntax-checked.
+From ~/dev/music-practice-app, no sudo:
+
+```
+$ LLDB_CMDS=$'breakpoint set -r "RootView\\.body\\.getter"\ncontinue\nbt 6\nbreakpoint delete -f\nprocess detach\nquit' \
+    ~/dev/omarchy-apple-dev/device-run.sh --lldb
+Build complete! (15.48 secs)
+== 5. LLDB ==
+[Installing] 100%
+Attaching to pid 1442
+(lldb) process attach --pid 1442
+Process 1442 stopped
+       frame #0: 0x00000001057e9a90 dyld`_dyld_start
+(lldb) breakpoint set -r "RootView\.body\.getter"
+Breakpoint 1: 33 locations.
+(lldb) continue
+* thread #1, stop reason = breakpoint 1.12
+    frame #0: 0x0000000104f69ab0 MusicPractice`RootView.body.getter() at RootView.swift:29:29
+-> 29  	        NavigationSplitView {
+(lldb) bt 6
+   * frame #0: 0x0000000104f69ab0 MusicPractice`RootView.body.getter() at RootView.swift:29:29
+     frame #2: 0x00000001975d9ce4 SwiftUICore`
+(lldb) process detach
+Process 1442 detached
+(lldb) quit
+exit=0
+```
+
+The install went over the stopped app, the suspended launch stopped at `_dyld_start`, and the
+breakpoint in app code hit with source. After the detach, the app (still pid 1442) answered
+`/ping` with ok, no forwarder or lldb process was left, and usbmuxd stayed active. About 50 s from
+step 5 to exit. The earlier attempt (21:20) failed because usbmuxd aborted during `xtool install`
+(`free(): invalid pointer` after "Sending to client fd 13 failed: Broken pipe"), before any of this
+code ran.
+
+Not tested: a real Ctrl-C at the LLDB prompt (simulated only: SIGINT to the script's process
+group leaves the setsid'd forwarder running).
