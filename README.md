@@ -2,8 +2,8 @@
 
 [![Sponsor](https://img.shields.io/badge/Sponsor-%E2%9D%A4-pink)](https://github.com/sponsors/joshuaswarren)
 
-SwiftUI apps built on Omarchy Linux, installed on a physical iPhone over USB,
-with no Xcode and no macOS in the loop.
+SwiftUI and Flutter apps built on Omarchy Linux, installed on a physical iPhone
+over USB, with no Xcode and no macOS in the loop.
 
 Current working set, verified 2026-10-03 on x86_64 Arch with the install
 script as a fresh user (FINDINGS.md item 22):
@@ -23,6 +23,51 @@ the same flow works on a Framework Desktop with an iPhone 16, used for a real
 client project.
 
 Works with a free Apple ID. Paid membership not required for device installs.
+
+## Flutter apps
+
+Build a Flutter app for an iPhone on Linux and end with a signed development
+`.ipa`. Release mode, arm64, verified on x86_64 with Flutter 3.47.6 (receipts:
+`receipts/2026-10-08-flutter-signed-ipa.md`).
+
+```
+./install-toolchain.sh                    # once, as for any app in this repo
+sudo pacman -S --needed llvm rsync        # the two tools the Flutter build calls
+flutter/setup.sh                          # once per Flutter version: about 5 minutes
+
+flutter create --platforms ios counter    # or use your own Flutter app
+flutter/build.sh counter                  # 29 s for the counter template
+                                          # -> counter/build/ios-linux/Runner.ipa (unsigned)
+
+# Sign it with a development profile for your device (App Store Connect API key;
+# see GETTING-STARTED.md), then install:
+tools/provision-dev.py --bundle-id dev.omarchy.flutterdemo.counter
+tools/sign-dev.sh counter/build/ios-linux/Payload/Runner.app Runner-dev.ipa
+```
+
+To skip the signing step on a free Apple ID, run `flutter/build.sh --install
+counter` instead: `xtool install` signs the app and puts it on the phone.
+
+- **Produces:** `Runner.ipa` (unsigned) from `build.sh`; `Runner-dev.ipa`
+  (development-signed, 6 MB for the counter template) from `sign-dev.sh`.
+  `tools/asc.py validate` passes 47 of 50 checks on it (the three that fail are
+  the App Store-only ones), and `tools/macho-lint.py` reports every Mach-O
+  image clean.
+- **Needs:** Flutter 3.47.x on `PATH`, the iPhoneOS SDK from the normal install,
+  and about 7 GB of disk for the one-time setup, which builds the iOS
+  `gen_snapshot` that Flutter ships only for macOS.
+- **Times:** setup 5 min 23 s on a 16-core x86_64 machine; the counter template
+  builds in 29 s with one plugin. A laptop took about 12 minutes for setup.
+- **Limits:** release builds only (no debug, hot reload or simulator). Plugins
+  must ship a `Package.swift`. aarch64 hosts are untested. Details:
+  [flutter/README.md](flutter/README.md).
+
+Flutter support is the work of [dl-alexandre](https://github.com/dl-alexandre)
+(@agrxculture). Thank you for the build pipeline
+([#7](https://github.com/joshuaswarren/omarchy-apple-dev/pull/7)), the Linux
+`ibtool` for Flutter's storyboards
+([#8](https://github.com/joshuaswarren/omarchy-apple-dev/pull/8)) and plugin
+package support ([#9](https://github.com/joshuaswarren/omarchy-apple-dev/pull/9)).
 
 ## What you need
 
@@ -217,13 +262,6 @@ overlay changes, applied by its setup script (FINDINGS.md item 41).
 For your own Xcode project, `tools/xcodeproj2xtool.py App.xcodeproj` writes an
 xtool adapter (`omarchy-xtool/`) next to it and prints a warning for each thing
 it cannot map (FINDINGS.md item 27).
-
-## Flutter apps
-
-`flutter/` builds a Flutter app for an iOS device on the same toolchain, with
-no Mac in the build: `flutter/setup.sh` once per Flutter version, then
-`flutter/build.sh --install /path/to/app`. Release mode, verified on x86_64
-with Flutter 3.47.6 (FINDINGS.md item 64). See [flutter/README.md](flutter/README.md).
 
 ## Scripts
 
