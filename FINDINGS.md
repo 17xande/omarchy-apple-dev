@@ -1570,3 +1570,19 @@ that Xcode 27.0 itself built from these storyboards at a 16.6 target. With
 that, `flutter/tools/storyboard-compat.py` is gone and `flutter/build.sh`
 compiles the app's storyboards untouched. Receipt
 `receipts/2026-10-08-ibtool-flutter-storyboards.md`.
+
+**66. Newer Flutter plugins name a `FlutterFramework` package next to their
+own.** `package_info_plus` 10.2.2 declares `.package(name: "FlutterFramework",
+path: "../FlutterFramework")` and links its product. On a Mac, Flutter
+generates that package and symlinks every plugin beside it under
+`ios/Flutter/ephemeral/Packages/.packages`. `flutter/tools/gen-shell-package.py`
+pointed SwiftPM at each plugin inside the pub cache, where no such sibling
+exists, and the build stopped with `the package at
+'.../package_info_plus-10.2.2/ios/FlutterFramework' cannot be accessed`. It now
+copies the plugin packages into `Packages/` in the generated shell and writes a
+placeholder `FlutterFramework` package there; the Flutter module itself still
+comes from the framework search path. Found when an app gained
+`package_info_plus` and `sentry_flutter` (nine native plugins, Sentry linked
+statically): it builds, installs and runs on an iPad on iPadOS 27.0, and the
+sample with `package_info_plus` added builds in 37 s. Plugins without the
+dependency are unaffected.
