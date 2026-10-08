@@ -1594,6 +1594,27 @@ class Generator:
             else:
                 dropped.append(key)
                 del plist[key]
+        # Xcode names a target's Swift module from PRODUCT_MODULE_NAME; SwiftPM names it after the
+        # target. A class named "<Xcode module>.Class" in the plist then does not exist at run time
+        # (UIKit: "could not load class NetNewsWire.SceneDelegate", black screen), so point the
+        # class keys at the SwiftPM module.
+        xcode_module = self.expand(self.setting(layers, "PRODUCT_MODULE_NAME") or "", layers)
+        spm_module = flat["PRODUCT_MODULE_NAME"]
+        if xcode_module and xcode_module != spm_module:
+            class_keys = {"UISceneDelegateClassName", "NSPrincipalClass", "NSExtensionPrincipalClass"}
+
+            def rename_classes(node):
+                if isinstance(node, dict):
+                    for k, v in node.items():
+                        if k in class_keys and isinstance(v, str) and v.startswith(xcode_module + "."):
+                            node[k] = spm_module + v[len(xcode_module):]
+                        else:
+                            rename_classes(v)
+                elif isinstance(node, list):
+                    for item in node:
+                        rename_classes(item)
+
+            rename_classes(plist)
         xtool_owned = [k for k in ("CFBundleExecutable", "CFBundleIdentifier")
                        if k in plist]
         for k in xtool_owned:
