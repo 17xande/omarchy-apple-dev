@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+# Flutter ad-hoc signs frameworks mid-build; xtool signs the finished app.
+[ -z "${XCRUN_SHIM_LOG:-}" ] || echo "codesign $*" >>"$XCRUN_SHIM_LOG"
+exit 0

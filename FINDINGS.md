@@ -1501,3 +1501,32 @@ Store artifacts — `_CodeSignature`, `embedded.mobileprovision`,
 `Metadata.appintents`, and NNW's dylibs still loose in Frameworks/ instead of
 wrapped `.framework` bundles. Receipt
 `receipts/2026-10-07-device-layout.md`.
+
+**64. Flutter apps build for iOS on Linux; the missing piece was one compiler.**
+`flutter build ios` drives Xcode, but under it there are only three things a
+Linux host lacks. First, the Dart AOT compiler: Flutter publishes
+`gen_snapshot` for iOS as a macOS binary, and its Linux-hosted Android one
+(same snapshot version hash) emits `arm64 android compressed-pointers` where
+the iOS engine demands `arm64 ios no-compressed-pointers`. Building it from
+the Dart SDK at Flutter's `dart_revision` with one added GN argument
+(`flutter/patches/dart-ios-target-on-linux.patch`: the host toolchain stays
+Linux, `DART_TARGET_OS_MACOS_IOS` is defined) gives a header identical to
+Xcode's, and since Flutter 3.47 the compiler writes the Mach-O dylib itself
+(`--snapshot_kind=app-aot-macho-dylib`), so no Apple linker is needed.
+Second, the Xcode command-line tools `flutter assemble` and the Dart build
+hooks shell out to: `flutter/shims/` answers `xcrun --show-sdk-path` from the
+darwin SDK bundle and forwards `lipo`, `strip`, `otool`, `install_name_tool`
+and `dsymutil` to LLVM, after which `flutter assemble
+release_ios_bundle_flutter_assets` runs unmodified, native assets included.
+`flutter precache --ios` already works on Linux. Third, the Runner target:
+every plugin with native code ships a `Package.swift`, so one generated
+SwiftPM package built with SwiftBuild replaces the Xcode project. Two traps on
+the way. The Swift toolchain's `ld64.lld` refuses iOS, and clang given the SDK
+bundle's linker by path omits `-platform_version` until `-mlinker-version` is
+passed. And llvm-strip and llvm-install-name-tool both leave the string pool
+4-byte aligned; dyld refuses that for images built against the 27.0 SDK
+(`mis-aligned LINKEDIT string pool`) while letting older-SDK images through,
+so a prebuilt dylib loads and a locally compiled one does not.
+`flutter/tools/macho-align.py` pads it. The stock Flutter storyboards need two
+neutral rewrites to fit the Linux ibtool (`flutter/tools/storyboard-compat.py`).
+Release device builds only. Receipt `receipts/2026-10-08-flutter-ios.md`.

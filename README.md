@@ -218,6 +218,13 @@ For your own Xcode project, `tools/xcodeproj2xtool.py App.xcodeproj` writes an
 xtool adapter (`omarchy-xtool/`) next to it and prints a warning for each thing
 it cannot map (FINDINGS.md item 27).
 
+## Flutter apps
+
+`flutter/` builds a Flutter app for an iOS device on the same toolchain, with
+no Mac in the build: `flutter/setup.sh` once per Flutter version, then
+`flutter/build.sh --install /path/to/app`. Release mode, verified on x86_64
+with Flutter 3.47.6 (FINDINGS.md item 64). See [flutter/README.md](flutter/README.md).
+
 ## Scripts
 
 - `install-toolchain.sh`: everything up to and including the SDK install;
