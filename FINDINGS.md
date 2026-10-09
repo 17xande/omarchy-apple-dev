@@ -1586,3 +1586,39 @@ comes from the framework search path. Found when an app gained
 statically): it builds, installs and runs on an iPad on iPadOS 27.0, and the
 sample with `package_info_plus` added builds in 37 s. Plugins without the
 dependency are unaffected.
+
+## LLDB on a device without root, 2026-10-08
+
+**67. `device-run.sh --lldb` attaches over pymobiledevice3's userspace tunnel,
+with no sudo; the earlier "hang" was LLDB's synchronous `process connect`.**
+`debugserver lldb` refuses `--userspace` (its external lldb cannot reach the
+in-process tunnel address), so the script runs `debugserver start-server
+--local-port N --userspace` (a localhost forwarder) and drives lldb itself
+with the steps `debugserver lldb` types. A gdb-remote packet log showed lldb
+never sent `vAttach`: in synchronous mode (`-b`, `-o`) `process connect` waits
+for the process to stop, and a debugserver with no process never sends a
+stop. `debugserver lldb` types into a pty, so its session is async and never
+hit this. `script lldb.debugger.SetAsync(True)` around the connect fixes it;
+`vAttach` is answered in about 1 s. The attach then reads every image missing
+from the sysroot out of process memory in 512-byte `x` packets (13,700 in
+60 s over the tunnel, still going; item 14 saw ~90 s over the kernel tunnel).
+`settings set target.memory-module-load-level minimal` makes the attach
+about 30 s; system frames then show only their module name, while the app
+(from the local binary) and the sysroot's Swift runtime keep symbols
+(`LLDB_LOAD_LEVEL=complete` restores the rest). Two shell traps: a background
+job of a non-interactive bash starts with SIGINT ignored, so the forwarder is
+started with `env --default-signal=INT`, and with `setsid` so a Ctrl-C at the
+LLDB prompt does not reach it. `wait` on the SIGINTed forwarder returns 130,
+which `set -e` turned into the script's exit status. Receipt
+`receipts/2026-10-08-device-run-lldb-userspace.md`.
+
+Three of the first five rootless sessions ended with usbmuxd 1.1.1 (Arch
+`usbmuxd 1.1.1-4`) aborting with `free(): invalid pointer`, within about 20 s
+of the detach or as the next session started. The device commands that follow
+then fail with "Failed to connect to usbmuxd socket" until the service
+restarts. The cause is not pinned down; it looks tied to the forwarder's usbmux
+connection closing at the end of a session. Arch's unit has no `Restart=`, so a
+drop-in (`sudo systemctl edit usbmuxd`) with `[Unit] StartLimitIntervalSec=0`
+and `[Service] Restart=on-failure`, `RestartSec=1` lets systemd bring it back
+on its own instead of needing a manual restart. The two sessions run after
+adding it did not crash, so the restart itself has not been observed yet.
