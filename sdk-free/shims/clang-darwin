@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+# The Swift toolchain's clang, linking with the toolset's ld64.lld. Callers written for Xcode's clang pass
+# `-arch arm64` and no -target: default to the iOS device triple and the sysroot.
+SDKFREE_HOME=${SDKFREE_HOME:-${XDG_DATA_HOME:-$HOME/.local/share}/omarchy-apple-dev/sdk-free}
+SR=${NOSDK_SYSROOT:-$SDKFREE_HOME/iPhoneOS.sdk}
+CLANG=${SDKFREE_CLANG:-$(dirname "$(readlink -f "$(command -v swift)")")/clang}
+pre=()
+case " $* " in
+  *" -target "* | *" --target="*) ;;
+  *) pre+=(-target arm64-apple-ios15.0) ;;
+esac
+case " $* " in
+  *" -isysroot "*) ;;
+  *) pre+=(-isysroot "$SR") ;;
+esac
+exec "$CLANG" "${pre[@]}" "-fuse-ld=$SDKFREE_HOME/toolset/ld64.lld" -mlinker-version=1200 "$@"

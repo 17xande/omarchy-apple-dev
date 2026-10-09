@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+SDKFREE_HOME=${SDKFREE_HOME:-${XDG_DATA_HOME:-$HOME/.local/share}/omarchy-apple-dev/sdk-free}
+exec "$SDKFREE_HOME/toolset/dsymutil" "$@"

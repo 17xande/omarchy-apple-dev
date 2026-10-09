@@ -86,6 +86,23 @@ matches the installed `swift-bin`: **Xcode 27 for swift-bin 6.4** (the
 current AUR version), Xcode 26 for 6.3 (FINDINGS.md items 16 and 22). The
 install script prints the matching Xcode when it stops at the SDK step.
 
+## Two install modes
+
+`./install-toolchain.sh` asks which mode to use when it runs in a terminal. Pass `--mode full` or `--mode no-xcode`
+to skip the question; the last choice is remembered in `~/.config/omarchy-apple-dev/mode`. Without a terminal and
+without a choice it uses `full`.
+
+| | **full** (Xcode download) | **no Xcode download** (experimental) |
+|---|---|---|
+| Languages | Swift, SwiftUI, Objective-C, C, C++ | Objective-C and C with UIKit |
+| Flutter | release builds, any plugin whose source builds | release builds with an Objective-C runner and Objective-C plugins |
+| System frameworks | everything in the Xcode SDK | a short list (Foundation, UIKit, CoreGraphics, QuartzCore, CoreFoundation, UserNotifications, libc), growing |
+| Extensions, widgets, macOS apps | yes | not yet |
+| TestFlight and App Store | yes, with a paid account | not yet |
+| Needs | the Xcode archive from Apple (about 3 GB of it is used) | your iPhone over USB, unlocked, Developer Mode on; about 7 GB of temporary disk |
+
+Details of the second mode are in [sdk-free/README.md](sdk-free/README.md).
+
 ## Install
 
 New here? [GETTING-STARTED.md](GETTING-STARTED.md) walks from the Omarchy

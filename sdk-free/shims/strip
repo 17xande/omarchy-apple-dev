@@ -1,0 +1,35 @@
+#!/usr/bin/env bash
+# strip via llvm-strip, then repair the layout dyld insists on (see
+# tools/macho-align.py). If an image cannot be repaired it is left unstripped:
+# larger, but loadable.
+set -euo pipefail
+here=$(dirname "$(readlink -f "$0")")
+input=${*: -1}
+output=$input
+prev=
+for a in "$@"; do
+  if [ "$prev" = "-o" ]; then output=$a; fi
+  prev=$a
+done
+if [ "$output" != "$input" ]; then
+  # `strip ... INPUT -o OUTPUT`: the input is the last argument that is not -o's value.
+  input=
+  prev=
+  for a in "$@"; do
+    case "$a" in -*) ;; *) [ "$prev" = "-o" ] || input=$a ;; esac
+    prev=$a
+  done
+fi
+keep=$(mktemp)
+trap 'rm -f "$keep"' EXIT
+cp -p "$input" "$keep"
+if command -v llvm-strip >/dev/null; then
+  llvm-strip "$@"
+else
+  # no llvm-strip on this host: -x (drop local symbols) through llvm-objcopy, which the swift toolchain ships
+  llvm-objcopy -x "$input" "$output"
+fi
+if ! python3 "$here/../../flutter/tools/macho-align.py" "$output" 2>/dev/null; then
+  cp -p "$keep" "$output"
+  [ -z "${XCRUN_SHIM_LOG:-}" ] || echo "strip: left $output unstripped (layout could not be repaired)" >>"$XCRUN_SHIM_LOG"
+fi

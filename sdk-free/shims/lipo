@@ -1,0 +1,81 @@
+#!/usr/bin/env python3
+"""Minimal lipo for the SDK-free mode: -info, -archs, -thin ARCH -output OUT (thin or fat Mach-O inputs).
+Anything else is passed to llvm-lipo when it exists."""
+import os
+import shutil
+import struct
+import sys
+
+CPU = {0x0100000C: "arm64", 0x0100000007: "x86_64", 0x01000007: "x86_64", 0x0200000C: "arm64e"}
+FAT, FAT64 = 0xCAFEBABE, 0xCAFEBABF
+
+
+def slices(path):
+    with open(path, "rb") as f:
+        d = f.read()
+    magic = struct.unpack_from(">I", d, 0)[0]
+    if magic in (FAT, FAT64):
+        n = struct.unpack_from(">I", d, 4)[0]
+        out = []
+        for i in range(n):
+            if magic == FAT:
+                cpu, sub, off, size, _al = struct.unpack_from(">iiIII", d, 8 + 20 * i)
+            else:
+                cpu, sub, off, size, _al = struct.unpack_from(">iiQQI", d, 8 + 32 * i)
+            out.append((cpu & 0xFFFFFFFF, off, size))
+        return True, d, out
+    if struct.unpack_from("<I", d, 0)[0] in (0xFEEDFACF, 0xFEEDFACE):
+        cpu = struct.unpack_from("<i", d, 4)[0] & 0xFFFFFFFF
+        return False, d, [(cpu, 0, len(d))]
+    return None, d, []
+
+
+def arch(cpu):
+    if cpu == 0x0100000C:
+        return "arm64"
+    if cpu == 0x01000007:
+        return "x86_64"
+    return f"cpu{cpu:#x}"
+
+
+args = sys.argv[1:]
+if "-verify_arch" in args:
+    want = args[args.index("-verify_arch") + 1:]
+    path = [a for a in args if not a.startswith("-") and a not in want][-1]
+    fat, _d, sl = slices(path)
+    have = [arch(c) for c, _o, _s in sl] if fat is not None else []
+    sys.exit(0 if all(w in have for w in want) else 1)
+if "-info" in args or "-archs" in args:
+    path = [a for a in args if not a.startswith("-")][-1]
+    fat, _d, sl = slices(path)
+    if fat is None:
+        sys.exit(f"lipo: {path} is not a Mach-O file")
+    names = [arch(c) for c, _o, _s in sl]
+    if "-archs" in args:
+        print(" ".join(names))
+    elif fat:
+        print(f"Architectures in the fat file: {path} are: {' '.join(names)}")
+    else:
+        print(f"Non-fat file: {path} is architecture: {names[0]}")
+    sys.exit(0)
+if "-thin" in args and "-output" in args:
+    want = args[args.index("-thin") + 1]
+    out = args[args.index("-output") + 1]
+    path = [a for a in args if not a.startswith("-") and a not in (want, out)][-1]
+    fat, d, sl = slices(path)
+    for c, o, s in sl:
+        if arch(c) == want:
+            with open(out, "wb") as f:
+                f.write(d[o:o + s])
+            sys.exit(0)
+    sys.exit(f"lipo: {path} does not contain architecture {want}")
+if "-create" in args and "-output" in args:
+    out = args[args.index("-output") + 1]
+    ins = [a for a in args if not a.startswith("-") and a != out]
+    if len(ins) == 1:
+        shutil.copyfile(ins[0], out)
+        sys.exit(0)
+exe = shutil.which("llvm-lipo")
+if exe:
+    os.execv(exe, [exe] + args)
+sys.exit("lipo shim: unsupported arguments: " + " ".join(args))

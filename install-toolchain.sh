@@ -4,6 +4,12 @@
 # SDK from Xcode 27.0); first run 2026-09-09 on aarch64 with 6.3.3 + 1.19.0.
 # Safe to re-run: pieces already in place are skipped. Installs into user
 # paths plus normal pacman/AUR packages. No system reinstalls.
+#
+# Mode (what supplies the iOS build files):
+#   --mode full       the SDK from an Xcode download (the default)
+#   --mode no-xcode   no Xcode download: link stubs and headers from your own iPhone (sdk-free/README.md)
+# The choice also comes from OMARCHY_APPLE_MODE, from ~/.config/omarchy-apple-dev/mode (the last run), or from a
+# prompt when run from a terminal. Without a terminal and without a choice it is full.
 set -euo pipefail
 
 # Put the active toolchain's own bin dir (clang, lldb) first on PATH. swift-bin
@@ -354,6 +360,66 @@ package links the wide libraries directly.
 EOF
 }
 
+# Install mode: --mode, OMARCHY_APPLE_MODE, the saved choice, or a prompt.
+MODE_FILE=$HOME/.config/omarchy-apple-dev/mode
+MODE=${OMARCHY_APPLE_MODE:-}
+mode_args=()
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --mode) MODE=${2:?--mode needs full or no-xcode}; shift 2 ;;
+    --mode=*) MODE=${1#--mode=}; shift ;;
+    *) mode_args+=("$1"); shift ;;
+  esac
+done
+set -- "${mode_args[@]+"${mode_args[@]}"}"
+
+print_modes() {
+  cat <<'EOF'
+
+How should this install get the iOS build files?
+
+  1) full (Xcode download)
+     Works:      Swift, SwiftUI, Objective-C, C and C++; every system framework; app extensions and widgets;
+                 Flutter apps; macOS apps; TestFlight and App Store uploads with a paid account.
+     Needs:      the Xcode archive from Apple (about 3 GB of it is used) and a free Apple ID to download it.
+
+  2) no Xcode download (experimental)
+     Works:      Objective-C and C apps with UIKit; Flutter apps (release builds) with an Objective-C runner and
+                 Objective-C plugins; asset catalogs and storyboards; install on your iPhone with a free Apple ID.
+     Not yet:    SwiftUI; Swift apps and Swift plugins; the full set of system frameworks (the list grows by
+                 release); app extensions and widgets; macOS apps; TestFlight and App Store uploads.
+     Needs:      your iPhone connected over USB, unlocked, with Developer Mode on; about 7 GB of temporary disk.
+
+EOF
+}
+
+resolve_mode() {
+  if [ -z "$MODE" ] && [ -f "$MODE_FILE" ]; then MODE=$(cat "$MODE_FILE"); fi
+  if [ -z "$MODE" ] && [ -t 0 ] && [ -t 1 ]; then
+    print_modes
+    while :; do
+      read -r -p "Choose 1 or 2 [1]: " answer
+      case "${answer:-1}" in
+        1) MODE=full; break ;;
+        2) MODE=no-xcode; break ;;
+      esac
+    done
+  fi
+  MODE=${MODE:-full}
+  case "$MODE" in
+    full | no-xcode) ;;
+    *) echo "Unknown mode '$MODE': use full or no-xcode" >&2; exit 2 ;;
+  esac
+  mkdir -p "$(dirname "$MODE_FILE")"
+  printf '%s\n' "$MODE" >"$MODE_FILE"
+  echo "== Mode: $MODE"
+}
+
+if [ "${1:-}" = "--mode-help" ]; then
+  print_modes
+  exit 0
+fi
+
 if [ "${1:-}" = "--curses-compat" ]; then
   curses_compat "${2:-}"
   exit 0
@@ -364,6 +430,10 @@ if [ "${1:-}" = "--repair" ]; then
   # reinstall): repair runs against whatever toolchain the current shell
   # resolves, so the SDK is re-registered into THAT toolchain. Pairing and
   # Apple ID auth live in user-global paths and were never affected.
+  if [ "$MODE" = no-xcode ] || { [ -z "$MODE" ] && [ "$(cat "$MODE_FILE" 2>/dev/null || true)" = no-xcode ]; }; then
+    echo "Mode no-xcode: rebuilding the sysroot from the connected iPhone"
+    exec "$REPO_DIR/sdk-free/setup.sh"
+  fi
   if ! command -v swift >/dev/null 2>&1; then
     echo "No swift on PATH. Activate your toolchain first — for mise:"
     echo '  eval "$(mise activate bash)"   # or reopen your shell'
@@ -389,6 +459,8 @@ if [ "${1:-}" = "--repair" ]; then
   survive_status "$cached"
   exit 0
 fi
+
+resolve_mode
 
 # --user-only: no sudo and no system packages. Bring your own Swift on PATH (a
 # swift.org tarball or mise; see --curses-compat) and the system tools below.
@@ -465,6 +537,15 @@ echo "== 4. pymobiledevice3 in a venv =="
 python3 -m venv "$VENV"
 "$VENV/bin/pip" install pymobiledevice3
 "$VENV/bin/pip" show pymobiledevice3 | sed -n 's/^Version: /pymobiledevice3 /p'
+
+if [ "$MODE" = no-xcode ]; then
+  echo "== 5. Build files from your iPhone (no Xcode download)"
+  "$REPO_DIR/sdk-free/setup.sh"
+  echo "== 6. Apple ID sign-in (interactive, needed before device deploys)"
+  echo "Run: $HOME/.local/bin/xtool auth"
+  echo "Done. Next: sdk-free/README.md (Flutter: flutter/setup.sh, then sdk-free/flutter-build.sh <app dir>)"
+  exit 0
+fi
 
 echo "== 5. iOS SDK source =="
 # The SDK artifacts exist only inside Apple's Xcode distribution; there is no
