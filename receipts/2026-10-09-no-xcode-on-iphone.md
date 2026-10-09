@@ -16,3 +16,14 @@ Not checked: the open and in-app buttons were not tapped. A free Apple ID instal
 run (they need a debugger on iOS 26 and later). Swift plugin apps in this table came from the research build of the
 Swift framework overlays; `sdk-free/swift/overlays.sh` is the installer version of the same build and is not yet
 verified end to end (see `2026-10-09-sdk-free-swift-overlays.md`).
+
+## Run 2: the app built by the installer's own scripts (Swift 6.4)
+
+`sdk-free/flutter-build.sh` built `shared_preferences` + `url_launcher` (Dart UI as above) with Swift 6.4 against
+the overlays from `sdk-free/swift/overlays.sh` (Arch chroot, link stubs cut from the iOS 27.0.1 cache). Signed with
+`tools/sign-dev.sh` (macho-lint 3 of 3 clean), installed on the iPhone (iOS 27.0.1) and launched:
+
+- First launch: `launch #1`, `canLaunchUrl: true` (`2026-10-09-no-xcode-installer-swift-plugins-launch1.png`).
+- After a relaunch: `launch #2`, `canLaunchUrl: true` (`...-launch2.png`). One extra screenshot taken between the two
+  shows a black screen (taken while the app started again); the next launch showed the page.
+- The buttons were not tapped.
