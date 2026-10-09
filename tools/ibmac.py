@@ -437,6 +437,26 @@ def _rect(el, key, where):
                                      _fmt_g(r.get("width")), _fmt_g(r.get("height")))
 
 
+def _window_rect(el, where):
+    """NSWindowRect: a window visible at launch with no initialPositionMask
+    compiles centered on its screenRect (About {1035,566} == center of
+    2560x1410 for 490x278); everything else keeps the saved contentRect."""
+    r = el.find("rect[@key='contentRect']")
+    if r is None:
+        raise I.XibError(f"<{el.tag}> is missing rect 'contentRect' ({where})")
+    if (el.get("visibleAtLaunch") != "NO"
+            and el.find("windowPositionMask[@key='initialPositionMask']") is None):
+        s = el.find("rect[@key='screenRect']")
+        if s is not None:
+            x = (float(s.get("width")) - float(r.get("width"))) / 2
+            y = (float(s.get("height")) - float(r.get("height"))) / 2
+            return "{{%s, %s}, {%s, %s}}" % (_fmt_g(x), _fmt_g(y),
+                                             _fmt_g(r.get("width")),
+                                             _fmt_g(r.get("height")))
+    return "{{%s, %s}, {%s, %s}}" % (_fmt_g(r.get("x", 0)), _fmt_g(r.get("y", 0)),
+                                     _fmt_g(r.get("width")), _fmt_g(r.get("height")))
+
+
 def _size(el, key, where):
     v = el.find(f"value[@key='{key}']")
     if v is None:
@@ -1676,7 +1696,7 @@ def _window(b, el, where, id_map, parent=None, obj=None):
     if mask is not None and mask.get("resizable") == "YES" and mask.get("titled") != "YES":
         o.add("NSWindowAllowNontitledResizable", *b.boolean(True))
     o.add("NSWindowBacking", *b.int8(2))
-    o.add("NSWindowRect", *b.ref(b.string(_rect(el, "contentRect", where))))
+    o.add("NSWindowRect", *b.ref(b.string(_window_rect(el, where))))
     flags = 0x60000000
     if el.get("hidesOnDeactivate") == "YES":
         flags |= 0x80000000

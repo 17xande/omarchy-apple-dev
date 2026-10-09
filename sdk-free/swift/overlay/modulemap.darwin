@@ -1,0 +1,78 @@
+// Authored for the SDK-free sysroot (not Apple's file). Subset of the Darwin module over apple-oss-distributions headers.
+module Darwin [system] {
+  module C {
+    module assert { header "assert.h" export * }
+    module ctype { header "ctype.h" export * }
+    module errno { header "errno.h" export * }
+    module inttypes { header "inttypes.h" export * }
+    textual header "limits.h"
+    module locale { header "locale.h" export * }
+    module math { header "math.h" export * }
+    module setjmp { header "setjmp.h" export * }
+    module signal { header "signal.h" export * }
+    module stdio { header "stdio.h" export * }
+    module stdlib { header "stdlib.h" export * }
+    module string { header "string.h" export * }
+    module strings { header "strings.h" export * }
+    module time { header "time.h" export * }
+    module wchar { header "wchar.h" export * }
+    module wctype { header "wctype.h" export * }
+    export *
+  }
+  module POSIX {
+    module unistd { header "unistd.h" export * }
+    module fcntl { header "fcntl.h" export * }
+    module dirent { header "dirent.h" export * }
+    module pthread { header "pthread.h" export * }
+    module sched { header "sched.h" export * }
+    module spawn { header "spawn.h" export * }
+    module semaphore { header "semaphore.h" export * }
+    module sys_types { header "sys/types.h" export * }
+    module sys_stat { header "sys/stat.h" export * }
+    module sys_time { header "sys/time.h" export * }
+    module sys_socket { header "sys/socket.h" export * }
+    module sys_mman { header "sys/mman.h" export * }
+    module sys_ioctl { header "sys/ioctl.h" export * }
+    module sys_wait { header "sys/wait.h" export * }
+    module sys_select { header "sys/select.h" export * }
+    module sys_uio { header "sys/uio.h" export * }
+    module sys_utsname { header "sys/utsname.h" export * }
+    module sys_param { header "sys/param.h" export * }
+    module malloc { header "malloc/malloc.h" export * }
+    module sys_qos { header "sys/qos.h" export * }
+    module sys_resource { header "sys/resource.h" export * }
+    module netinet_in { header "netinet/in.h" export * }
+    module arpa_inet { header "arpa/inet.h" export * }
+    export *
+  }
+  module MacTypes { header "MacTypes.h" export * }
+  module sys_proc { header "sys/proc.h" export * }
+  module Mach {
+    module mach_time { header "mach/mach_time.h" export * }
+    module mach_error { header "mach/mach_error.h" export * }
+    export *
+  }
+  module sys_underscore_types { umbrella "sys/_types" export * }
+  module libkern {
+    module OSByteOrder { header "libkern/OSByteOrder.h" export * }
+    export *
+  }
+  export *
+}
+module Dispatch [system] {
+  header "dispatch/dispatch.h"
+  header "dispatch/dispatch_swift_shims.h"
+  export *
+}
+module os [system] {
+  module object { header "os/object.h" export * }
+  export *
+}
+module ObjectiveC [system] {
+  header "objc/objc.h"
+  header "objc/NSObject.h"
+  header "objc/NSObjCRuntime.h"
+  header "objc/runtime.h"
+  header "objc/message.h"
+  export *
+}

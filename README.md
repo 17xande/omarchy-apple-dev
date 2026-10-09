@@ -2,8 +2,10 @@
 
 [![Sponsor](https://img.shields.io/badge/Sponsor-%E2%9D%A4-pink)](https://github.com/sponsors/joshuaswarren)
 
-SwiftUI apps built on Omarchy Linux, installed on a physical iPhone over USB,
-with no Xcode and no macOS in the loop.
+SwiftUI and Flutter apps built on Omarchy Linux, installed on a physical iPhone
+over USB, with no Xcode and no macOS in the loop.
+
+Any PC that runs Omarchy works: an x86_64 laptop or desktop, or an Apple Silicon Mac.
 
 Current working set, verified 2026-10-03 on x86_64 Arch with the install
 script as a fresh user (FINDINGS.md item 22):
@@ -24,6 +26,51 @@ client project.
 
 Works with a free Apple ID. Paid membership not required for device installs.
 
+## Flutter apps
+
+Build a Flutter app for an iPhone on Linux and end with a signed development
+`.ipa`. Release mode, arm64, verified on x86_64 with Flutter 3.47.6 (receipts:
+`receipts/2026-10-08-flutter-signed-ipa.md`).
+
+```
+./install-toolchain.sh                    # once, as for any app in this repo
+sudo pacman -S --needed llvm rsync        # the two tools the Flutter build calls
+flutter/setup.sh                          # once per Flutter version: about 5 minutes
+
+flutter create --platforms ios counter    # or use your own Flutter app
+flutter/build.sh counter                  # 29 s for the counter template
+                                          # -> counter/build/ios-linux/Runner.ipa (unsigned)
+
+# Sign it with a development profile for your device (App Store Connect API key;
+# see GETTING-STARTED.md), then install:
+tools/provision-dev.py --bundle-id dev.omarchy.flutterdemo.counter
+tools/sign-dev.sh counter/build/ios-linux/Payload/Runner.app Runner-dev.ipa
+```
+
+To skip the signing step on a free Apple ID, run `flutter/build.sh --install
+counter` instead: `xtool install` signs the app and puts it on the phone.
+
+- **Produces:** `Runner.ipa` (unsigned) from `build.sh`; `Runner-dev.ipa`
+  (development-signed, 6 MB for the counter template) from `sign-dev.sh`.
+  `tools/asc.py validate` passes 47 of 50 checks on it (the three that fail are
+  the App Store-only ones), and `tools/macho-lint.py` reports every Mach-O
+  image clean.
+- **Needs:** Flutter 3.47.x on `PATH`, the iPhoneOS SDK from the normal install,
+  and about 7 GB of disk for the one-time setup, which builds the iOS
+  `gen_snapshot` that Flutter ships only for macOS.
+- **Times:** setup 5 min 23 s on a 16-core x86_64 machine; the counter template
+  builds in 29 s with one plugin. A laptop took about 12 minutes for setup.
+- **Limits:** release builds only (no debug, hot reload or simulator). Plugins
+  must ship a `Package.swift`. aarch64 hosts are untested. Details:
+  [flutter/README.md](flutter/README.md).
+
+Flutter support is the work of [dl-alexandre](https://github.com/dl-alexandre)
+(@agrxculture). Thank you for the build pipeline
+([#7](https://github.com/joshuaswarren/omarchy-apple-dev/pull/7)), the Linux
+`ibtool` for Flutter's storyboards
+([#8](https://github.com/joshuaswarren/omarchy-apple-dev/pull/8)) and plugin
+package support ([#9](https://github.com/joshuaswarren/omarchy-apple-dev/pull/9)).
+
 ## What you need
 
 - An Apple Silicon or x86_64 Linux box running Omarchy (Arch-based). Both
@@ -40,6 +87,23 @@ Version matching matters: the SDK pieces must come from an Xcode whose Swift
 matches the installed `swift-bin`: **Xcode 27 for swift-bin 6.4** (the
 current AUR version), Xcode 26 for 6.3 (FINDINGS.md items 16 and 22). The
 install script prints the matching Xcode when it stops at the SDK step.
+
+## Two install modes
+
+`./install-toolchain.sh` asks which mode to use when it runs in a terminal. Pass `--mode full` or `--mode no-xcode`
+to skip the question; the last choice is remembered in `~/.config/omarchy-apple-dev/mode`. Without a terminal and
+without a choice it uses `full`.
+
+| | **full** (Xcode download) | **no Xcode download** (experimental) |
+|---|---|---|
+| Languages | Swift, SwiftUI, Objective-C, C, C++ | Objective-C, C and Swift (standard library, async/await, Foundation); no SwiftUI yet |
+| Flutter | release builds, any plugin whose source builds | release builds with Objective-C plugins and the Swift plugins `shared_preferences` and `url_launcher` |
+| System frameworks | everything in the Xcode SDK | a short list (Foundation, UIKit, CoreGraphics, QuartzCore, CoreFoundation, UserNotifications, libc), growing |
+| Extensions, widgets, macOS apps | yes | not yet |
+| TestFlight and App Store | yes, with a paid account | not yet |
+| Needs | the Xcode archive from Apple (about 3 GB of it is used) | an iPhone only to run the apps; setup needs no phone (it reads a connected iPhone or Apple's public iOS update download) and uses about 7 GB of temporary disk |
+
+Details of the second mode are in [sdk-free/README.md](sdk-free/README.md).
 
 ## Install
 
@@ -207,7 +271,7 @@ The Linux `actool` compiles imagesets (PNG, JPEG, SVG, PDF, HEIC), colorsets, cu
 SF Symbol sets, app icons and Icon Composer `.icon` icons with their layers and
 Liquid Glass pre-render (FINDINGS.md); PDF imagesets need poppler's `pdftocairo` and
 HEIC images libheif's `heif-convert`, which the installer adds. `tools/ibtool`
-compiles storyboards and xibs byte-identical to Xcode 27.0 (all of NetNewsWire's;
+compiles storyboards and xibs byte-identical to Xcode 27.0 (all of NetNewsWire's, Flutter's template pair;
 `tests/ibtool`); the generator leaves out any it cannot reproduce, with a warning.
 Alternate app icons are left out with a warning. `compat/icecubes/`, `compat/nnw/` and `compat/mastodon/`
 reproduce IceCubesApp, NetNewsWire and Mastodon for iOS, which build with

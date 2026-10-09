@@ -1,0 +1,47 @@
+#!/usr/bin/env bash
+# Stand-in for Apple's xcrun so `flutter assemble` and Dart build hooks run on
+# Linux: answers SDK queries from the xtool darwin SDK bundle and forwards tool
+# invocations to their LLVM equivalents. Set XCRUN_SHIM_LOG to record calls.
+here=$(dirname "$(readlink -f "$0")")
+SDKB=${DARWIN_SDK_BUNDLE:-${XDG_CONFIG_HOME:-$HOME/.config}/swiftpm/swift-sdks/darwin.artifactbundle}
+[ -d "$SDKB" ] || SDKB=$HOME/.swiftpm/swift-sdks/darwin.artifactbundle
+[ -z "${XCRUN_SHIM_LOG:-}" ] || echo "xcrun $*" >>"$XCRUN_SHIM_LOG"
+
+sdk_path() {
+  case "$1" in
+    iphonesimulator*) echo "$SDKB/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator.sdk" ;;
+    macosx*) echo "$SDKB/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk" ;;
+    *) echo "$SDKB/Developer/Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS.sdk" ;;
+  esac
+}
+
+sdk=iphoneos
+args=()
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --sdk | -sdk) sdk=$2; shift 2 ;;
+    --show-sdk-path) sdk_path "$sdk"; exit 0 ;;
+    --show-sdk-version | --show-sdk-platform-version)
+      python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["Version"])' "$(sdk_path "$sdk")/SDKSettings.json"
+      exit 0 ;;
+    --find | -f)
+      case "$2" in clang | clang++ | cc) echo "$here/clang-darwin"; exit 0 ;; esac
+      for c in "$here/$2" "llvm-$2" "$2"; do
+        if p=$(command -v "$c"); then echo "$p"; exit 0; fi
+      done
+      exit 1 ;;
+    *) args+=("$1"); shift ;;
+  esac
+done
+[ ${#args[@]} -gt 0 ] || exit 0
+
+tool=${args[0]}
+rest=("${args[@]:1}")
+case "$tool" in
+  clang | clang++ | cc) exec "$here/clang-darwin" "${rest[@]}" ;;
+  codesign) exit 0 ;;
+  *)
+    if [ -x "$here/$tool" ]; then exec "$here/$tool" "${rest[@]}"; fi
+    if command -v "llvm-${tool//_/-}" >/dev/null; then exec "llvm-${tool//_/-}" "${rest[@]}"; fi
+    exec "$tool" "${rest[@]}" ;;
+esac

@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+# The Swift toolchain's clang, linking with the darwin SDK bundle's ld64.lld.
+# The toolchain's own lld refuses iOS, and without -mlinker-version clang
+# assumes an old linker and omits -platform_version.
+SDKB=${DARWIN_SDK_BUNDLE:-${XDG_CONFIG_HOME:-$HOME/.config}/swiftpm/swift-sdks/darwin.artifactbundle}
+[ -d "$SDKB" ] || SDKB=$HOME/.swiftpm/swift-sdks/darwin.artifactbundle
+tc=$(dirname "$(readlink -f "$(command -v swift)")")
+exec "$tc/clang" "-fuse-ld=$SDKB/toolset/bin/ld64.lld" -mlinker-version=1200 "$@"

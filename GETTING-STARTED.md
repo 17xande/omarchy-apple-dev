@@ -79,6 +79,17 @@ whole project; cross-file results appear when that ends.
    `LLDB_CMDS` (one command per line) scripts the session, and
    `LLDB_PYTHONHOME` names a CPython 3.12 when the system has none
    (FINDINGS.md 56, receipt `receipts/2026-10-07-device-run-lldb.md`).
+4. The dev build leaves most resources inside the SwiftPM resource bundle,
+   where only `Bundle.module` finds them; an app that reads themes, RTF or JSON
+   through `Bundle.main` traps at launch. `ship.sh --device` (with your
+   10-character team id when the app reads `$(AppIdentifierPrefix)`) rebuilds
+   with every resource at the bundle roots, like Xcode; install the result
+   with `xtool install xtool/<App>.app` (FINDINGS.md 63).
+   No xtool on the machine that holds the phone? `tools/sign-dev.sh App.app
+   out.ipa` signs the result with your development identity and profiles
+   (`tools/provision-dev.py`), and `pymobiledevice3 apps install out.ipa`
+   installs it. `CONFIGURATION=debug ship.sh --device` builds the debug app
+   for LLDB.
 
 ## 4. Upload to TestFlight
 

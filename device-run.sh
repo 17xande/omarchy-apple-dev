@@ -4,12 +4,16 @@
 # First run ever: do `xtool auth` once beforehand (interactive Apple ID sign-in).
 #
 # Modes:
-#   ./device-run.sh [--lldb [--sudo]]      USB (default; the proven path). --lldb then
+#   ./device-run.sh [--lldb|--attach [--sudo]]      USB (default; the proven path). --lldb then
 #       starts LLDB on the app over pymobiledevice3's in-process userspace tunnel
-#       (no root, no tunneld; pymobiledevice3 >= 11.26; FINDINGS.md 63). --sudo
+#       (no root, no tunneld; pymobiledevice3 >= 11.26; FINDINGS.md 67). --sudo
 #       restores the old path: a kernel tunnel from `sudo lockdown start-tunnel`
 #       and `debugserver lldb` (FINDINGS.md 56), e.g. when mount-personalized
 #       refuses to run unprivileged.
+#       --attach implies --lldb but does not build, stop or reinstall the app: it debugs
+#       the app already on the device (attaching to it if running, else launching it
+#       suspended). It still needs xtool/<App>.app locally for symbols, and works with
+#       and without --sudo.
 #       LLDB_CMDS: LLDB commands to run after the attach, one per line. Without
 #       --sudo they run in LLDB's synchronous mode, so `continue` returns at the
 #       next stop; with --sudo they are typed into an async session.
@@ -54,19 +58,20 @@ export PATH
 XT="$HOME/.local/bin/xtool"
 PMD3="$HOME/pymobile3-venv/bin/pymobiledevice3"
 
-MODE=usb; UDID=; RSD_HOST=; RSD_PORT=; PKG=; LLDB=0; SUDO=0
+MODE=usb; UDID=; RSD_HOST=; RSD_PORT=; PKG=; LLDB=0; SUDO=0; ATTACH=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --network) MODE=network ;;
     --lldb) LLDB=1 ;;
     --sudo) SUDO=1 ;;
+    --attach) LLDB=1; ATTACH=1 ;;
     -u|--udid) UDID="${2:?--udid needs a value}"; shift ;;
     --rsd) MODE=rsd
       RSD_HOST="${2:?usage: --rsd HOST PORT PACKAGE}"
       RSD_PORT="${3:?usage: --rsd HOST PORT PACKAGE}"
       PKG="${4:?usage: --rsd HOST PORT PACKAGE}"
       shift 3 ;;
-    *) echo "Unknown argument: $1 (modes: [--lldb [--sudo]] [--network] [--rsd HOST PORT PKG])" >&2; exit 2 ;;
+    *) echo "Unknown argument: $1 (modes: [--lldb|--attach [--sudo]] [--network] [--rsd HOST PORT PKG])" >&2; exit 2 ;;
   esac
   shift
 done
@@ -180,12 +185,14 @@ print(d["ProductVersion"] + " (" + d["BuildVersion"] + ")")' "$info")"
         "$HOME/.local/bin/ipsw" dyld extract "$dsc" "$(basename "$p")" --slide -o "$sym/Symbols$(dirname "$p")" >/dev/null
       done
   fi
-  # Stop the running app (needs the DDI), then install over it.
+  # Stop the running app (needs the DDI), then install over it. --attach leaves it alone.
   bid=$(installed_bid "$(grep -E '^bundleID:' xtool.yml | awk '{print $2}')")
-  if [ -n "$bid" ]; then
-    "$PMD3" developer dvt pkill --bundle "$bid" "${rsd[@]}" >/dev/null 2>&1 || true
+  if [ "$ATTACH" != 1 ]; then
+    if [ -n "$bid" ]; then
+      "$PMD3" developer dvt pkill --bundle "$bid" "${rsd[@]}" >/dev/null 2>&1 || true
+    fi
+    $XT install "${UDID_ARGS[@]}" "$(ls -d xtool/*.app | head -n1)"
   fi
-  $XT install "${UDID_ARGS[@]}" "$(ls -d xtool/*.app | head -n1)"
   bid=$(installed_bid "$(grep -E '^bundleID:' xtool.yml | awk '{print $2}')")
   [ -n "$bid" ] || { echo "app not found on the device after install" >&2; exit 1; }
   # LLDB_CMDS: LLDB commands to run after the attach, one per line (for scripted sessions).
@@ -255,7 +262,7 @@ print(json.load(sys.stdin)[sys.argv[1]]["Path"])' "$bid")
     launched=1
   fi
   echo "Attaching to pid $pid"
-  # The same steps `debugserver lldb` sends, with two changes (FINDINGS.md 63):
+  # The same steps `debugserver lldb` sends, with two changes (FINDINGS.md 67):
   #  - `process connect` runs async. Synchronous, lldb waits for a stop from a debugserver
   #    that has no process yet, forever (Platform::DoConnectProcess). The next line waits for
   #    the connection and, if there is none, stops lldb with exit 1.
@@ -302,7 +309,12 @@ usb)
   echo "== 4. Build, sign, install, launch =="
   # Signing uses your Apple ID (free tier works); the first deploy creates a free
   # provisioning profile for your device.
-  if [ "$LLDB" = 0 ]; then
+  if [ "$ATTACH" = 1 ]; then
+    # --attach: the app is already installed (for example a debug build copied from another host);
+    # only the LLDB session runs. The bundle id comes from xtool.yml.
+    echo "== 5. LLDB =="
+    lldb_session
+  elif [ "$LLDB" = 0 ]; then
     $XT dev run "${UDID_ARGS[@]}"
   else
     # lldb_session stops the app, installs, then launches it suspended and attaches, so

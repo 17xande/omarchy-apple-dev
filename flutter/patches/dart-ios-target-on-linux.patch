@@ -1,0 +1,32 @@
+diff --git i/runtime/BUILD.gn w/runtime/BUILD.gn
+index 5c3eb760..689c7643 100644
+--- i/runtime/BUILD.gn
++++ w/runtime/BUILD.gn
+@@ -110,7 +110,12 @@ config("dart_precompiler_config") {
+ config("dart_os_config") {
+   defines = []
+ 
+-  if (target_os == "android") {
++  # Linux-hosted cross gen_snapshot for iOS: the host toolchain stays Linux,
++  # only the VM's notion of the TARGET operating system changes.
++  if (dart_target_os_override == "ios") {
++    defines += [ "DART_TARGET_OS_MACOS" ]
++    defines += [ "DART_TARGET_OS_MACOS_IOS" ]
++  } else if (target_os == "android") {
+     defines += [ "DART_TARGET_OS_ANDROID" ]
+   } else if (target_os == "fuchsia") {
+     defines += [ "DART_TARGET_OS_FUCHSIA" ]
+diff --git i/runtime/runtime_args.gni w/runtime/runtime_args.gni
+index d465b34f..f58f25f9 100644
+--- i/runtime/runtime_args.gni
++++ w/runtime/runtime_args.gni
+@@ -66,6 +66,9 @@ declare_args() {
+   # Whether libdart should export the symbols of the Dart API.
+   dart_lib_export_symbols = true
+ 
++  # Overrides the target OS the VM is compiled for ("" keeps target_os).
++  dart_target_os_override = ""
++
+   # Whether to use compressed pointers.
+   dart_use_compressed_pointers = false
+ 

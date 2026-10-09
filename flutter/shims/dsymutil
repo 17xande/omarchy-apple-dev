@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+SDKB=${DARWIN_SDK_BUNDLE:-${XDG_CONFIG_HOME:-$HOME/.config}/swiftpm/swift-sdks/darwin.artifactbundle}
+[ -d "$SDKB" ] || SDKB=$HOME/.swiftpm/swift-sdks/darwin.artifactbundle
+exec "$SDKB/toolset/bin/dsymutil" "$@"

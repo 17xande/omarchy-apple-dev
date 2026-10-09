@@ -1466,9 +1466,130 @@ rcodesign seals the plists, and a device install runs it with
 any surviving `$(...)`. Receipt
 `receipts/2026-10-07-app-identifier-prefix.md`.
 
+## A device mode for ship.sh: Xcode's root-level resources, 2026-10-07
+
+**63. `ship.sh --device [TEAMID]` builds the app that the 2026-10-07
+NetNewsWire device session had to fix by hand.** A release `xtool dev build`
+leaves the target's resources inside the SwiftPM resource bundle
+(`<App>_<Target>.bundle`), where only `Bundle.module` finds them — the two
+launch traps of that session were exactly this: `Assets.Images.faviconTemplate`
+(`RSImage(named:)!`, catalog image not at the app root) and ArticleTheme's
+`*.nnwtheme` lookups through `Bundle.main`. Device mode runs the TestFlight
+steps 1-3 unchanged, then copies every other entry of each target's resource
+bundle to that target's root — the app and every extension — with `cp -an`, the
+no-clobber form of the manual fix's `rsync --ignore-existing --exclude
+Assets.car --exclude Info.plist`. Step 3's root Assets.car is what the catalogs
+become (NNW's app car came out the same 7,116,032 bytes as the ship build's;
+IceCubes's 70,251,424), so a car never collides; the one exception proves the
+rule — IceCubes's widget had no `EXTENSION_APP_ICONS` entry, step 3 compiled
+nothing for it, and its 18 KB bundle car reached the widget root, where Xcode
+puts a widget's compiled catalog. Everything App Store-only is skipped (stamp,
+framework wrapping, App Intents metadata, signing, package, validate, upload),
+because flattening whole bundles into an App Store upload once stalled
+processing — the App Store path is untouched. With a team id the mode fills the
+team prefix first; without one it fails closed: the device path runs asc.py's
+surviving-placeholder FAIL on the .app as its final step, and on the un-teamed
+NNW run it exited 1 naming `Info.plist:AppIdentifierPrefix` in the app and both
+appexes, then passed after `--device 9LX44YXXVX` filled them. Layout proof
+against the TestFlight builds: NNW's root gained 28 entries (eight themes, four
+RTF, four keyboard-shortcut plists, ContentRules.json, DefaultFeeds.opml,
+PrivacyInfo.xcprivacy, the article js/css/html, en.lproj) and IceCubes's 141
+files (fonts and sounds under Embeds, 19 lproj trees, per-appex lproj strings
+and xib cells); in both apps every bundle entry sits at a root, and the only
+files the TestFlight build has that the device app lacks are the skipped App
+Store artifacts — `_CodeSignature`, `embedded.mobileprovision`,
+`Metadata.appintents`, and NNW's dylibs still loose in Frameworks/ instead of
+wrapped `.framework` bundles. Receipt
+`receipts/2026-10-07-device-layout.md`.
+
+**64. Flutter apps build for iOS on Linux; the missing piece was one compiler.**
+`flutter build ios` drives Xcode, but under it there are only three things a
+Linux host lacks. First, the Dart AOT compiler: Flutter publishes
+`gen_snapshot` for iOS as a macOS binary, and its Linux-hosted Android one
+(same snapshot version hash) emits `arm64 android compressed-pointers` where
+the iOS engine demands `arm64 ios no-compressed-pointers`. Building it from
+the Dart SDK at Flutter's `dart_revision` with one added GN argument
+(`flutter/patches/dart-ios-target-on-linux.patch`: the host toolchain stays
+Linux, `DART_TARGET_OS_MACOS_IOS` is defined) gives a header identical to
+Xcode's, and since Flutter 3.47 the compiler writes the Mach-O dylib itself
+(`--snapshot_kind=app-aot-macho-dylib`), so no Apple linker is needed.
+Second, the Xcode command-line tools `flutter assemble` and the Dart build
+hooks shell out to: `flutter/shims/` answers `xcrun --show-sdk-path` from the
+darwin SDK bundle and forwards `lipo`, `strip`, `otool`, `install_name_tool`
+and `dsymutil` to LLVM, after which `flutter assemble
+release_ios_bundle_flutter_assets` runs unmodified, native assets included.
+`flutter precache --ios` already works on Linux. Third, the Runner target:
+every plugin with native code ships a `Package.swift`, so one generated
+SwiftPM package built with SwiftBuild replaces the Xcode project. Two traps on
+the way. The Swift toolchain's `ld64.lld` refuses iOS, and clang given the SDK
+bundle's linker by path omits `-platform_version` until `-mlinker-version` is
+passed. And llvm-strip and llvm-install-name-tool both leave the string pool
+4-byte aligned; dyld refuses that for images built against the 27.0 SDK
+(`mis-aligned LINKEDIT string pool`) while letting older-SDK images through,
+so a prebuilt dylib loads and a locally compiled one does not.
+`flutter/tools/macho-align.py` pads it. The stock Flutter storyboards at first
+needed two neutral rewrites to fit the Linux ibtool; item 65 made the compiler
+take them as they are and removed the rewrite.
+Release device builds only. Receipt `receipts/2026-10-08-flutter-ios.md`.
+
+**65. The Linux ibtool compiles Flutter's template storyboards byte-identical
+to Xcode's.** `flutter create` still writes the `Main.storyboard` and
+`LaunchScreen.storyboard` of the Xcode 7 era, and they use four things no
+storyboard in the corpus had. (1) `<layoutGuides>` with
+`viewControllerLayoutGuide` top and bottom, the guides that predate the safe
+area. ibtool was skipping the element without an error, so the scene view nib
+came out 1010 bytes where Apple's is 1863. Each guide is a `_UILayoutGuide`
+(class fallback `UIView`) appended to the scene view's subviews after the
+document's own, with one `_UILayoutSupportConstraint` (fallback
+`NSLayoutConstraint`; width, priority 999) of its own and three constraints
+that the view owns and the guide lists again under
+`_UILayoutGuideConstraintsToRemove`: top is leading = view.leading, top =
+view.top, height; bottom is leading = view.leading, height, view.bottom =
+guide.bottom. They lead the view's constraint array, ahead of the document's,
+and the view gets a subviews array and a constraint array even when the
+document gives it neither. In the objects array the guides follow the view's
+constraints and precede its subviews. (2) `<color white= alpha=
+customColorSpace="calibratedWhite">` is stored as RGB with the white repeated,
+not as a white color. The white passes through float32 and is then rounded to
+ten significant digits, the alpha is only rounded (white 1/3 gives
+`UIRed-Double` 0.3333333433 and 2/3 gives 0.6666666865, while alpha 0.1 stays
+0.1): eight probe values, all identical. An opaque inline sRGB color writes
+three `NSRGB` components, not four, the rule system and named colors already
+followed. (3) A view saved with no design-time frame is 1000 x 1000 at the
+origin, the scene view and an image view alike, and sorts at the origin in the
+constraint order. Below a deployment target of 17.0 the scene view alone
+becomes 393 x 852 instead: compiled at 13.0, 15.0, 16.6, 17.0 and 26.0, the
+boundary is 17.0, so ibtool now reads `--minimum-deployment-target`, which it
+had been accepting and ignoring. (4) On a scene image view,
+`multipleTouchEnabled` (stored inverted, after `UIDeepDrawRect`) and
+`image="Name"` for an asset-catalog image, whose placeholder is 1 x 1 whatever
+the document's `<image>` resource says; both were dropped silently. The two
+storyboards, three more with other whites and the 16.6 scene nib are in the
+self-test. The six files also match, byte for byte, the `Base.lproj` of an app
+that Xcode 27.0 itself built from these storyboards at a 16.6 target. With
+that, `flutter/tools/storyboard-compat.py` is gone and `flutter/build.sh`
+compiles the app's storyboards untouched. Receipt
+`receipts/2026-10-08-ibtool-flutter-storyboards.md`.
+
+**66. Newer Flutter plugins name a `FlutterFramework` package next to their
+own.** `package_info_plus` 10.2.2 declares `.package(name: "FlutterFramework",
+path: "../FlutterFramework")` and links its product. On a Mac, Flutter
+generates that package and symlinks every plugin beside it under
+`ios/Flutter/ephemeral/Packages/.packages`. `flutter/tools/gen-shell-package.py`
+pointed SwiftPM at each plugin inside the pub cache, where no such sibling
+exists, and the build stopped with `the package at
+'.../package_info_plus-10.2.2/ios/FlutterFramework' cannot be accessed`. It now
+copies the plugin packages into `Packages/` in the generated shell and writes a
+placeholder `FlutterFramework` package there; the Flutter module itself still
+comes from the framework search path. Found when an app gained
+`package_info_plus` and `sentry_flutter` (nine native plugins, Sentry linked
+statically): it builds, installs and runs on an iPad on iPadOS 27.0, and the
+sample with `package_info_plus` added builds in 37 s. Plugins without the
+dependency are unaffected.
+
 ## LLDB on a device without root, 2026-10-08
 
-**63. `device-run.sh --lldb` attaches over pymobiledevice3's userspace tunnel,
+**67. `device-run.sh --lldb` attaches over pymobiledevice3's userspace tunnel,
 with no sudo; the earlier "hang" was LLDB's synchronous `process connect`.**
 `debugserver lldb` refuses `--userspace` (its external lldb cannot reach the
 in-process tunnel address), so the script runs `debugserver start-server

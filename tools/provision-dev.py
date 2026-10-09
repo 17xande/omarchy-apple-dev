@@ -1,13 +1,17 @@
 #!/usr/bin/env python3
 """Development signing identity for one iOS bundle id and one device, through the App Store Connect API.
 
-usage: provision-dev.py --bundle-id ID --udid UDID [--name NAME] [--out DIR]
+usage: provision-dev.py --bundle-id ID [ID...] [--udid UDID] [--name NAME] [--out DIR] [--expect-group GROUP]
 
 Needs ASC_KEY_ID, ASC_ISSUER_ID and ASC_KEY_PATH, like ship.sh. It makes a local RSA key and a CSR, asks
-Apple for an iOS Development certificate, registers the device, registers the bundle id, and creates an
-IOS_APP_DEVELOPMENT profile that holds both. Output in DIR (default ~/.config/omarchy-apple-dev/development):
+Apple for an iOS Development certificate, registers the device (or, without --udid, attaches every
+ENABLED iOS device in the team), registers each bundle id, and deletes and recreates the
+IOS_APP_DEVELOPMENT profiles that hold both — delete-and-recreate is how a profile picks up a
+capability (e.g. App Groups) configured in the portal after the profile was made. Output in DIR
+(default ~/.config/omarchy-apple-dev/development):
 key.pem (mode 600, never printed), cert.der, cert.pem, certificate-id, <bundle id>.mobileprovision.
-Run again to reuse the key and certificate and refresh the profile."""
+Run again to reuse the key and certificate and refresh the profiles. With --expect-group, exit
+nonzero unless every recreated profile's Entitlements contain that application group."""
 import argparse
 import base64
 import sys
@@ -54,7 +58,12 @@ def device(udid, name):
         "name": name, "udid": udid, "platform": "IOS"}}})["data"]["id"]
 
 
-def profile(bundle_id, cert_id, device_id, out):
+def all_devices():
+    return [d["id"] for d in asc.call(
+        "GET", "/v1/devices?filter[platform]=IOS&filter[status]=ENABLED&limit=200")["data"]]
+
+
+def profile(bundle_id, cert_id, device_ids, out):
     name = f"omarchy-apple-dev development {bundle_id}"
     for p in asc.call("GET", "/v1/profiles?filter[profileType]=IOS_APP_DEVELOPMENT&limit=200")["data"]:
         if p["attributes"]["name"] == name:
@@ -64,7 +73,7 @@ def profile(bundle_id, cert_id, device_id, out):
         "relationships": {
             "bundleId": asc.rel("bundleIds", asc.bundle_id(bundle_id)),
             "certificates": {"data": [{"type": "certificates", "id": cert_id}]},
-            "devices": {"data": [{"type": "devices", "id": device_id}]},
+            "devices": {"data": [{"type": "devices", "id": d} for d in device_ids]},
         }}})["data"]
     path = out / f"{bundle_id}.mobileprovision"
     path.write_bytes(base64.b64decode(made["attributes"]["profileContent"]))
@@ -73,17 +82,28 @@ def profile(bundle_id, cert_id, device_id, out):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--bundle-id", required=True)
-    ap.add_argument("--udid", required=True)
+    ap.add_argument("--bundle-id", required=True, nargs="+")
+    ap.add_argument("--udid")
     ap.add_argument("--name", default="iPhone")
     ap.add_argument("--out", default=str(Path.home() / ".config/omarchy-apple-dev/development"))
+    ap.add_argument("--expect-group")
     a = ap.parse_args()
     out = Path(a.out)
     out.mkdir(parents=True, exist_ok=True, mode=0o700)
     cert_id = certificate(out)
-    dev_id = device(a.udid, a.name)
-    path, prof_id = profile(a.bundle_id, cert_id, dev_id, out)
-    print(f"certificate {cert_id}, device {dev_id}, profile {prof_id} -> {path}")
+    device_ids = [device(a.udid, a.name)] if a.udid else all_devices()
+    print(f"certificate {cert_id}, {len(device_ids)} device(s)")
+    missing = []
+    for bundle_id in a.bundle_id:
+        path, prof_id = profile(bundle_id, cert_id, device_ids, out)
+        payload = asc.profile_payload(path.read_bytes())
+        groups = payload["Entitlements"].get("com.apple.security.application-groups", [])
+        print(f"profile {prof_id} -> {path}, expires {payload['ExpirationDate']:%Y-%m-%d}")
+        print(f"  Entitlements: {payload['Entitlements']}")
+        if a.expect_group and a.expect_group not in groups:
+            missing.append(bundle_id)
+    if missing:
+        sys.exit(f"provision-dev: {len(missing)} profile(s) lack group {a.expect_group}: {missing}")
 
 
 if __name__ == "__main__":
