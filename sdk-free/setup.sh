@@ -1,16 +1,22 @@
 #!/usr/bin/env bash
-# Mode "no Xcode download": build the link-and-header sysroot from your own iPhone, no Xcode.xip anywhere.
+# Mode "no Xcode download": build the link-and-header sysroot without Xcode.xip anywhere.
 #
-#   sdk-free/setup.sh          needs the iPhone connected, unlocked, paired, Developer Mode on (sudo for the USB tunnel)
+#   sdk-free/setup.sh          phone source (default when an iPhone is connected): needs it unlocked, paired,
+#                              Developer Mode on (sudo for the USB tunnel)
+#   sdk-free/setup.sh --ipsw   no phone: pull the shared cache from Apple's public iOS update download instead
+#                              (--ipsw[=auto|<build>], --build <build>, --device <model>; env SDKFREE_IPSW, SDKFREE_DEVICE).
+#                              Downloads only the cache (several GB) into $SDKFREE_HOME/cache and deletes it once the
+#                              stubs are cut. A phone is then only needed to run the apps.
 #
 # Result under $SDKFREE_HOME (default ~/.local/share/omarchy-apple-dev/sdk-free):
-#   iPhoneOS.sdk/   link stubs (.tbd) cut from the shared cache of the connected iPhone, public Objective-C runtime
+#   iPhoneOS.sdk/   link stubs (.tbd) cut from the shared cache (iPhone or public IPSW), public Objective-C runtime
 #                   headers, and the headers this repo ships in sdk-free/headers
 #   toolset/        ld64.lld and dsymutil (xtool-org/darwin-tools-linux-llvm, pinned)
 #   bin/actool      asset catalog compiler (built from tools/darwin-tools)
 # Safe to re-run: finished pieces are skipped.
 #
-# Test and CI hooks: SDKFREE_TBD_DIR=<dir with ready-made .tbd files> skips the iPhone; SDKFREE_ACTOOL=<path> skips
+# Test and CI hooks: SDKFREE_TBD_DIR=<dir with ready-made .tbd files> skips the cache entirely; SDKFREE_DSC_DIR=<dir
+# with an unpacked dyld_shared_cache_arm64e> skips the download but still cuts the stubs; SDKFREE_ACTOOL=<path> skips
 # the actool build.
 set -euo pipefail
 
@@ -21,6 +27,17 @@ SR=$SDKFREE_HOME/iPhoneOS.sdk
 VENV=${VENV:-$HOME/pymobile3-venv}
 PMD3=$VENV/bin/pymobiledevice3
 IPSW=$HOME/.local/bin/ipsw
+IPSW_SRC=${SDKFREE_IPSW:-}
+DEVICE=${SDKFREE_DEVICE:-iPhone16,2}
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --ipsw) IPSW_SRC=auto; shift ;;
+    --ipsw=*) IPSW_SRC=${1#--ipsw=}; shift ;;
+    --build) IPSW_SRC=${2:?--build needs a build id like 24A446}; shift 2 ;;
+    --device) DEVICE=${2:?--device needs a model like iPhone16,2}; shift 2 ;;
+    *) echo "unknown option '$1': use --ipsw, --ipsw=<build>, --build <build> or --device <model>" >&2; exit 1 ;;
+  esac
+done
 mkdir -p "$SDKFREE_HOME"
 
 # Images whose link stubs the sysroot carries (install name -> stub file).
@@ -65,28 +82,89 @@ if [ ! -d "$OBJC4/.git" ]; then
   git -C "$OBJC4" checkout -q FETCH_HEAD
 fi
 
-echo "== 3. link stubs from the iPhone"
+echo "== 3. link stubs (phone or public IPSW)"
 tbd=$SDKFREE_HOME/cache/tbd
 if [ -n "${SDKFREE_TBD_DIR:-}" ]; then
   tbd=$SDKFREE_TBD_DIR
 elif [ ! -f "$tbd/UIKit.tbd" ]; then
-  "$PMD3" lockdown info >/dev/null 2>&1 || {
-    echo "No paired iPhone found. Connect it, unlock it, tap Trust, turn on Developer Mode, then run this again." >&2
-    exit 1
-  }
   [ -x "$IPSW" ] || { echo "ipsw is missing: run ./install-toolchain.sh first" >&2; exit 1; }
-  info=$("$PMD3" lockdown info)
   dsc=$SDKFREE_HOME/cache/dsc
-  if ! find "$dsc" -name dyld_shared_cache_arm64e -print -quit 2>/dev/null | grep -q .; then
-    echo "Copying the shared cache from the iPhone (about 7 GB, once; it is deleted after the stubs are cut)"
-    log=$(mktemp)
-    sudo "$PMD3" lockdown start-tunnel >"$log" 2>&1 &
-    trap 'sudo pkill -f "lockdown start-tunne[l]" || true' EXIT
-    for _ in $(seq 30); do grep -q "RSD Port" "$log" && break; sleep 1; done
-    host=$(grep -o "RSD Address: [^ ]*" "$log" | awk '{print $3}')
-    port=$(grep -o "RSD Port: [0-9]*" "$log" | awk '{print $3}')
-    [ -n "$port" ] || { cat "$log" >&2; exit 1; }
-    "$PMD3" developer fetch-symbols download "$dsc" --rsd "$host" "$port"
+  dsc_tmp=${SDKFREE_TMP:-$SDKFREE_HOME/cache/tmp}
+  if [ -n "${SDKFREE_DSC_DIR:-}" ]; then dsc=$SDKFREE_DSC_DIR; fi
+  cache=$(find "$dsc" -name dyld_shared_cache_arm64e -print -quit 2>/dev/null || true)
+  cleanup=
+  if [ -n "$IPSW_SRC" ]; then
+    # The build also decides the iOS version recorded in the sysroot's SystemVersion.plist.
+    ver=
+    if [ "$IPSW_SRC" = auto ]; then
+      ver=$("$IPSW" download ipsw --device "$DEVICE" --latest --show-latest-version)
+      build=$("$IPSW" download ipsw --device "$DEVICE" --latest --show-latest-build)
+    else
+      build=$IPSW_SRC
+    fi
+    url=$("$IPSW" download ipsw --device "$DEVICE" --build "$build" --urls | grep -o 'https://[^[:space:]]*Restore\.ipsw' | head -n1)
+    [ -n "$url" ] || { echo "no IPSW found for $DEVICE build $build" >&2; exit 1; }
+    if [ -z "$ver" ]; then
+      ver=$(printf '%s\n' "$url" | sed -nE "s#.*/${DEVICE}_([^/]*)_${build}_Restore\\.ipsw#\\1#p")
+      [ -n "$ver" ] || { echo "cannot read the iOS version for build $build from $url" >&2; exit 1; }
+    fi
+    mkdir -p "$SDKFREE_HOME/cache"
+    printf '{"ProductVersion":"%s","BuildVersion":"%s"}\n' "$ver" "$build" >"$SDKFREE_HOME/cache/device-info.json"
+  fi
+  if [ -z "$cache" ]; then
+    if [ -n "$IPSW_SRC" ] || ! "$PMD3" lockdown info >/dev/null 2>&1; then
+      # No usable phone: the shared cache comes from Apple's public iOS update download instead.
+      if [ -z "$IPSW_SRC" ]; then
+        build=$("$IPSW" download ipsw --device "$DEVICE" --latest --show-latest-build)
+        url=$("$IPSW" download ipsw --device "$DEVICE" --build "$build" --urls | grep -o 'https://[^[:space:]]*Restore\.ipsw' | head -n1)
+        [ -n "$url" ] || { echo "no IPSW found for $DEVICE build $build" >&2; exit 1; }
+        ver=$(printf '%s\n' "$url" | sed -nE "s#.*/${DEVICE}_([^/]*)_${build}_Restore\\.ipsw#\\1#p")
+        [ -n "$ver" ] || { echo "cannot read the iOS version for build $build from $url" >&2; exit 1; }
+        mkdir -p "$SDKFREE_HOME/cache"
+        printf '{"ProductVersion":"%s","BuildVersion":"%s"}\n' "$ver" "$build" >"$SDKFREE_HOME/cache/device-info.json"
+      fi
+      fuse=${IPSW_APFS_FUSE_PATH:-$SDKFREE_HOME/bin/apfs-fuse}
+      if [ ! -x "$fuse" ]; then
+        fuse=$SDKFREE_HOME/bin/apfs-fuse
+        # ipsw mounts the iOS update's system image with apfs-fuse to pull the cache out.
+        if ! command -v cmake >/dev/null 2>&1 || ! command -v git >/dev/null 2>&1 || ! command -v cc >/dev/null 2>&1 ||
+          ! echo '#include <fuse3/fuse.h>' | cc -E - >/dev/null 2>&1; then
+          echo "apfs-fuse is missing and cannot be built: run  pacman -S --needed fuse3 cmake git gcc bzip2 zlib" >&2
+          exit 1
+        fi
+        APFS_PIN=66b86bd525e8cb90f9012543be89b1f092b75cf3
+        APFS_DIR=$HOME/.cache/omarchy-apple-dev/apfs-fuse-$APFS_PIN
+        if [ ! -d "$APFS_DIR/.git" ]; then
+          git init -q "$APFS_DIR"
+          git -C "$APFS_DIR" fetch -q --depth 1 https://github.com/sgan81/apfs-fuse "$APFS_PIN"
+          git -C "$APFS_DIR" checkout -q FETCH_HEAD
+          git -C "$APFS_DIR" submodule update -q --init --recursive
+        fi
+        echo "Building apfs-fuse (ipsw uses it to read the iOS update)"
+        # Newer GCC and libstdc++ no longer leak uint32_t into every translation unit.
+        cmake -S "$APFS_DIR" -B "$APFS_DIR/build" -DCMAKE_BUILD_TYPE=Release -DCMAKE_POLICY_VERSION_MINIMUM=3.5 -DCMAKE_CXX_FLAGS="-include cstdint" >/dev/null
+        cmake --build "$APFS_DIR/build" -j >/dev/null
+        mkdir -p "$SDKFREE_HOME/bin"
+        install -m755 "$APFS_DIR/build/apfs-fuse" "$fuse"
+      fi
+      echo "Downloading the shared cache of $DEVICE iOS ${ver:-?} ($build) from Apple (several GB, once; it is deleted after the stubs are cut)"
+      rm -rf "$dsc_tmp"
+      mkdir -p "$dsc_tmp"
+      # TMPDIR keeps ipsw's partial download off /tmp.
+      TMPDIR=$dsc_tmp IPSW_APFS_FUSE_PATH=$fuse "$IPSW" extract --dyld --dyld-arch arm64e --remote "$url" -o "$dsc"
+      cleanup=1
+    else
+      echo "Copying the shared cache from the iPhone (about 7 GB, once; it is deleted after the stubs are cut)"
+      log=$(mktemp)
+      sudo "$PMD3" lockdown start-tunnel >"$log" 2>&1 &
+      trap 'sudo pkill -f "lockdown start-tunne[l]" || true' EXIT
+      for _ in $(seq 30); do grep -q "RSD Port" "$log" && break; sleep 1; done
+      host=$(grep -o "RSD Address: [^ ]*" "$log" | awk '{print $3}')
+      port=$(grep -o "RSD Port: [0-9]*" "$log" | awk '{print $3}')
+      [ -n "$port" ] || { cat "$log" >&2; exit 1; }
+      "$PMD3" developer fetch-symbols download "$dsc" --rsd "$host" "$port"
+      printf '%s\n' "$("$PMD3" lockdown info)" >"$SDKFREE_HOME/cache/device-info.json"
+    fi
   fi
   cache=$(find "$dsc" -name dyld_shared_cache_arm64e -print -quit)
   mkdir -p "$tbd"
@@ -97,8 +175,10 @@ elif [ ! -f "$tbd/UIKit.tbd" ]; then
       case "$image" in */UIKitCore | /usr/lib/swift/*) echo "note: $image is not in this cache" ;; *) echo "failed: $image" >&2; exit 1 ;; esac
     }
   done
-  echo "stubs written to $tbd; the cache in $dsc can be deleted"
-  printf '%s\n' "$info" >"$SDKFREE_HOME/cache/device-info.json"
+  echo "stubs written to $tbd"
+  if [ -n "$cleanup" ] && [ "$dsc" = "$SDKFREE_HOME/cache/dsc" ]; then
+    rm -rf "$SDKFREE_HOME/cache/dsc" "$dsc_tmp"
+  fi
 fi
 
 echo "== 4. assemble the sysroot"

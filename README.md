@@ -101,7 +101,7 @@ without a choice it uses `full`.
 | System frameworks | everything in the Xcode SDK | a short list (Foundation, UIKit, CoreGraphics, QuartzCore, CoreFoundation, UserNotifications, libc), growing |
 | Extensions, widgets, macOS apps | yes | not yet |
 | TestFlight and App Store | yes, with a paid account | not yet |
-| Needs | the Xcode archive from Apple (about 3 GB of it is used) | your iPhone over USB, unlocked, Developer Mode on; about 7 GB of temporary disk |
+| Needs | the Xcode archive from Apple (about 3 GB of it is used) | an iPhone only to run the apps; setup needs no phone (it reads a connected iPhone or Apple's public iOS update download) and uses about 7 GB of temporary disk |
 
 Details of the second mode are in [sdk-free/README.md](sdk-free/README.md).
 
