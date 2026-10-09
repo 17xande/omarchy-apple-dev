@@ -5,6 +5,8 @@
 SwiftUI and Flutter apps built on Omarchy Linux, installed on a physical iPhone
 over USB, with no Xcode and no macOS in the loop.
 
+Any PC that runs Omarchy works: an x86_64 laptop or desktop, or an Apple Silicon Mac.
+
 Current working set, verified 2026-10-03 on x86_64 Arch with the install
 script as a fresh user (FINDINGS.md item 22):
 
