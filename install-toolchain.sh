@@ -7,7 +7,8 @@
 #
 # Mode (what supplies the iOS build files):
 #   --mode full       the SDK from an Xcode download (the default)
-#   --mode no-xcode   no Xcode download: link stubs and headers from your own iPhone (sdk-free/README.md)
+#   --mode no-xcode   no Xcode download: link stubs and headers from your iPhone or from Apple's public iOS
+#                     update download (sdk-free/README.md)
 # The choice also comes from OMARCHY_APPLE_MODE, from ~/.config/omarchy-apple-dev/mode (the last run), or from a
 # prompt when run from a terminal. Without a terminal and without a choice it is full.
 set -euo pipefail
@@ -388,7 +389,8 @@ How should this install get the iOS build files?
                  Objective-C plugins; asset catalogs and storyboards; install on your iPhone with a free Apple ID.
      Not yet:    SwiftUI; Swift apps and Swift plugins; the full set of system frameworks (the list grows by
                  release); app extensions and widgets; macOS apps; TestFlight and App Store uploads.
-     Needs:      your iPhone connected over USB, unlocked, with Developer Mode on; about 7 GB of temporary disk.
+     Needs:      an iPhone only to run the apps. Setup needs no phone: it copies the cache from a connected iPhone
+                 or pulls it from Apple's public iOS update download; about 7 GB of temporary disk.
 
 EOF
 }
@@ -431,7 +433,7 @@ if [ "${1:-}" = "--repair" ]; then
   # resolves, so the SDK is re-registered into THAT toolchain. Pairing and
   # Apple ID auth live in user-global paths and were never affected.
   if [ "$MODE" = no-xcode ] || { [ -z "$MODE" ] && [ "$(cat "$MODE_FILE" 2>/dev/null || true)" = no-xcode ]; }; then
-    echo "Mode no-xcode: rebuilding the sysroot from the connected iPhone"
+    echo "Mode no-xcode: rebuilding the sysroot (from a connected iPhone, or Apple's public iOS update download)"
     exec "$REPO_DIR/sdk-free/setup.sh"
   fi
   if ! command -v swift >/dev/null 2>&1; then
@@ -539,7 +541,7 @@ python3 -m venv "$VENV"
 "$VENV/bin/pip" show pymobiledevice3 | sed -n 's/^Version: /pymobiledevice3 /p'
 
 if [ "$MODE" = no-xcode ]; then
-  echo "== 5. Build files from your iPhone (no Xcode download)"
+  echo "== 5. Build files, no Xcode download (iPhone or Apple's public iOS update)"
   "$REPO_DIR/sdk-free/setup.sh"
   echo "== 5b. Swift standard library for iOS, built from source (about 4 minutes)"
   toolchain_first_on_path
