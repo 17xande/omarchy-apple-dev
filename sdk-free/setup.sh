@@ -86,7 +86,10 @@ elif [ ! -f "$tbd/UIKit.tbd" ]; then
   cache=$(find "$dsc" -name dyld_shared_cache_arm64e -print -quit)
   mkdir -p "$tbd"
   for image in $IMAGES; do
-    "$IPSW" dyld tbd "$cache" "$image" -o "$tbd" >/dev/null
+    # iOS 27 folds UIKitCore into the UIKit stub: a missing optional image is not an error
+    "$IPSW" dyld tbd "$cache" "$image" -o "$tbd" >/dev/null 2>&1 || {
+      case "$image" in */UIKitCore) echo "note: $image is not a separate image on this iOS" ;; *) echo "failed: $image" >&2; exit 1 ;; esac
+    }
   done
   echo "stubs written to $tbd; the cache in $dsc can be deleted"
   printf '%s\n' "$info" >"$SDKFREE_HOME/cache/device-info.json"
@@ -105,6 +108,7 @@ cut_stub "$tbd/libobjc.A.dylib.tbd" "$SR/usr/lib/libobjc.tbd"
 cut_stub "$tbd/libc++.1.dylib.tbd" "$SR/usr/lib/libc++.tbd"
 cut_stub "$tbd/libc++abi.dylib.tbd" "$SR/usr/lib/libc++abi.tbd"
 for f in UIKit UIKitCore Foundation CoreFoundation CoreGraphics QuartzCore; do
+  [ -f "$tbd/$f.tbd" ] || continue
   mkdir -p "$SR/System/Library/Frameworks/$f.framework"
   cut_stub "$tbd/$f.tbd" "$SR/System/Library/Frameworks/$f.framework/$f.tbd"
 done
