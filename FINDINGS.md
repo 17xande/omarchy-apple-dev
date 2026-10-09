@@ -1611,3 +1611,14 @@ started with `env --default-signal=INT`, and with `setsid` so a Ctrl-C at the
 LLDB prompt does not reach it. `wait` on the SIGINTed forwarder returns 130,
 which `set -e` turned into the script's exit status. Receipt
 `receipts/2026-10-08-device-run-lldb-userspace.md`.
+
+Three of the first five rootless sessions ended with usbmuxd 1.1.1 (Arch
+`usbmuxd 1.1.1-4`) aborting with `free(): invalid pointer`, within about 20 s
+of the detach or as the next session started. The device commands that follow
+then fail with "Failed to connect to usbmuxd socket" until the service
+restarts. The cause is not pinned down; it looks tied to the forwarder's usbmux
+connection closing at the end of a session. Arch's unit has no `Restart=`, so a
+drop-in (`sudo systemctl edit usbmuxd`) with `[Unit] StartLimitIntervalSec=0`
+and `[Service] Restart=on-failure`, `RestartSec=1` lets systemd bring it back
+on its own instead of needing a manual restart. The two sessions run after
+adding it did not crash, so the restart itself has not been observed yet.
