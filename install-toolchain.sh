@@ -541,6 +541,9 @@ python3 -m venv "$VENV"
 if [ "$MODE" = no-xcode ]; then
   echo "== 5. Build files from your iPhone (no Xcode download)"
   "$REPO_DIR/sdk-free/setup.sh"
+  echo "== 5b. Swift standard library for iOS, built from source (about 4 minutes)"
+  toolchain_first_on_path
+  "$REPO_DIR/sdk-free/swift/build-stdlib.sh"
   echo "== 6. Apple ID sign-in (interactive, needed before device deploys)"
   echo "Run: $HOME/.local/bin/xtool auth"
   echo "Done. Next: sdk-free/README.md (Flutter: flutter/setup.sh, then sdk-free/flutter-build.sh <app dir>)"

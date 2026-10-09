@@ -30,7 +30,12 @@ IMAGES="/usr/lib/libSystem.B.dylib /usr/lib/libobjc.A.dylib /usr/lib/libc++.1.dy
 /System/Library/Frameworks/CoreGraphics.framework/CoreGraphics
 /System/Library/Frameworks/QuartzCore.framework/QuartzCore
 /System/Library/Frameworks/UIKit.framework/UIKit
-/System/Library/Frameworks/UIKitCore.framework/UIKitCore"
+/System/Library/Frameworks/UIKitCore.framework/UIKitCore
+/usr/lib/swift/libswiftCore.dylib /usr/lib/swift/libswiftSwiftOnoneSupport.dylib /usr/lib/swift/libswift_Concurrency.dylib
+/usr/lib/swift/libswift_StringProcessing.dylib /usr/lib/swift/libswift_RegexParser.dylib /usr/lib/swift/libswiftDarwin.dylib
+/usr/lib/swift/libswiftObjectiveC.dylib /usr/lib/swift/libswiftDispatch.dylib /usr/lib/swift/libswiftCoreFoundation.dylib
+/usr/lib/swift/libswiftFoundation.dylib /usr/lib/swift/libswiftCoreGraphics.dylib /usr/lib/swift/libswiftUIKit.dylib
+/usr/lib/swift/libswiftQuartzCore.dylib"
 
 echo "== 1. linker toolset (ld64.lld, dsymutil)"
 TOOLSET_VERSION=v1.1.0
@@ -86,9 +91,10 @@ elif [ ! -f "$tbd/UIKit.tbd" ]; then
   cache=$(find "$dsc" -name dyld_shared_cache_arm64e -print -quit)
   mkdir -p "$tbd"
   for image in $IMAGES; do
-    # iOS 27 folds UIKitCore into the UIKit stub: a missing optional image is not an error
+    # iOS 27 folds UIKitCore into the UIKit stub, and Swift overlay libraries differ by release: only the
+    # C/Objective-C images are required
     "$IPSW" dyld tbd "$cache" "$image" -o "$tbd" >/dev/null 2>&1 || {
-      case "$image" in */UIKitCore) echo "note: $image is not a separate image on this iOS" ;; *) echo "failed: $image" >&2; exit 1 ;; esac
+      case "$image" in */UIKitCore | /usr/lib/swift/*) echo "note: $image is not in this cache" ;; *) echo "failed: $image" >&2; exit 1 ;; esac
     }
   done
   echo "stubs written to $tbd; the cache in $dsc can be deleted"
@@ -111,6 +117,13 @@ for f in UIKit UIKitCore Foundation CoreFoundation CoreGraphics QuartzCore; do
   [ -f "$tbd/$f.tbd" ] || continue
   mkdir -p "$SR/System/Library/Frameworks/$f.framework"
   cut_stub "$tbd/$f.tbd" "$SR/System/Library/Frameworks/$f.framework/$f.tbd"
+done
+# Swift runtime stubs (libswiftCore and the overlay libraries the connected iPhone has)
+mkdir -p "$SR/usr/lib/swift"
+for f in "$tbd"/libswift*.dylib.tbd; do
+  [ -f "$f" ] || continue
+  name=$(basename "$f" .dylib.tbd)
+  cut_stub "$f" "$SR/usr/lib/swift/$name.tbd"
 done
 cp -R "$HERE/headers/." "$SR/"
 # Flutter reads the platform and build from the SDK directory
