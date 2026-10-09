@@ -27,7 +27,14 @@ done
 obj=$(mktemp -d)
 trap 'rm -rf "$obj"' EXIT
 IMPORTS=(-I "$SDKFREE_HOME/swift/ovl")
-[ -d "$SDKFREE_HOME/swift/ovl" ] || IMPORTS=()
+# With the overlay modules built (sdk-free/swift/overlays.sh), add what `import Foundation` and the other
+# overlays need: the framework module maps in sdkm, the C Darwin module in our include tree, and the apinotes.
+if [ -f "$RES/iphoneos/Foundation.swiftmodule/arm64-apple-ios.swiftmodule" ]; then
+  SDKM=$SDKFREE_HOME/swift/sdkm
+  IMPORTS+=(-I "$SDKFREE_HOME/swift/darwin/usr/include" -Xcc -isystem -Xcc "$SDKFREE_HOME/swift/darwin/usr/include"
+    -I "$SDKM/ovlshims" -F "$SDKM/Frameworks" -Xcc -F -Xcc "$SDKM/Frameworks"
+    -Xcc -fapinotes-modules -Xcc -fapinotes)
+fi
 "$SWIFTC" "$OPT" -wmo -swift-version 5 -enable-bare-slash-regex -target "arm64-apple-ios$MIN" -sdk "$SR" -resource-dir "$RES" \
   "${IMPORTS[@]}" -Xcc "-fmodule-map-file=$TC/lib/swift/shims/module.modulemap" -Xcc "-I$TC/lib/swift/shims" -Xcc -isystem -Xcc "$SR/usr/include" -module-name "$(basename "$OUT" | tr -c 'A-Za-z0-9_\n' _)" \
   -emit-object -o "$obj/main.o" "${FILES[@]}"
