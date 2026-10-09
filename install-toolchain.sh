@@ -544,8 +544,8 @@ if [ "$MODE" = no-xcode ]; then
   echo "== 5b. Swift standard library for iOS, built from source (about 4 minutes)"
   toolchain_first_on_path
   "$REPO_DIR/sdk-free/swift/build-stdlib.sh"
-  echo "== 5c. Swift framework overlays for iOS"
-  "$REPO_DIR/sdk-free/swift/overlays.sh"
+  echo "== 5c. Swift framework overlays for iOS (experimental; a failure here does not stop the install)"
+  "$REPO_DIR/sdk-free/swift/overlays.sh" || echo "warning: the Swift overlay build failed; Swift programs that import Foundation will not compile yet (see the log above). Standard-library-only Swift still works."
   echo "== 6. Apple ID sign-in (interactive, needed before device deploys)"
   echo "Run: $HOME/.local/bin/xtool auth"
   echo "Done. Next: sdk-free/README.md (Flutter: flutter/setup.sh, then sdk-free/flutter-build.sh <app dir>)"

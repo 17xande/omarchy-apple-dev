@@ -7,6 +7,9 @@ runtime headers. Choose it with `./install-toolchain.sh --mode no-xcode` (or ans
 ## What works
 
 - Objective-C and C apps with UIKit, built with clang and linked with `ld64.lld`.
+- Swift programs that import Foundation (`sdk-free/swiftc.sh`), and Flutter apps with Swift plugins
+  (`shared_preferences_foundation`, `url_launcher_ios`) built by `sdk-free/flutter-build.sh`
+  (sdk-free/swift/README.md, receipts/2026-10-09).
 - Flutter apps: release builds, with an Objective-C runner and Objective-C plugins (for example `sqflite`,
   `path_provider`, `geolocator`, `image_picker`, `permission_handler`). `sdk-free/flutter-build.sh <app dir>`.
 - Asset catalogs (icons) and storyboards, compiled by this repo's `actool` and `ibtool`.
@@ -15,7 +18,8 @@ runtime headers. Choose it with `./install-toolchain.sh --mode no-xcode` (or ans
 
 ## What it gives up (for now)
 
-- SwiftUI, and apps and plugins written in Swift. Most popular Flutter plugins use Swift.
+- SwiftUI, and Swift code that imports frameworks without an overlay (Combine, WebKit, ...): the overlay list is
+  ObjectiveC, Darwin, Dispatch, CoreGraphics and Foundation.
 - System frameworks beyond the ones in the list: Foundation, UIKit, CoreGraphics, QuartzCore, CoreFoundation,
   UserNotifications, and the C library. The list grows by release; a plugin that needs another framework needs its
   headers first.

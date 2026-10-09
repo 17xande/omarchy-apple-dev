@@ -129,6 +129,11 @@ EOT
     's/#define USE_CLANG_STDDEF 1/#define USE_CLANG_STDDEF 0/; s/#define USE_CLANG_TYPES 1/#define USE_CLANG_TYPES 0/; s/#define USE_CLANG_LIMITS 1/#define USE_CLANG_LIMITS 0/'
   # the module map for the Darwin/Dispatch/os/ObjectiveC clang modules (authored, subset over these headers)
   cp "$HERE/overlay/modulemap.darwin" "$D/module.modulemap"
+  # libdispatch's apinotes give the dispatch C API its Swift names
+  cp "$OSS/libdispatch/dispatch/Dispatch.apinotes" "$D/Dispatch.apinotes"
+  # MacTypes' Boolean must import as Swift Bool (6.x has no importer special case for the typedef)
+  sed -i 's/^typedef unsigned char                   Boolean;/typedef _Bool                        Boolean;/' "$D/MacTypes.h"
+  grep -q "typedef _Bool" "$D/MacTypes.h" || { echo "MacTypes.h Boolean patch failed" >&2; exit 1; }
   touch "$OUT/darwin/.done"
   echo "darwin include tree: $(find "$D" -name '*.h' | wc -l) headers"
 fi
@@ -144,7 +149,7 @@ if [ ! -f "$OUT/sdkm/.done" ]; then
     }
     mkdir -p "$FW/$f.framework/Modules" "$FW/$f.framework/Headers"
     cp -r "$SR/System/Library/Frameworks/$f.framework/Headers/." "$FW/$f.framework/Headers/"
-    printf 'framework module %s {\n  umbrella header "%s.h"\n  use ObjectiveC\n  use Darwin\n  export *\n}\n' "$f" "$f" > "$FW/$f.framework/Modules/module.modulemap"
+    printf 'framework module %s [system] {\n  umbrella header "%s.h"\n  use ObjectiveC\n  use Darwin\n  export *\n}\n' "$f" "$f" > "$FW/$f.framework/Modules/module.modulemap"
   done
   # libc include prefix: the hand-written Foundation headers rely on it textually
   sed -i '1i #include <limits.h>\n#include <stdint.h>\n#include <stdbool.h>\n#include <stddef.h>\n#include <stdarg.h>\n#include <string.h>\n#include <stdlib.h>\n#include <math.h>\n#include <errno.h>' "$FW/Foundation.framework/Headers/Foundation.h"

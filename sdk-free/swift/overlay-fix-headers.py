@@ -67,6 +67,8 @@ def foundation(p):
          "- (void)setLength:(NSInteger)length;"),
         ("+ (instancetype)dictionaryWithObjects:(const ObjectType _Nonnull[_Nonnull])objects forKeys:(const KeyType<NSCopying> _Nonnull[_Nonnull])keys count:(NSUInteger)cnt;",
          "+ (instancetype)dictionaryWithObjects:(const ObjectType _Nonnull[_Nonnull])objects forKeys:(const KeyType<NSCopying> _Nonnull[_Nonnull])keys count:(NSInteger)cnt;"),
+        ("typedef int32_t OSStatus; typedef unsigned char Boolean;",
+         "typedef int32_t OSStatus; typedef _Bool Boolean; /* imports as Swift Bool, as on Apple's SDK */"),
     ]:
         s = must(s, old, new)
     n = s.count("@property(readonly) NSUInteger count;")

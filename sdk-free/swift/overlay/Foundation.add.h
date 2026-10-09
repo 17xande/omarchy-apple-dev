@@ -1,5 +1,7 @@
 // Declarations added for the Swift Foundation overlay build (authored from public API behaviour; not Apple's file).
 // Appended to the module-clean copy of Foundation.h by mk-sdkm2.sh.
+/* NSInteger for size/count members: the 6.x importer maps NSUInteger to UInt while the
+   5.3 overlay sources pass Int; same ABI. */
 #pragma once
 NS_ASSUME_NONNULL_BEGIN
 @interface NSDictionary (W71OverlayAdditions)
@@ -41,7 +43,7 @@ NS_ASSUME_NONNULL_BEGIN
 @end
 NS_ASSUME_NONNULL_END
 NS_ASSUME_NONNULL_BEGIN
-FOUNDATION_EXPORT NSUInteger NSPageSize(void);
+FOUNDATION_EXPORT NSInteger NSPageSize(void);
 typedef NS_OPTIONS(NSUInteger, NSDataReadingOptions) {
   NSDataReadingMappedIfSafe = 1UL << 0, NSDataReadingUncached = 1UL << 1, NSDataReadingMappedAlways = 1UL << 3,
   NSDataReadingMapped = NSDataReadingMappedIfSafe
@@ -61,9 +63,9 @@ typedef NS_OPTIONS(NSUInteger, NSDataBase64EncodingOptions) {
 typedef NS_OPTIONS(NSUInteger, NSDataBase64DecodingOptions) { NSDataBase64DecodingIgnoreUnknownCharacters = 1UL << 0 }
   __attribute__((swift_name("NSData.Base64DecodingOptions")));
 @interface NSData (W71OverlayAdditions)
-- (instancetype)initWithBytesNoCopy:(void *)bytes length:(NSUInteger)length deallocator:(nullable void (^)(void *bytes, NSUInteger length))deallocator;
-- (instancetype)initWithBytesNoCopy:(void *)bytes length:(NSUInteger)length freeWhenDone:(BOOL)b;
-- (instancetype)initWithBytesNoCopy:(void *)bytes length:(NSUInteger)length;
+- (instancetype)initWithBytesNoCopy:(void *)bytes length:(NSInteger)length deallocator:(nullable void (^)(void *bytes, NSInteger length))deallocator;
+- (instancetype)initWithBytesNoCopy:(void *)bytes length:(NSInteger)length freeWhenDone:(BOOL)b;
+- (instancetype)initWithBytesNoCopy:(void *)bytes length:(NSInteger)length;
 - (instancetype)initWithData:(NSData *)data;
 - (nullable instancetype)initWithContentsOfFile:(NSString *)path options:(NSDataReadingOptions)readOptionsMask error:(NSError **)errorPtr;
 - (nullable instancetype)initWithContentsOfURL:(NSURL *)url options:(NSDataReadingOptions)readOptionsMask error:(NSError **)errorPtr;
@@ -79,8 +81,8 @@ typedef NS_OPTIONS(NSUInteger, NSDataBase64DecodingOptions) { NSDataBase64Decodi
 - (BOOL)_isCompact;
 @end
 @interface NSMutableData (W71OverlayAdditions)
-- (void)setLength:(NSUInteger)length;
-- (void)increaseLengthBy:(NSUInteger)extraLength;
+- (void)setLength:(NSInteger)length;
+- (void)increaseLengthBy:(NSInteger)extraLength;
 - (void)resetBytesInRange:(NSRange)range;
 - (void)setData:(NSData *)data;
 @end
@@ -119,9 +121,9 @@ typedef NS_OPTIONS(NSUInteger, NSURLBookmarkResolutionOptions) {
 };
 NS_ASSUME_NONNULL_END
 NS_ASSUME_NONNULL_BEGIN
-FOUNDATION_EXPORT NSUInteger NSRoundUpToMultipleOfPageSize(NSUInteger bytes);
-FOUNDATION_EXPORT NSUInteger NSRoundDownToMultipleOfPageSize(NSUInteger bytes);
-FOUNDATION_EXPORT void NSCopyMemoryPages(const void *source, void *dest, NSUInteger bytes);
+FOUNDATION_EXPORT NSInteger NSRoundUpToMultipleOfPageSize(NSInteger bytes);
+FOUNDATION_EXPORT NSInteger NSRoundDownToMultipleOfPageSize(NSInteger bytes);
+FOUNDATION_EXPORT void NSCopyMemoryPages(const void *source, void *dest, NSInteger bytes);
 FOUNDATION_EXPORT void (^const NSDataDeallocatorVM)(void *bytes, NSUInteger length);
 FOUNDATION_EXPORT void (^const NSDataDeallocatorUnmap)(void *bytes, NSUInteger length);
 FOUNDATION_EXPORT void (^const NSDataDeallocatorFree)(void *bytes, NSUInteger length);
@@ -163,7 +165,7 @@ NS_ASSUME_NONNULL_BEGIN
 NS_ASSUME_NONNULL_END
 NS_ASSUME_NONNULL_BEGIN
 @interface NSSet<__covariant ObjectType> (W71OverlayAdditions)
-- (instancetype)initWithObjects:(const ObjectType _Nonnull [_Nullable])objects count:(NSUInteger)cnt;
+- (instancetype)initWithObjects:(const ObjectType _Nonnull [_Nullable])objects count:(NSInteger)cnt;
 - (instancetype)initWithArray:(NSArray<ObjectType> *)array;
 - (instancetype)initWithSet:(NSSet<ObjectType> *)set;
 - (nullable ObjectType)member:(ObjectType)object;
@@ -173,8 +175,8 @@ NS_ASSUME_NONNULL_BEGIN
 NS_ASSUME_NONNULL_END
 NS_ASSUME_NONNULL_BEGIN
 @interface NSString (W71OverlayAdditions)
-- (nullable instancetype)initWithBytes:(const void *)bytes length:(NSUInteger)len encoding:(NSStringEncoding)encoding;
-- (nullable instancetype)initWithBytesNoCopy:(void *)bytes length:(NSUInteger)len encoding:(NSStringEncoding)encoding freeWhenDone:(BOOL)freeBuffer;
+- (nullable instancetype)initWithBytes:(const void *)bytes length:(NSInteger)len encoding:(NSStringEncoding)encoding;
+- (nullable instancetype)initWithBytesNoCopy:(void *)bytes length:(NSInteger)len encoding:(NSStringEncoding)encoding freeWhenDone:(BOOL)freeBuffer;
 - (instancetype)initWithString:(NSString *)aString;
 - (instancetype)initWithFormat:(NSString *)format arguments:(va_list)argList NS_FORMAT_FUNCTION(1, 0);
 - (instancetype)initWithFormat:(NSString *)format locale:(nullable id)locale arguments:(va_list)argList NS_FORMAT_FUNCTION(1, 0);

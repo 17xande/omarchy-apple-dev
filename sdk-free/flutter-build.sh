@@ -54,9 +54,11 @@ SWIFTC=$(command -v swiftc || true)
 PLUGINS=()
 DEPS=$APP/.flutter-plugins-dependencies
 if [ -f "$DEPS" ] && [ -n "$SWIFTC" ] && [ -f "$SDKFREE_HOME/swift/res/iphoneos/Foundation.swiftmodule/arm64-apple-ios.swiftmodule" ]; then
-  while IFS='|' read -r name path cls; do
+  while IFS='|' read -r name path; do
     [ -n "${name:-}" ] && [ -d "${path:-}" ] || continue
-    if [ -n "$(find "$path" -name '*.swift' -not -path '*/test*' -print -quit)" ]; then kind=swift; else kind=objc; fi
+    cls=$(grep -m1 "pluginClass:" "$path/pubspec.yaml" 2>/dev/null | awk '{print $2}')
+    [ -n "$cls" ] || continue
+    if [ -n "$(find "$path" -name '*.swift' -not -name 'Package.swift' -not -path '*example*' -not -path '*Tests*' -not -path '*test*' -print -quit)" ]; then kind=swift; else kind=objc; fi
     PLUGINS+=("$kind|$name|$path|$cls")
   done < <(python3 -c '
 import json, sys
@@ -66,7 +68,7 @@ for key in ("darwin", "ios"):
     for p in d.get("plugins", {}).get(key, []):
         if p["name"] in seen: continue
         seen.add(p["name"])
-        print(p["name"], p["path"], p["class"], sep="|")' "$DEPS")
+        print(p["name"], p["path"].rstrip("/"), sep="|")' "$DEPS")
 fi
 swift=0
 for p in "${PLUGINS[@]}"; do [ "${p%%|*}" = swift ] && swift=1; done
@@ -120,12 +122,15 @@ RES=$SDKFREE_HOME/swift/res
 for p in "${PLUGINS[@]}"; do
   [ "${p%%|*}" = swift ] || continue
   rest=${p#*|}; name=${rest%%|*}; rest=${rest#*|}; path=${rest%%|*}
-  mapfile -t SFILES < <(find "$path" -name '*.swift' -not -path '*/test*' | sort)
+  # Package.swift is the SPM manifest, not plugin code
+  mapfile -t SFILES < <(find "$path" -name '*.swift' -not -name 'Package.swift' -not -path '*example*' -not -path '*Tests*' -not -path '*test*' | sort)
+  SWIFTC_TC=$(dirname "$(dirname "$(readlink -f "$SWIFTC")")")
   "$SWIFTC" -O -wmo -swift-version 5 -enable-bare-slash-regex -target "arm64-apple-ios${NOSDK_SWIFT_MIN:-17.0}" \
     -sdk "$SR" -resource-dir "$RES" -I "$SDKFREE_HOME/swift/ovl" -F "$ASM" \
     -I "$SDKFREE_HOME/swift/darwin/usr/include" -Xcc -isystem -Xcc "$SDKFREE_HOME/swift/darwin/usr/include" \
     -I "$SDKFREE_HOME/swift/sdkm/ovlshims" -F "$SDKFREE_HOME/swift/sdkm/Frameworks" -Xcc -F -Xcc "$SDKFREE_HOME/swift/sdkm/Frameworks" \
     -Xcc -fapinotes-modules -Xcc -fapinotes -Xcc '-D__unused=__attribute__((unused))' \
+    -Xcc "-fmodule-map-file=$SWIFTC_TC/lib/swift/shims/module.modulemap" -Xcc "-I$SWIFTC_TC/lib/swift/shims" \
     -module-name "$name" -parse-as-library -emit-object -o "$OUT/obj/swiftplugin-$name.o" "${SFILES[@]}" \
     >"$OUT/swift-$name.log" 2>&1 || { tail -n 40 "$OUT/swift-$name.log" >&2; exit 1; }
   echo "$name ok (${#SFILES[@]} files)"

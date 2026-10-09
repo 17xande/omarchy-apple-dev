@@ -1,13 +1,34 @@
 # Swift in no-xcode mode
 
-`install-toolchain.sh --mode no-xcode` builds Swift modules for arm64 iOS without an Xcode download. The installer builds the standard-library modules, then `sdk-free/swift/overlays.sh` fetches pinned source trees and attempts to build the ObjectiveC, Darwin, Dispatch, CoreGraphics, and Foundation overlays.
+`install-toolchain.sh --mode no-xcode` builds Swift programs for arm64 iOS without an Xcode download.
 
-The standard-library modules (`Swift`, `SwiftOnoneSupport`, `_Concurrency`, `_StringProcessing`, `_RegexParser`) build from the Swift release tag that the installed `swiftc` reports. `sdk-free/swiftc.sh` compiles and links standard-library-only programs. The deployment target is iOS 17.0 by default; `NOSDK_SWIFT_MIN` changes it.
+What the installer does for Swift:
 
-## Overlay status
+1. `sdk-free/setup.sh` cuts link stubs for the Swift runtime libraries on the iPhone (`libswiftCore`,
+   `libswift_Concurrency`, `libswiftFoundation`, `libswiftUIKit` and more) into the sysroot.
+2. `sdk-free/swift/build-stdlib.sh` builds the Swift module interfaces (`Swift`, `SwiftOnoneSupport`,
+   `_Concurrency`, `_StringProcessing`, `_RegexParser`) with the installed swiftc. The source is the open-source
+   Swift tree at the release tag that swiftc reports. The build takes about 6 minutes and needs git and python3.
+3. `sdk-free/swift/overlays.sh` builds the framework overlay modules (`ObjectiveC`, `Darwin`, `Dispatch`,
+   `CoreGraphics`, `Foundation`) so `import Foundation` works and Swift Flutter plugins compile. Sources are
+   fetched at run time from pinned tags: the Darwin C headers and CoreFoundation headers from
+   apple-oss-distributions, the Foundation/Dispatch overlay sources from the Swift tree at
+   `swift-5.3-RELEASE` (patched by `mk-foundation-src.py` and the patches in `overlay/`). Needs git, cmake and
+   python3. Output installs next to the standard library in `$SDKFREE_HOME/swift/res`.
+4. `sdk-free/swiftc.sh [-Onone] -o out main.swift ...` compiles and links. The program uses the Swift runtime
+   and the frameworks that are on the iPhone. The deployment target is iOS 17.0 (`NOSDK_SWIFT_MIN` changes it).
+5. `sdk-free/flutter-build.sh` compiles Swift Flutter plugins found in the app's `.flutter-plugins-dependencies`
+   and registers them by runtime class name; `sdk-free/swift/chk-undef.sh` checks a plugin object's
+   Foundation/ObjC symbols against the sysroot stubs.
 
-On Swift 6.4, the Darwin C include tree and the ObjectiveC, Darwin, Dispatch, and CoreGraphics modules built in the chroot. The Foundation overlay does not yet build. The current compiler errors include mismatched `Int`/`UInt` imports in the Swift 5.3 Foundation sources and a `Boolean`/`Bool` mismatch in `CFStringCreateWithBytes`. `overlays.sh` stops on the Foundation errors. Do not use the overlay build as a completed Foundation or Swift-plugin toolchain yet.
+Supported now: standard-library programs; `import Foundation` programs (String/NSString, Data, URL, NSArray,
+NSSet bridging); Flutter apps whose plugins are Swift (`shared_preferences_foundation`, `url_launcher_ios`) or
+Objective-C, release and debug.
 
-The SafariServices header and link stub are authored for `url_launcher_ios`. A successful `Runner-unsigned.ipa` build with Swift plugins has not been verified. Nothing has run on a device.
+Not supported: `import UIKit` Swift code beyond what the plugins use through the imported headers, overlays for
+other frameworks (Combine, WebKit, ...), and `NSDictionary(dictionary:)` calls in user code (a Swift 6.4 IRGen
+crash, receipts/2026-10-09). The SafariServices headers are written for `url_launcher_ios`. Nothing here runs on
+a device; the linker only proves that every referenced symbol exists in the stubs cut from the phone.
 
-The runtime libraries remain on the iPhone. `sdk-free/setup.sh` supplies their link stubs. The overlay build requires `git`, `cmake`, the Swift source cache created by `build-stdlib.sh`, and network access to the pinned public source repositories. Output stays under `$SDKFREE_HOME` (default `~/.local/share/omarchy-apple-dev/sdk-free`).
+Paths: everything lives under `$SDKFREE_HOME` (default `~/.local/share/omarchy-apple-dev/sdk-free`). Re-running a
+script is safe: finished stages are skipped.
