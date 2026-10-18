@@ -1745,3 +1745,31 @@ processing rejects. `tools/car_check.py` now enforces the Apple-visible rules be
 passing control is the car Xcode's actool writes from the same catalog, not an Apple-accepted
 upload. Detail and every command are in `receipts/2026-10-14-icecubes-assets-car.md`.
 
+
+## Fonts and Pencil Pro APIs in a dev build, 2026-10-18
+
+**70. `UIAppFonts` registers nothing in an `xtool dev build`.** A target that
+declares `.copy("Resources")` gets its fonts at
+`<App>.app/<App>_<Target>.bundle/Resources/Fonts/`, not at the app root, so the
+`UIAppFonts` paths never resolve. `CTFontManagerCopyAvailablePostScriptNames`
+shows none of them at launch. Register the fonts at launch instead, with
+`CTFontManagerRegisterFontsForURL(url, .process, &error)`. Seen in the
+handwriting-practice-app (iPad, iOS 27.0.1). `ship.sh --device` flattens resource
+bundles (63), so there `UIAppFonts` may resolve, but registering in code works
+on both paths.
+
+**71. `Bundle.module.resourceURL` already ends in `/Resources` on iOS.** Appending
+`Resources/Fonts` to it gives `Resources/Resources/Fonts`, which doesn't exist.
+Build from the bundle instead: `Bundle.module.bundleURL.appendingPathComponent("Resources/Fonts")`.
+
+**72. The Google Fonts variable TTFs register as named instances.** For example,
+`PlaywriteGBS[wght].ttf` registers as `PlaywriteGBS-Regular`, `-Regular_Thin` and
+so on. The brackets in the GitHub file names are best dropped when saving, with
+the source URL percent-encoded in the provenance file.
+
+**73. The Apple Pencil Pro APIs compile and work under the iPhoneOS 27 SDK at an
+iOS 18 minimum:** `UITouch.rollAngle`, `UIPencilInteraction.preferredSqueezeAction`,
+`UIPencilInteractionDelegate.pencilInteraction(_:didReceiveSqueeze:)` and
+`UICanvasFeedbackGenerator`. On an iPad Air M3 (iPad15,3) with a Pencil Pro paired,
+`preferredSqueezeAction` reads `showContextualPalette` and `preferredTapAction`
+reads `switchEraser`.
