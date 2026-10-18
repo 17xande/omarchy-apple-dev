@@ -1773,3 +1773,15 @@ iOS 18 minimum:** `UITouch.rollAngle`, `UIPencilInteraction.preferredSqueezeActi
 `UICanvasFeedbackGenerator`. On an iPad Air M3 (iPad15,3) with a Pencil Pro paired,
 `preferredSqueezeAction` reads `showContextualPalette` and `preferredTapAction`
 reads `switchEraser`.
+
+**74. `xtool dev build` compiles every package at `-Onone`, local path
+dependencies included.** It defaults to the debug configuration, so SwiftPM
+builds a path dependency (here the handwriting app's `HandwritingCore`:
+distance transform, Zhang–Suen thinning, DTW) with `-Onone -enable-testing`.
+Code that works pixel by pixel ran 20–25× slower than at `-O`: a one-line
+handwriting check took 258 ms instead of 12 ms on a Ryzen 6800H, and 300–800 ms
+on an M3 iPad. A local path dependency is allowed `unsafeFlags`, so optimise
+just that target in debug builds and keep the app's `#if DEBUG` hooks:
+`.target(name: "Core", swiftSettings: [.unsafeFlags(["-O"], .when(configuration: .debug))])`.
+Its tests still pass under `swift test`. A `-c release` build would drop the
+DEBUG code instead.
